@@ -144,6 +144,44 @@ def parse_chart(text, symbol):
             "bars": bars, "dividends": divs}
 
 
+EODHD = "https://eodhd.com/api/%s/%s.US?api_token=%s&fmt=json&from=%s"
+
+
+def parse_eodhd(eod, divs, symbol):
+    """EODHD end-of-day and dividend JSON -> the same chart dict as parse_chart. Paid data that
+    includes companies no longer listed (Yahoo drops them), for an honest backtest."""
+    bars = []
+    for r in eod or []:
+        try:
+            c = float(r["close"])
+            bars.append({"d": r["date"], "o": float(r.get("open") or c), "h": float(r.get("high") or c),
+                         "l": float(r.get("low") or c), "c": c, "v": float(r.get("volume") or 0)})
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not bars:
+        raise MarketError("EODHD has no prices for %s" % symbol)
+    bars.sort(key=lambda b: b["d"])
+    dv = sorted((d["date"], float(d.get("unadjustedValue") or d.get("value") or 0)) for d in (divs or [])
+                if d.get("date"))
+    return {"symbol": symbol.upper(), "name": "", "currency": "USD", "price": bars[-1]["c"], "time": bars[-1]["d"],
+            "bars": bars, "dividends": [x for x in dv if x[1] > 0]}
+
+
+def get_chart_eodhd(symbol, key, since="2014-01-01", http=None):
+    """US symbols only. The key never appears in an error message."""
+    get = http or (lambda url: fetch(url))
+    sym = symbol.upper().replace("-", ".")
+    try:
+        eod = json.loads(get(EODHD % ("eod", sym, key, since)))
+        try:
+            divs = json.loads(get(EODHD % ("div", sym, key, since)))
+        except (MarketError, ValueError):
+            divs = []
+    except (MarketError, ValueError) as e:
+        raise MarketError(str(e).replace(key, "***") if key else str(e))
+    return parse_eodhd(eod, divs, symbol)
+
+
 def get_chart(symbol, offline=None, range_="5y", save=None):
     """One Yahoo chart. offline: read DIR/chart-SYM.json instead. save: also write the raw
     answer there, so a later run can use it with offline=DIR."""

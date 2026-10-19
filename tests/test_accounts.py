@@ -371,3 +371,22 @@ class Review(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PaidData(unittest.TestCase):
+    def test_eodhd_prices_become_a_chart_and_the_key_stays_secret(self):
+        import json as _json
+        mk = acc.mk
+        eod = [{"date": "2020-01-03", "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100},
+               {"date": "2020-01-02", "open": 9, "high": 10, "low": 8, "close": 9.5, "volume": 50}]
+        ch = mk.parse_eodhd(eod, [{"date": "2020-01-02", "value": 0.2}], "OLDCO")
+        self.assertEqual([b["d"] for b in ch["bars"]], ["2020-01-02", "2020-01-03"])
+        self.assertEqual((ch["price"], ch["currency"], ch["dividends"]), (10.5, "USD", [("2020-01-02", 0.2)]))
+
+        def http(url):
+            raise mk.MarketError("%s answered HTTP 403" % url)
+        with self.assertRaises(mk.MarketError) as cm:
+            mk.get_chart_eodhd("OLDCO", "SECRETKEY123", http=http)
+        self.assertNotIn("SECRETKEY123", str(cm.exception))
+        got = mk.get_chart_eodhd("BRK-B", "K", http=lambda url: _json.dumps(eod) if "/eod/BRK.B.US" in url else "[]")
+        self.assertEqual(got["symbol"], "BRK-B")

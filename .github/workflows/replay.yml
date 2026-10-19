@@ -160,6 +160,8 @@ jobs:
           [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
           [[ -z "$WINDOWS" || "$WINDOWS" =~ ^[0-9]+[dwmy](,[0-9]+[dwmy])*$ ]] || { echo "windows like 24m,12m"; exit 1; }
       - name: Download 10 years of prices
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: |
           python trade.py init
           python .claude/skills/trader-replay/replay.py --history 10y --save-data market --windows 1m \

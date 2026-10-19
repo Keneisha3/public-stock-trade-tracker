@@ -1696,6 +1696,14 @@ def latest_friday(days):
 HISTORY_YEARS = {"2y": 2, "5y": 5, "10y": 10}
 
 
+def paid_data_key(base="trader"):
+    """EODHD_API_KEY from the environment or the git-ignored .env (never printed, never saved)."""
+    if os.environ.get("EODHD_API_KEY"):
+        return os.environ["EODHD_API_KEY"].strip()
+    env, _ = team.candles.load_env(os.path.join(os.path.dirname(os.path.abspath(base)), ".env"), ".env")
+    return (env.get("EODHD_API_KEY") or "").strip() or None
+
+
 def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print, mc_runs=5000,
            windows=None, holdings=None, rolling_spec=ROLLING, uni=None, history="5y", save_dir=None, signals=None):
     """uni: "auto" (the point-in-time S&P 500 + index funds + the Canadian list), a Universe, or
@@ -1728,10 +1736,28 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     charts = {}
     if not offline and len(syms) > 100:
         log("loading %d price histories (%s)..." % (len(syms), history))
+    eod_key = paid_data_key(base)
+    filled = []
     for i, s in enumerate(syms):
         try:
             charts[s] = mk.get_chart(s, offline=offline, range_=history, save=save_dir)
         except mk.MarketError as e:
+            eod_file = os.path.join(offline or save_dir or "", "eod-%s.json" % s.upper())
+            if offline and os.path.exists(eod_file):
+                with open(eod_file, encoding="utf-8") as fh:
+                    charts[s] = json.load(fh)
+                filled.append(s)
+                continue
+            if eod_key and not offline and "." not in s and not s.startswith("^") and "=" not in s:
+                try:  # a company Yahoo no longer lists: paid data still has it
+                    charts[s] = mk.get_chart_eodhd(s, eod_key)
+                    filled.append(s)
+                    if save_dir:
+                        with open(eod_file, "w", encoding="utf-8") as fh:
+                            json.dump(charts[s], fh)
+                    continue
+                except mk.MarketError as e2:
+                    errors.append(str(e2))
             errors.append(str(e))
         if not offline and len(syms) > 100 and i % 100 == 99:
             log("  %d of %d" % (i + 1, len(syms)))
@@ -1739,6 +1765,8 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         raise ReplayError("no SPY prices, so no trading calendar. Data problems: %s"
                           % "; ".join(errors[:3] or ["none reported"]))
     data = Data(charts, {})
+    if filled:
+        log("paid data filled %d companies Yahoo no longer lists" % len(filled))
     asof = data.trading_day_on_or_before(asof) if asof else latest_friday(data.days)
     candles = {}
     crypto_max = CRYPTO_MAX_DAYS if team.DEFAULTS["interval_min"] < 60 else CRYPTO_LONG_DAYS
