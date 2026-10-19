@@ -530,6 +530,15 @@ class PointInTimeUniverse(unittest.TestCase):
         self.assertEqual(sorted(last), ["IEF", "SPY", "XLK"])  # XLE is under the short-bond hurdle: its share goes to IEF
         one = replay.run_dual(data, data.days[300], ASOF, 100)  # default: the single best fund
         self.assertEqual(len(one["picks"][-1][1]), 1)
+        core = replay.run_dual(data, data.days[300], ASOF, 100, core="IEF", core_weight=0.7)
+        self.assertEqual(sorted(core["picks"][-1][1]), ["IEF", "XLK"])  # 70% core + the best fund
+        calm = replay.run_dual(data, data.days[300], ASOF, 100, vol_target=1)  # a tiny target: mostly bonds
+        self.assertIn("IEF", calm["picks"][-1][1])
+        self.assertIn("XLK", calm["picks"][-1][1])
+        held = {h: 1 for h in calm["holdings"]}
+        self.assertIn("IEF", held)
+        trend = replay.run_dual(data, data.days[300], ASOF, 100, k=3, trend=True)
+        self.assertNotIn("XLE", trend["picks"][-1][1])
         self.assertIn("XLK", r["holdings"])
         self.assertNotIn("XLE", r["holdings"])
 
@@ -580,8 +589,8 @@ class PointInTimeUniverse(unittest.TestCase):
                        "coverage": {"priced": 480, "members": 503}} for w, g, s in zip(
                 ["24 months", "12 months", "6 months", "1 month"], rets, spy)}
             return {"asof": asof, "windows": list(res), "checks": [{"name": "x", "ok": True}], "results": res,
-                    "scenarios": [{"strategy": "growth", "name": "A", "results": {w: {"return_pct": g + 1} for w, g in
-                                                                                  zip(res, rets)}}]}
+                    "scenarios": [{"strategy": "growth", "name": "A", "risk": {"max_dd_pct": -20.0},
+                                   "results": {w: {"return_pct": g + 1} for w, g in zip(res, rets)}}]}
         reports = [rep("2026-10-16", [30, 20, 9, 1], [25, 10, 5, 2]), rep("2020-10-16", [30, 1, 1, 1], [12, 1, 1, 1]),
                    rep("2022-10-14", [-10, 1, 1, 1], [-15, 1, 1, 1]), rep("2025-12-19", [5, 5, 5, 5], [1, 1, 1, 1])]
         train, last, cut = wf.split(reports)
@@ -590,8 +599,134 @@ class PointInTimeUniverse(unittest.TestCase):
         text = wf.table(reports)
         self.assertIn("| Growth (Questrade) | +30.0% (+18.0) | -10.0% (+5.0) | 2 of 2 | +11.5 pts |", text)
         self.assertIn("| Growth (Questrade) | +20.0% (+10.0) | +9.0% (+4.0) | +1.0% (-1.0) |", text)  # the held-out test
-        self.assertIn("| growth | A | +12.5 pts | +11.0 pts |", text)  # chosen on training, checked on the last year
+        self.assertIn("| growth | A | +12.5 pts | -20.0% | +11.0 pts |", text)  # chosen on training, checked on the last year
         self.assertIn("480 of 503 index members priced", text)
+
+
+class ForwardRecord(unittest.TestCase):
+    def test_record_grows_and_never_rewrites_a_day(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            for sym, g in (("XLK", 0.6), ("IEF", 0.03), ("SHY", 0.02), ("QQQ", 0.4)):
+                _synth.write(off, sym, _synth.chart(sym, p0=50, growth=g, wiggle=0.005, n=520))
+            days = load_data(off).days
+            plan = {"start": days[480], "cash": 100.0, "strategies": {
+                "Dual": {"kind": "dual", "opts": {}}, "Nasdaq 100 (QQQ)": {"kind": "hold", "weights": {"QQQ": 1.0}}}}
+            rec = replay.forward(plan, None, offline=off, today=days[500], log=lambda m: None)
+            self.assertEqual(sorted(rec["days"])[0], days[480])
+            self.assertEqual(sorted(rec["days"])[-1], days[500])
+            frozen = json.loads(json.dumps(rec["days"]))
+            plan["strategies"]["Dual"]["opts"] = {"k": 3}  # even if the code or settings change later...
+            rec = replay.forward(plan, rec, offline=off, today=days[510], log=lambda m: None)
+        finally:
+            shutil.rmtree(d)
+        for day, vals in frozen.items():
+            self.assertEqual(rec["days"][day], vals)  # ...days already recorded stay exactly as they were
+        self.assertEqual(sorted(rec["days"])[-1], days[510])
+        self.assertEqual(rec["targets"]["Nasdaq 100 (QQQ)"], {"QQQ": 1.0})
+        self.assertAlmostEqual(sum(rec["targets"]["Dual"].values()), 1.0, places=3)  # today's weights, for the review
+        self.assertIn("Live paper record since", replay.render_forward(rec))
+        with open(replay.FORWARD_PLAN) as fh:
+            real = json.load(fh)
+        self.assertIn("S&P 500 (SPY)", real["strategies"])
+
+
+class CongressRecords(unittest.TestCase):
+    def test_members_are_judged_only_on_outcomes_known_at_the_time(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        rows = []
+        for i in range(100, 400, 20):  # Good keeps buying the strong stock, Bad the weak one
+            rows += [[days[i], "Good", "AAA", "buy", 15001, 50000, days[i], "self"],
+                     [days[i], "Bad", "INTC", "buy", 15001, 50000, days[i], "self"]]
+        sig = replay.sigs.Signals(congress={"rows": rows})
+        rec = replay.member_records(data, sig, days[420])
+        self.assertGreater(rec["Good"], rec["Bad"])
+        early = replay.member_records(data, sig, days[150])  # only one buy each has a known outcome by then
+        self.assertEqual(early, {})
+        uni = fake_universe(days)
+        r = replay.run_signals(data, uni, sig, days[300], days[420], 100, source="congress", weighted=True, n=2,
+                               every=7)
+        self.assertTrue(any("AAA" in p for _, p in r["picks"]))
+
+
+class Statistics(unittest.TestCase):
+    def load(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("stats", os.path.join(FIX, "..", "..", "scripts", "stats.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_confidence_range_and_reality_check(self):
+        st = self.load()
+        import random
+        rng = random.Random(3)
+        spy = [rng.gauss(8, 10) for _ in range(28)]
+        table = {"S&P 500 (SPY)": {"runs": [{"return_pct": x} for x in spy]},
+                 "edge": {"runs": [{"return_pct": x + 6 + rng.gauss(0, 2)} for x in spy]},   # a steady edge
+                 "noise": {"runs": [{"return_pct": x + rng.gauss(0, 15)} for x in spy]}}      # luck only
+        a = st.analyse({"asof": "2025-10-17", "rolling": {"table": table, "horizon_days": 365, "step_days": 91}},
+                       runs=2000)
+        rows = {r["strategy"]: r for r in a["rows"]}
+        self.assertEqual(a["best"], "edge")
+        self.assertGreater(rows["edge"]["lo90"], 0)                       # its whole range is above zero
+        self.assertLess(rows["noise"]["lo90"], 0)
+        self.assertLess(a["reality_check_p"], 0.1)
+        self.assertIn("Reality check", st.render(a))
+        self.assertEqual(replay.parse_rolling("365,91,28"), {"horizon_days": 365, "step_days": 91, "count": 28})
+
+
+class LearnedScore(unittest.TestCase):
+    def world(self, folder, crash_after=None):
+        off = os.path.join(folder, "off")
+        names = ["S%02d" % i for i in range(14)]
+        for i, sym in enumerate(names):
+            doc = _synth.chart(sym, p0=30 + i, growth=-0.4 + 0.08 * i, wiggle=0.012, n=700)
+            if crash_after:
+                r = doc["chart"]["result"][0]
+                q = r["indicators"]["quote"][0]
+                for j, ts in enumerate(r["timestamp"]):
+                    if _synth.datetime.datetime.utcfromtimestamp(ts).date().isoformat() > crash_after:
+                        for k in ("open", "high", "low", "close"):
+                            q[k][j] = q[k][j] * (0.3 if i % 2 else 2.5)
+            _synth.write(off, sym, doc)
+        _synth.write(off, "SPY", _synth.chart("SPY", p0=400, growth=0.2, n=700))
+        _synth.write(off, "USDCAD=X", _synth.chart("USDCAD=X", p0=1.37, n=700, wiggle=0.002, currency="CAD"))
+        data = load_data(off)
+        uni = replay.univ.Universe({"licence": "t", "last_snapshot": data.days[-1],
+                                    "members": {n: [["2014-01-01", None]] for n in names}})
+        return data, uni
+
+    def test_math_helpers(self):
+        self.assertEqual([round(x, 6) for x in replay._solve([[2, 0], [0, 4]], [2, 8])], [1.0, 2.0])
+        z = replay._zscore([[i, 1.0] for i in range(12)])
+        self.assertAlmostEqual(sum(r[0] for r in z), 0.0, places=9)
+        self.assertIsNone(replay._zscore([[1.0]] * 5))  # too few stocks that day
+
+    def test_learns_only_from_the_past(self):
+        a, b = tempfile.mkdtemp(), tempfile.mkdtemp()
+        try:
+            data, uni = self.world(a)
+            cutoff = data.days[600]
+            m1 = replay.fit_model(data, uni, None, cutoff, first="2000-01-01")
+            data2, uni2 = self.world(b, crash_after=cutoff)  # a different future after the cutoff
+            m2 = replay.fit_model(data2, uni2, None, cutoff, first="2000-01-01")
+            r = replay.run_model(data, uni, None, data.days[520], data.days[690], 100, n=3)
+        finally:
+            shutil.rmtree(a)
+            shutil.rmtree(b)
+        self.assertGreater(m1["samples"], 100)
+        self.assertEqual(m1["coef"], m2["coef"])  # identical: nothing after the cutoff was used
+        self.assertGreater(m1["coef"][0], 0)      # steady winners keep winning: momentum gets a positive weight
+        self.assertTrue(r["models"])
+        self.assertTrue(all(len(set(p) - {"SPY"}) <= 3 for _, p in r["picks"]))
 
 
 class YourHoldingsAndRolling(unittest.TestCase):

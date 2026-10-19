@@ -441,9 +441,9 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
 
 
 def run_targets(data, start, asof, cash, choose, every=28, split=None):
-    """Equal weight in whatever choose(day) returns (a name listed twice gets two shares),
-    rebalanced every `every` days. choose sees only data up to that day's close; trades
-    fill at the next open."""
+    """Equal weight in whatever choose(day) returns (a name listed twice gets two shares), or the
+    weights it returns as {ticker: weight}; rebalanced every `every` days. choose sees only data
+    up to that day's close; trades fill at the next open."""
     pf, pending = Portfolio(data, cash, split=split or {"USD": 1.0}, start=start), []
     days = [d for d in data.days if start <= d <= asof]
     reviews = _review_days(days, start, asof, every)
@@ -454,10 +454,16 @@ def run_targets(data, start, asof, cash, choose, every=28, split=None):
         pf.mark(d)
         if d not in reviews:
             continue
-        picked = [t for t in choose(d) if data.close(t, d)]
-        picks_log.append([d, list(picked)])
+        picked = choose(d)
+        if isinstance(picked, dict):
+            w = {t: x for t, x in picked.items() if x > 0 and data.close(t, d)}
+        else:
+            picked = [t for t in picked if data.close(t, d)]
+            w = {t: picked.count(t) for t in dict.fromkeys(picked)}
+        picks_log.append([d, sorted(w)])
         total = pf.value(d) * 0.995
-        share = {t: total * picked.count(t) / len(picked) for t in dict.fromkeys(picked)} if picked else {}
+        tw = sum(w.values())
+        share = {t: total * x / tw for t, x in w.items()} if tw else {}
         target = list(share)
         pending = []
         for t, p in pf.pos.items():
@@ -509,23 +515,43 @@ def run_momentum(data, uni, start, asof, cash, **opts):
     return run_targets(data, start, asof, cash, choose, o["every"])
 
 
-DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY"}  # best 1 fund: won the walk-forward
+DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY",  # best 1 fund: won the walk-forward
+                "pool": "all", "vol_target": None, "trend": False, "core": None, "core_weight": 0.5}
 DUAL_POOL = ("us_broad", "us_sector", "us_factor", "world", "commodities")
+DUAL_POOLS = {"all": DUAL_POOL, "growth": ("us_broad", "us_sector", "us_factor")}
 
 
 def run_dual(data, start, asof, cash, **opts):
     """Dual momentum on index funds: each month hold the k funds with the best 12-month return
     (relative momentum), but only those beating short bonds (SHY, absolute momentum); the
-    rest goes to IEF. A fund counts only once it has traded long enough to have the history."""
-    o = dict(DUAL_DEFAULT, **opts)
-    pool = sorted({x for g in DUAL_POOL for x in univ.ETFS[g] if not x.endswith(".TO")})
+    rest goes to IEF. A fund counts only once it has traded long enough to have the history.
 
-    def choose(d):
-        hurdle = (data.quick(o["cash_like"], d, 21 * o["months"]) or {}).get("ret", 0.0)
-        rows = [(q["ret"], f) for f in pool for q in [data.quick(f, d, 21 * o["months"])] if q]
-        top = [f for r, f in sorted(rows, reverse=True)[:o["k"]] if r > hurdle]
-        return top + [o["safe"]] * (o["k"] - len(top)) if o["safe"] in data.charts else top
-    return run_targets(data, start, asof, cash, choose, 28)
+    Safety options: pool "growth" (US broad, sector and factor funds only); trend (a fund
+    must also be above its 200-day average); vol_target (hold target/volatility of a fund,
+    at most all of it, the rest in IEF: less in wild markets); core ("QQQ"): that fund takes
+    core_weight of the money, dual momentum the rest, rebalanced together every month."""
+    return run_targets(data, start, asof, cash, lambda d: dual_weights(data, d, **opts), 28)
+
+
+def dual_weights(data, d, **opts):
+    """What dual momentum (with its options) would hold after the close of `d`: {fund: weight}."""
+    o = dict(DUAL_DEFAULT, **opts)
+    pool = sorted({x for g in DUAL_POOLS[o["pool"]] for x in univ.ETFS[g] if not x.endswith(".TO")})
+    hurdle = (data.quick(o["cash_like"], d, 21 * o["months"]) or {}).get("ret", 0.0)
+    rows = [(q["ret"], f, q) for f in pool for q in [data.quick(f, d, 21 * o["months"])] if q]
+    top = [(f, q) for r, f, q in sorted(rows, key=lambda x: -x[0])[:o["k"]]
+           if r > hurdle and (q["above200"] or not o["trend"])]
+    sat = 1.0 - (o["core_weight"] if o["core"] else 0.0)
+    w = {}
+    for f, q in top:
+        scale = min(1.0, o["vol_target"] / max(q["vol"], 1.0)) if o["vol_target"] else 1.0
+        w[f] = w.get(f, 0.0) + sat / o["k"] * scale
+    if o["core"] and o["core"] in data.charts:
+        w[o["core"]] = w.get(o["core"], 0.0) + o["core_weight"]
+    rest = 1.0 - sum(w.values())
+    if rest > 1e-6 and o["safe"] in data.charts:
+        w[o["safe"]] = w.get(o["safe"], 0.0) + rest
+    return w
 
 
 SIGNAL_DEFAULT = {"source": "insiders", "n": 20, "days": 60, "min_count": 2, "officers": False,
@@ -547,7 +573,15 @@ def run_signals(data, uni, sig, start, asof, cash, **opts):
             for t, x in sig.insider_buys(d, o["days"]).items():
                 if x["insiders"] >= o["min_count"] and (not o["officers"] or x["officers"] >= 1):
                     rows.append(((x["insiders"], x["value"]), t))
-        if o["source"] in ("congress", "both"):
+        if o["source"] == "congress" and o.get("weighted"):
+            import math
+            rec = member_records(data, sig, d)
+            score = {}
+            for filed, member, t, side, low, high, traded, owner in sig.congress_rows(d, max(o["days"], 90)):
+                edge = max(-1.0, min(1.0, rec.get(member, 0.0) / 10.0))  # a member's past edge, +-10 pts caps it
+                score[t] = score.get(t, 0.0) + math.log1p((low or 1000) / 1000.0) * (1.0 + edge)
+            rows += [((sc,), t) for t, sc in score.items() if sc > 0]
+        elif o["source"] in ("congress", "both"):
             for t, x in sig.congress_buys(d, max(o["days"], 90)).items():
                 if x["members"] >= o["min_count"]:
                     rows.append(((x["members"], x["low"]), t))
@@ -559,6 +593,25 @@ def run_signals(data, uni, sig, start, asof, cash, **opts):
         picks = picks[:o["n"]]
         return picks + [o["fill"]] * (o["n"] - len(picks)) if o["fill"] in data.charts else picks
     return run_targets(data, start, asof, cash, choose, o["every"])
+
+
+def member_records(data, sig, day, horizon=63, years=3, min_trades=3):
+    """{member: average return beyond the S&P 500 over the `horizon` trading days after each of
+    their disclosed buys}, counting only buys whose outcome was known by `day`. Cached by month."""
+    key = (day[:7], horizon, years)
+    cache = data.__dict__.setdefault("_records", {})
+    if key in cache:
+        return cache[key]
+    month_start = data.trading_day_on_or_before(day[:7] + "-01") if day[8:] != "01" else day
+    per = {}
+    for filed, member, t, side, low, high, traded, owner in sig.congress_rows(month_start, 365 * years):
+        r, end = _fwd(data, t, filed, horizon)
+        s_, s_end = _fwd(data, "SPY", filed, horizon)
+        if r is None or s_ is None or end > month_start:
+            continue
+        per.setdefault(member, []).append(100.0 * (r - s_))
+    cache[key] = {m: sum(x) / len(x) for m, x in per.items() if len(x) >= min_trades}
+    return cache[key]
 
 
 def run_momentum_signals(data, uni, sig, start, asof, cash, n=20, days=180, **opts):
@@ -602,6 +655,148 @@ def blend(parts, cash):
     return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2), "curve": curve,
             "trades": sum(p.get("trades", 0) for p in parts), "fees": round(sum(p.get("fees") or 0 for p in parts) / n, 2),
             "holdings": held, "contrib": [], "fills": []}
+
+
+# ---------------------------------------------------------------- a learned score
+
+FEATURES = ["mom_12_1", "mom_6_1", "rev_1m", "low_vol", "above200", "insiders", "congress"]
+MODEL_DEFAULT = {"n": 20, "every": 28, "horizon": 21, "ridge": 10.0, "features": FEATURES, "core": None,
+                 "core_weight": 0.7}
+
+
+def _zscore(rows):
+    """Standardise each column across the stocks of one date, capped at +-3."""
+    import statistics
+    if len(rows) < 10:
+        return None
+    cols = list(zip(*rows))
+    out = []
+    for c in cols:
+        m, sd = statistics.mean(c), statistics.pstdev(c) or 1.0
+        out.append([max(-3.0, min(3.0, (x - m) / sd)) for x in c])
+    return [list(r) for r in zip(*out)]
+
+
+def model_features(data, uni, sig, d, names=FEATURES):
+    """{ticker: [feature values]} for S&P 500 members on `d`, from data known by its close."""
+    import math
+    ins = sig.insider_buys(d, 90) if sig and sig.insiders else {}
+    con = sig.congress_buys(d, 180) if sig and sig.congress else {}
+    out = {}
+    for sym in uni.members_on(d):
+        q12, q6 = data.quick(sym, d, 252, 21), data.quick(sym, d, 126, 21)
+        q1 = data.quick(sym, d, 21)
+        if not (q12 and q6 and q1):
+            continue
+        f = {"mom_12_1": q12["ret"], "mom_6_1": q6["ret"], "rev_1m": -q1["ret"], "low_vol": -q12["vol"],
+             "above200": 1.0 if q12["above200"] else 0.0,
+             "insiders": math.log1p((ins.get(sym) or {}).get("insiders", 0)),
+             "congress": math.log1p((con.get(sym) or {}).get("members", 0))}
+        out[sym] = [f[k] for k in names]
+    return out
+
+
+def _fwd(data, sym, d, n):
+    ds = data.dates.get(sym) or []
+    i = bisect.bisect_right(ds, d) - 1
+    if i < 0 or i + n >= len(ds):
+        return None, None
+    bars = data.charts[sym]["bars"]
+    return (bars[i + n]["c"] / bars[i]["c"] - 1) if bars[i]["c"] else None, ds[i + n]
+
+
+def _solve(a, b):
+    """Gaussian elimination for a small dense system."""
+    n = len(b)
+    m = [row[:] + [b[i]] for i, row in enumerate(a)]
+    for c in range(n):
+        p = max(range(c, n), key=lambda r: abs(m[r][c]))
+        m[c], m[p] = m[p], m[c]
+        if abs(m[c][c]) < 1e-12:
+            continue
+        for r in range(n):
+            if r != c:
+                f = m[r][c] / m[c][c]
+                m[r] = [x - f * y for x, y in zip(m[r], m[c])]
+    return [m[i][n] / m[i][i] if abs(m[i][i]) > 1e-12 else 0.0 for i in range(n)]
+
+
+def fit_model(data, uni, sig, cutoff, opts=None, first="2016-01-01"):
+    """Ridge regression of each stock's next-month return relative to the other members,
+    on standardised features, using only months whose outcome was known by `cutoff`."""
+    o = dict(MODEL_DEFAULT, **(opts or {}))
+    k = len(o["features"])
+    xtx = [[0.0] * k for _ in range(k)]
+    xty = [0.0] * k
+    n = 0
+    month = None
+    for d in data.days:
+        if d < first or d > cutoff:
+            continue
+        if d[:7] == month:
+            continue
+        month = d[:7]
+        feats = model_features(data, uni, sig, d, o["features"])
+        rows, ys = [], []
+        for sym, f in feats.items():
+            y, end = _fwd(data, sym, d, o["horizon"])
+            if y is None or end > cutoff:
+                continue
+            rows.append(f)
+            ys.append(y)
+        z = _zscore(rows)
+        if not z:
+            continue
+        mean = sum(ys) / len(ys)
+        ys = [max(-0.5, min(0.5, y - mean)) for y in ys]
+        for x, y in zip(z, ys):
+            for i in range(k):
+                xty[i] += x[i] * y
+                for j in range(k):
+                    xtx[i][j] += x[i] * x[j]
+            n += 1
+    if n < 100:
+        return None
+    for i in range(k):
+        xtx[i][i] += o["ridge"]
+    return {"coef": _solve(xtx, xty), "samples": n, "cutoff": cutoff, "features": o["features"]}
+
+
+def run_model(data, uni, sig, start, asof, cash, **opts):
+    """Hold the n S&P 500 members with the best learned score, refitting every January on
+    everything known by then (expanding window, point in time). core: a fund takes
+    core_weight of the money, the model the rest."""
+    o = dict(MODEL_DEFAULT, **opts)
+    models = {}
+
+    def model_for(d):
+        cutoff = data.trading_day_on_or_before(d[:4] + "-01-01") if d[5:] != "01-01" else d
+        if cutoff not in models:
+            key = (cutoff, tuple(o["features"]), o["horizon"], o["ridge"], id(uni), id(sig))
+            cache = data.__dict__.setdefault("_fits", {})  # many runs refit the same January
+            if key not in cache:
+                cache[key] = fit_model(data, uni, sig, cutoff, o)
+            models[cutoff] = cache[key]
+        return models[cutoff]
+
+    def choose(d):
+        m = model_for(d)
+        feats = model_features(data, uni, sig, d, o["features"])
+        if not m or len(feats) < 10:
+            return {"SPY": 1.0} if "SPY" in data.charts else {}
+        syms = list(feats)
+        z = _zscore([feats[t] for t in syms])
+        score = sorted(((sum(c * x for c, x in zip(m["coef"], zr)), t) for t, zr in zip(syms, z)), reverse=True)
+        top = [t for _, t in score[:o["n"]]]
+        sat = 1.0 - (o["core_weight"] if o["core"] else 0.0)
+        w = {t: sat / len(top) for t in top}
+        if o["core"] and o["core"] in data.charts:
+            w[o["core"]] = w.get(o["core"], 0.0) + o["core_weight"]
+        return w
+    out = run_targets(data, start, asof, cash, choose, o["every"])
+    out["models"] = {c: {"coef": dict(zip(m["features"], [round(x, 5) for x in m["coef"]])), "samples": m["samples"]}
+                     for c, m in models.items() if m}
+    return out
 
 
 def run_hold(data, weights, start, asof, cash):
@@ -1135,12 +1330,35 @@ SIGNAL_VARIANTS = [
     ("congress buys", "Congress: any member buying in 90 days", {"source": "congress", "days": 90, "min_count": 1}),
     ("congress buys", "Congress: 2+ members, 180 days", {"source": "congress", "days": 180}),
     ("congress buys", "Insiders or Congress, 2+ buyers", {"source": "both", "days": 90}),
+    ("congress buys", "Congress: weighted by size and each member's past record", {"source": "congress", "days": 90,
+                                                                                  "weighted": True}),
 ]
 DUAL_VARIANTS = [
     ("Dual momentum: best 1 fund (default)", {}),
+    ("Dual momentum: best 2 funds", {"k": 2}),
+    ("Dual momentum: growth funds only", {"pool": "growth"}),
+    ("Dual momentum: volatility target 15%", {"vol_target": 15}),
+    ("Dual momentum: volatility target 20%", {"vol_target": 20}),
+    ("Dual momentum: fund above its 200-day only", {"trend": True}),
+    ("Dual momentum: best 2, growth funds, volatility target 20%", {"k": 2, "pool": "growth", "vol_target": 20}),
     ("Dual momentum: best 3 funds", {"k": 3}),
     ("Dual momentum: best 5 funds", {"k": 5}),
     ("Dual momentum: 6-month lookback", {"months": 6}),
+]
+CORE_DEFAULT = {"core": "QQQ", "core_weight": 0.7}  # chosen in the walk-forward (pit-v6-safety)
+CORE_VARIANTS = [
+    ("Core: 70% Nasdaq 100, 30% dual momentum (default)", {"core": "QQQ", "core_weight": 0.7}),
+    ("Core: half Nasdaq 100, half dual momentum, rebalanced monthly", {"core": "QQQ", "core_weight": 0.5}),
+    ("Core: half Nasdaq 100, half dual momentum (volatility target 15%)", {"core": "QQQ", "core_weight": 0.5,
+                                                                         "vol_target": 15}),
+    ("Core: half Nasdaq 100, half dual momentum (best 2, growth funds)", {"core": "QQQ", "core_weight": 0.5, "k": 2,
+                                                                        "pool": "growth"}),
+]
+MODEL_VARIANTS = [
+    ("Learned score: top 20 (default)", {}),
+    ("Learned score: top 40", {"n": 40}),
+    ("Learned score: price features only", {"features": ["mom_12_1", "mom_6_1", "rev_1m", "low_vol", "above200"]}),
+    ("Learned score: 70% Nasdaq 100 + 30% top 20", {"core": "QQQ"}),
 ]
 PELOSI_VARIANTS = [("Pelosi: mirror buys and sells", "mirror"), ("Pelosi: keep every buy", "hold")]
 CRYPTO_VARIANTS = [
@@ -1177,6 +1395,11 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
             add("momentum", name, over, lambda st, o=over: run_momentum(data, ctx["uni"], st, asof, cash, **o))
         for name, over in DUAL_VARIANTS:
             add("dual momentum", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
+        if "QQQ" in data.charts:
+            for name, over in CORE_VARIANTS:
+                add("core + dual", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
+        for name, over in MODEL_VARIANTS:
+            add("model", name, over, lambda st, o=over: run_model(data, ctx["uni"], ctx.get("signals"), st, asof, cash, **o))
     sig = ctx.get("signals")
     if ctx.get("uni") is not None and sig:
         for fam, name, over in SIGNAL_VARIANTS:
@@ -1377,7 +1600,8 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
                 row["congress buys"] = run_signals(data, uni, sig, start, end, cash, source="congress", days=90)
             row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
             if "QQQ" in data.charts:
-                row["core + dual"] = blend([run_hold(data, {"QQQ": 1.0}, start, end, cash), row["dual momentum"]], cash)
+                row["core + dual"] = run_dual(data, start, end, cash, **CORE_DEFAULT)
+            row["model"] = run_model(data, uni, sig, start, end, cash)
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
@@ -1473,6 +1697,14 @@ def latest_friday(days):
 HISTORY_YEARS = {"2y": 2, "5y": 5, "10y": 10}
 
 
+def paid_data_key(base="trader"):
+    """EODHD_API_KEY from the environment or the git-ignored .env (never printed, never saved)."""
+    if os.environ.get("EODHD_API_KEY"):
+        return os.environ["EODHD_API_KEY"].strip()
+    env, _ = team.candles.load_env(os.path.join(os.path.dirname(os.path.abspath(base)), ".env"), ".env")
+    return (env.get("EODHD_API_KEY") or "").strip() or None
+
+
 def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print, mc_runs=5000,
            windows=None, holdings=None, rolling_spec=ROLLING, uni=None, history="5y", save_dir=None, signals=None):
     """uni: "auto" (the point-in-time S&P 500 + index funds + the Canadian list), a Universe, or
@@ -1505,10 +1737,28 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     charts = {}
     if not offline and len(syms) > 100:
         log("loading %d price histories (%s)..." % (len(syms), history))
+    eod_key = paid_data_key(base)
+    filled = []
     for i, s in enumerate(syms):
         try:
             charts[s] = mk.get_chart(s, offline=offline, range_=history, save=save_dir)
         except mk.MarketError as e:
+            eod_file = os.path.join(offline or save_dir or "", "eod-%s.json" % s.upper())
+            if offline and os.path.exists(eod_file):
+                with open(eod_file, encoding="utf-8") as fh:
+                    charts[s] = json.load(fh)
+                filled.append(s)
+                continue
+            if eod_key and not offline and "." not in s and not s.startswith("^") and "=" not in s:
+                try:  # a company Yahoo no longer lists: paid data still has it
+                    charts[s] = mk.get_chart_eodhd(s, eod_key)
+                    filled.append(s)
+                    if save_dir:
+                        with open(eod_file, "w", encoding="utf-8") as fh:
+                            json.dump(charts[s], fh)
+                    continue
+                except mk.MarketError as e2:
+                    errors.append(str(e2))
             errors.append(str(e))
         if not offline and len(syms) > 100 and i % 100 == 99:
             log("  %d of %d" % (i + 1, len(syms)))
@@ -1516,6 +1766,8 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         raise ReplayError("no SPY prices, so no trading calendar. Data problems: %s"
                           % "; ".join(errors[:3] or ["none reported"]))
     data = Data(charts, {})
+    if filled:
+        log("paid data filled %d companies Yahoo no longer lists" % len(filled))
     asof = data.trading_day_on_or_before(asof) if asof else latest_friday(data.days)
     candles = {}
     crypto_max = CRYPTO_MAX_DAYS if team.DEFAULTS["interval_min"] < 60 else CRYPTO_LONG_DAYS
@@ -1541,7 +1793,8 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                 row["congress buys"] = run_signals(data, uni, sig, start, asof, cash, source="congress", days=90)
             row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
             if "QQQ" in data.charts:
-                row["core + dual"] = blend([run_hold(data, {"QQQ": 1.0}, start, asof, cash), row["dual momentum"]], cash)
+                row["core + dual"] = run_dual(data, start, asof, cash, **CORE_DEFAULT)
+            row["model"] = run_model(data, uni, sig, start, asof, cash)
         if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
@@ -1613,7 +1866,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
-         "blend", "core + dual",
+         "blend", "core + dual", "model",
          "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
@@ -1623,7 +1876,8 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)",
           "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)",
           "blend": "Blend: dual momentum + momentum + Congress (thirds)",
-          "core + dual": "Core + satellite: half Nasdaq 100, half dual momentum"}
+          "core + dual": "Core + satellite: 70% Nasdaq 100, 30% dual momentum",
+          "model": "Learned score (top 20, refit every January)"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 
@@ -1776,6 +2030,76 @@ def render(out):
     return "\n".join(L) + "\n"
 
 
+# ---------------------------------------------------------------- forward paper record
+
+FORWARD_PLAN = os.path.join(HERE, "forward_plan.json")
+
+
+def forward(plan, record=None, offline=None, today=None, log=print):
+    """The live paper record: every strategy in the frozen plan, run from the plan's start date
+    to the latest close with only what was known each day. Values for days already in `record`
+    are kept as they were (append-only): only new days are added."""
+    start = plan["start"]
+    syms = {"SPY", "QQQ", "IEF", "SHY", "USDCAD=X"}
+    for st in plan["strategies"].values():
+        if st["kind"] == "hold":
+            syms |= set(st["weights"])
+        elif st["kind"] == "dual":
+            pool = DUAL_POOLS[dict(DUAL_DEFAULT, **st.get("opts", {}))["pool"]]
+            syms |= {x for g in pool for x in univ.ETFS[g] if not x.endswith(".TO")}
+    charts = {}
+    for s in sorted(syms):
+        try:
+            charts[s] = mk.get_chart(s, offline=offline, range_="2y")
+        except mk.MarketError as e:
+            log("forward: %s" % e)
+    data = Data(charts, {})
+    last = data.trading_day_on_or_before(today or data.days[-1])
+    first = data.trading_day_on_or_before(start)
+    rec = record or {"start": start, "plan": plan, "days": {}}
+    out = {}
+    for name, st in plan["strategies"].items():
+        if st["kind"] == "hold":
+            r = run_hold(data, st["weights"], first, last, plan.get("cash", 100.0))
+        else:
+            r = run_dual(data, first, last, plan.get("cash", 100.0), **st.get("opts", {}))
+        out[name] = {d: v for d, v in r["curve"]}
+        out[name]["_holdings"] = r.get("holdings", [])
+    days = sorted({d for v in out.values() for d in v if not d.startswith("_")})
+    for d in days:
+        if d in rec["days"]:
+            continue  # never rewrite a day that is already on the record
+        rec["days"][d] = {name: v.get(d) for name, v in out.items()}
+    rec["holdings"] = {name: v["_holdings"] for name, v in out.items()}
+    rec["targets"] = {name: {k: round(x, 4) for k, x in (dual_weights(data, last, **st.get("opts", {}))
+                                                      if st["kind"] == "dual" else st["weights"]).items()}
+                      for name, st in plan["strategies"].items()}
+    rec["updated"] = last
+    return rec
+
+
+def render_forward(rec):
+    days = sorted(rec["days"])
+    if not days:
+        return "No forward days yet."
+    first, last = rec["days"][days[0]], rec["days"][days[-1]]
+    L = ["Live paper record since %s (%d trading days), $%g each:" % (rec["start"], len(days), rec["plan"].get("cash", 100))]
+    for name in rec["plan"]["strategies"]:
+        v = last.get(name)
+        if v is not None:
+            L.append("  %-40s $%.2f (%+.1f%%)  holds %s" % (name, v, v - rec["plan"].get("cash", 100),
+                                                            ", ".join(rec.get("holdings", {}).get(name, [])[:5])))
+    return "\n".join(L)
+
+
+def parse_rolling(text):
+    """'365,91,28' -> {"horizon_days": 365, "step_days": 91, "count": 28} (None -> the default)."""
+    if not text:
+        return ROLLING
+    h, st, n = [int(x) for x in text.split(",")]
+    return {"horizon_days": h, "step_days": st, "count": n}
+
+
 def parse_windows(text):
     """'12m,6m,1w' -> [('12 months', 365), ('6 months', 182), ('1 week', 7)]."""
     if not text:
@@ -1801,20 +2125,37 @@ def main(argv=None):
                     help="replay your own holdings from a broker CSV (also read from trader/accounts/*.json)")
     ap.add_argument("--windows", help="e.g. 12m,6m,3m,1m,2w,1w (default)")
     ap.add_argument("--no-rolling", action="store_true", help="skip the rolling-window test")
+    ap.add_argument("--rolling-spec", metavar="DAYS,STEP,COUNT",
+                    help="rolling windows: length in days, days between starts, how many (default 91,30,12)")
     ap.add_argument("--universe", choices=["auto", "watchlists"], default="auto",
                     help="auto: choose from the S&P 500 as it was each day + index funds (default); "
                          "watchlists: today's hand-picked lists (hindsight)")
     ap.add_argument("--history", choices=sorted(HISTORY_YEARS), default="5y", help="price history to load")
     ap.add_argument("--save-data", metavar="DIR", help="also save every chart to DIR (reuse with --offline DIR)")
     ap.add_argument("--signals", metavar="DIR", help="congress.json.gz / insiders.json.gz from signals.py")
+    ap.add_argument("--forward", metavar="RECORD", help="update the live paper record in RECORD (JSON) from "
+                    "forward_plan.json, then stop")
     ap.add_argument("--strict", action="store_true", help="exit 3 if any self-check fails")
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
+    if a.forward:
+        with open(FORWARD_PLAN, encoding="utf-8") as fh:
+            plan = json.load(fh)
+        rec = None
+        if os.path.exists(a.forward):
+            with open(a.forward, encoding="utf-8") as fh:
+                rec = json.load(fh)
+        rec = forward(plan, rec, offline=a.offline, today=a.asof, log=lambda m: print(m, file=sys.stderr))
+        os.makedirs(os.path.dirname(os.path.abspath(a.forward)), exist_ok=True)
+        with open(a.forward, "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, indent=1)
+        print(render_forward(rec))
+        return 0
     try:
         out, text = replay(a.dir, a.asof, a.cash, a.skip, a.offline, a.account_type,
                            log=lambda m: print(m, file=sys.stderr), windows=parse_windows(a.windows),
-                           holdings=a.holdings, rolling_spec=None if a.no_rolling else ROLLING,
+                           holdings=a.holdings, rolling_spec=None if a.no_rolling else parse_rolling(a.rolling_spec),
                            uni="auto" if a.universe == "auto" else None, history=a.history, save_dir=a.save_data,
                            signals=a.signals)
     except (ReplayError, mk.MarketError) as e:

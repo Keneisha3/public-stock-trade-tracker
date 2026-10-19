@@ -14,7 +14,7 @@ on:
         required: false
         default: "replay"
         type: choice
-        options: ["replay", "walk-forward", "build-signals", "discover"]
+        options: ["replay", "walk-forward", "build-signals", "discover", "forward"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -160,6 +160,8 @@ jobs:
           [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
           [[ -z "$WINDOWS" || "$WINDOWS" =~ ^[0-9]+[dwmy](,[0-9]+[dwmy])*$ ]] || { echo "windows like 24m,12m"; exit 1; }
       - name: Download 10 years of prices
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: |
           python trade.py init
           python .claude/skills/trader-replay/replay.py --history 10y --save-data market --windows 1m \
@@ -216,8 +218,44 @@ jobs:
           path: out
           if-no-files-found: ignore
 
+  wf-stats:
+    # 28 overlapping 12-month windows, a new one every quarter, all inside the training
+    # years (ending a year before the latest Friday), then confidence ranges and a reality check.
+    needs: wf-data
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: market-data
+          path: market
+      - name: Dated signals
+        run: |
+          mkdir -p signals
+          git fetch -q origin replay-results || true
+          for f in congress.json.gz insiders.json.gz; do
+            git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
+          done
+      - name: Rolling windows inside the training years
+        run: |
+          python trade.py init
+          asof=$(date -u -d "$(date -u +%Y-%m-%d) -1 year -3 days" +%Y-%m-%d)
+          python .claude/skills/trader-replay/replay.py --offline market --history 10y --asof "$asof" --windows 12m \
+            --rolling-spec 365,91,28 --skip crypto pelosi --signals signals > /dev/null
+          mkdir -p out
+          cp trader/replay/report.json out/stats-report.json
+          python scripts/stats.py out/stats.md out/stats-report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: period-stats
+          path: out
+
   wf-combine:
-    needs: wf-period
+    needs: [wf-period, wf-stats]
     if: ${{ always() && inputs.mode == 'walk-forward' }}
     runs-on: ubuntu-latest
     steps:
@@ -234,6 +272,7 @@ jobs:
         run: |
           python scripts/walkforward.py out/summary.md out/report-*.json
           cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          [ -f out/stats.md ] && cat out/stats.md >> "$GITHUB_STEP_SUMMARY" || true
       - name: Save to the replay-results branch
         env:
           LABEL: ${{ inputs.label }}
@@ -245,6 +284,7 @@ jobs:
           git checkout -q -B replay-results FETCH_HEAD
           mkdir -p "research/$LABEL"
           cp "$RUNNER_TEMP"/out/summary.md "$RUNNER_TEMP"/out/report-*.md "$RUNNER_TEMP"/out/report-*.json "research/$LABEL/"
+          cp "$RUNNER_TEMP"/out/stats.md "research/$LABEL/" 2>/dev/null || true
           git add "research/$LABEL"
           git commit -qm "Walk-forward research: $LABEL" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
@@ -289,10 +329,12 @@ jobs:
           y=$(date +%Y); q=$(( ($(date +%-m) - 1) / 3 ))
           if [ "$q" -eq 0 ]; then y=$((y - 1)); q=4; fi
           python .claude/skills/trader-replay/signals.py insiders --quarters "2015q1-${y}q${q}" --out out
+          since=$(python -c "import gzip,json,datetime; r=json.load(gzip.open('out/insiders.json.gz','rt'))['rows']; print((datetime.date.fromisoformat(max(x[0] for x in r))+datetime.timedelta(days=1)).isoformat())")
+          python .claude/skills/trader-replay/signals.py insiders-recent --since "$since" --sp500 --out out
       - uses: actions/upload-artifact@v4
         with:
           name: sig-insiders
-          path: out/insiders.json.gz
+          path: out/insiders*.json.gz
 
   sig-save:
     needs: [sig-congress, sig-insiders]
@@ -359,4 +401,36 @@ jobs:
           cp "$RUNNER_TEMP"/out/ideas-*.json discover/latest-ideas.json
           git add discover
           git commit -qm "Discover snapshot $day" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- forward
+  # The live paper record: every weekday, the frozen plan (forward_plan.json) is
+  # brought up to the latest close and appended to replay-results/forward/record.json.
+  # Days already on the record are never rewritten.
+
+  forward:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '41 22 * * 1-5') || inputs.mode == 'forward' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bring the live paper record up to today
+        run: |
+          mkdir -p forward
+          git fetch -q origin replay-results || true
+          git show origin/replay-results:forward/record.json > forward/record.json 2>/dev/null || rm -f forward/record.json
+          python .claude/skills/trader-replay/replay.py --forward forward/record.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        run: |
+          cp forward/record.json "$RUNNER_TEMP/record.json"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -B replay-results origin/replay-results
+          mkdir -p forward
+          cp "$RUNNER_TEMP/record.json" forward/record.json
+          git add forward
+          git commit -qm "Live paper record $(date -u +%Y-%m-%d)" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
