@@ -584,6 +584,26 @@ def run_momentum_signals(data, uni, sig, start, asof, cash, n=20, days=180, **op
     return run_targets(data, start, asof, cash, choose, o["every"])
 
 
+def blend(parts, cash):
+    """Split the money equally between strategies at the start and let each run on its own
+    (no rebalancing between them): the blend's value is the sum of the parts' values."""
+    parts = [p for p in parts if p and p.get("curve")]
+    if not parts:
+        return None
+    n = len(parts)
+    days = [d for d, _ in parts[0]["curve"]]
+    by = [dict(p["curve"]) for p in parts]
+    curve, last = [], [p["curve"][0][1] for p in parts]
+    for d in days:
+        last = [b.get(d, last[i]) for i, b in enumerate(by)]
+        curve.append([d, round(sum(last) / n, 2)])
+    v = curve[-1][1]
+    held = sorted({h for p in parts for h in p.get("holdings", [])})
+    return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2), "curve": curve,
+            "trades": sum(p.get("trades", 0) for p in parts), "fees": round(sum(p.get("fees") or 0 for p in parts) / n, 2),
+            "holdings": held, "contrib": [], "fills": []}
+
+
 def run_hold(data, weights, start, asof, cash):
     pf = Portfolio(data, cash, split=currency_split(data, weights, start), start=start)
     orders = [{"side": "buy", "ticker": s, "cad": cash * w * 0.999, "decided": start} for s, w in weights.items()
@@ -1355,6 +1375,9 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
                 row["insider buys"] = run_signals(data, uni, sig, start, end, cash)
             if sig and sig.congress:
                 row["congress buys"] = run_signals(data, uni, sig, start, end, cash, source="congress", days=90)
+            row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
+            if "QQQ" in data.charts:
+                row["core + dual"] = blend([run_hold(data, {"QQQ": 1.0}, start, end, cash), row["dual momentum"]], cash)
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
@@ -1516,6 +1539,9 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                 row["insider buys"] = run_signals(data, uni, sig, start, asof, cash)
             if sig and sig.congress:
                 row["congress buys"] = run_signals(data, uni, sig, start, asof, cash, source="congress", days=90)
+            row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
+            if "QQQ" in data.charts:
+                row["core + dual"] = blend([run_hold(data, {"QQQ": 1.0}, start, asof, cash), row["dual momentum"]], cash)
         if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
@@ -1587,6 +1613,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
+         "blend", "core + dual",
          "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
@@ -1594,7 +1621,9 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "dividend": "Dividend reviewer (Wealthsimple)", "stock bot": "Stock bot (ATR, paper)",
           "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (Nasdaq 100 or cash)",
           "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)",
-          "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)"}
+          "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)",
+          "blend": "Blend: dual momentum + momentum + Congress (thirds)",
+          "core + dual": "Core + satellite: half Nasdaq 100, half dual momentum"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 

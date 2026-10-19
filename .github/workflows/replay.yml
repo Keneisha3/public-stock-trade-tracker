@@ -38,6 +38,7 @@ on:
   schedule:
     - cron: "17 13 * * 6"  # Saturdays, 13:17 UTC: the weekly replay
     - cron: "41 22 * * 1-5"  # weekdays after the close: archive the idea lists (discover)
+    - cron: "23 7 3 * *"  # the 3rd of each month: refresh the Congress and insider signals
 
 permissions:
   contents: write
@@ -60,6 +61,13 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
       - name: Set up trader/ with the default watchlists
         run: python trade.py init
+      - name: Dated signals (Congress, insiders) from the replay-results branch
+        run: |
+          mkdir -p signals
+          git fetch -q origin replay-results || true
+          for f in congress.json.gz insiders.json.gz; do
+            git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
+          done
       - name: Replay $100 in every strategy
         env:
           ASOF: ${{ inputs.asof }}
@@ -85,7 +93,7 @@ jobs:
           if [ -n "$LABEL" ]; then
             [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
           fi
-          python trade.py replay --strict "${args[@]}"
+          python trade.py replay --strict --signals signals "${args[@]}"
       - name: Summary page
         if: always()
         run: |
@@ -190,7 +198,7 @@ jobs:
           ls -la signals
       - name: Replay the period ending ${{ matrix.asof }}
         env:
-          WINDOWS: ${{ inputs.windows || '24m,12m' }}
+          WINDOWS: ${{ inputs.windows || '24m,12m,6m,1m' }}
           ASOF: ${{ matrix.asof }}
         run: |
           python trade.py init
@@ -246,7 +254,7 @@ jobs:
   # bulk data) since 2015, saved to replay-results/signals/ for the walk-forward.
 
   sig-congress:
-    if: ${{ inputs.mode == 'build-signals' && !contains(inputs.skip, 'congress') }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'congress')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
@@ -263,7 +271,7 @@ jobs:
           path: out/congress.json.gz
 
   sig-insiders:
-    if: ${{ inputs.mode == 'build-signals' }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -273,7 +281,7 @@ jobs:
           python-version: "3.12"
       - name: SEC insider purchases, 2015 on
         env:
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
         run: |
           ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")  # from the trigger, not printed
           if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
@@ -288,7 +296,7 @@ jobs:
 
   sig-save:
     needs: [sig-congress, sig-insiders]
-    if: ${{ always() && inputs.mode == 'build-signals' }}
+    if: ${{ always() && ((github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -327,7 +335,7 @@ jobs:
           python-version: "3.12"
       - name: Snapshot every source, rank the whole market
         env:
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
         run: |
           ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH" 2>/dev/null)
           if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi

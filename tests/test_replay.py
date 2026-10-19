@@ -561,19 +561,36 @@ class PointInTimeUniverse(unittest.TestCase):
         m = replay.run_momentum_signals(data, uni, sig, data.days[300], ASOF, 100, n=2)
         self.assertTrue(all(set(p) - {"SPY"} <= {"AAA", "BBB", "MMM"} for _, p in m["picks"]))
 
-    def test_walk_forward_table(self):
+    def test_blend_is_the_sum_of_its_parts(self):
+        a = {"curve": [["d1", 50.0], ["d2", 60.0]], "holdings": ["X"], "trades": 1, "fees": 0.2}
+        b = {"curve": [["d1", 50.0], ["d2", 40.0]], "holdings": ["Y"], "trades": 2, "fees": 0.4}
+        r = replay.blend([a, b, None], 100)
+        self.assertEqual(r["curve"], [["d1", 50.0], ["d2", 50.0]])  # two halves of $100: averages of $100 runs
+        self.assertEqual((r["return_pct"], r["holdings"], r["trades"]), (-50.0, ["X", "Y"], 3))
+        self.assertIsNone(replay.blend([None], 100))
+
+    def test_walk_forward_keeps_the_last_year_out_of_training(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("walkforward", os.path.join(FIX, "..", "..", "scripts", "walkforward.py"))
         wf = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(wf)
 
-        def rep(asof, g, spy):
-            return {"asof": asof, "windows": ["12 months"], "checks": [{"name": "x", "ok": True}],
-                    "results": {"12 months": {"growth": {"return_pct": g}, "S&P 500 (SPY)": {"return_pct": spy},
-                                              "coverage": {"priced": 480, "members": 503}}}}
-        text = wf.table([rep("2022-10-14", -10.0, -15.0), rep("2020-10-16", 30.0, 12.0)])
-        self.assertIn("| 2020-10-16 | 2022-10-14 |", text)  # oldest first
+        def rep(asof, rets, spy, sc=None):
+            res = {w: {"growth": {"return_pct": g}, "S&P 500 (SPY)": {"return_pct": s},
+                       "coverage": {"priced": 480, "members": 503}} for w, g, s in zip(
+                ["24 months", "12 months", "6 months", "1 month"], rets, spy)}
+            return {"asof": asof, "windows": list(res), "checks": [{"name": "x", "ok": True}], "results": res,
+                    "scenarios": [{"strategy": "growth", "name": "A", "results": {w: {"return_pct": g + 1} for w, g in
+                                                                                  zip(res, rets)}}]}
+        reports = [rep("2026-10-16", [30, 20, 9, 1], [25, 10, 5, 2]), rep("2020-10-16", [30, 1, 1, 1], [12, 1, 1, 1]),
+                   rep("2022-10-14", [-10, 1, 1, 1], [-15, 1, 1, 1]), rep("2025-12-19", [5, 5, 5, 5], [1, 1, 1, 1])]
+        train, last, cut = wf.split(reports)
+        self.assertEqual([r["asof"] for r in train], ["2020-10-16", "2022-10-14"])  # 2025-12 is inside the test year
+        self.assertEqual((last["asof"], cut), ("2026-10-16", "2025-10-16"))
+        text = wf.table(reports)
         self.assertIn("| Growth (Questrade) | +30.0% (+18.0) | -10.0% (+5.0) | 2 of 2 | +11.5 pts |", text)
+        self.assertIn("| Growth (Questrade) | +20.0% (+10.0) | +9.0% (+4.0) | +1.0% (-1.0) |", text)  # the held-out test
+        self.assertIn("| growth | A | +12.5 pts | +11.0 pts |", text)  # chosen on training, checked on the last year
         self.assertIn("480 of 503 index members priced", text)
 
 
