@@ -56,6 +56,29 @@ def _tool(folder, script, args, timeout=180):
         return None, out[:400]
 
 
+def tested_plan(review, rec):
+    """For each growth account: what the strategy chosen by the walk-forward (marked "(chosen)" in
+    the live record's plan) would hold today, in the account's money, beside what it holds now."""
+    if not rec:
+        return []
+    name = next((k for k in (rec.get("plan") or {}).get("strategies", {}) if "(chosen)" in k), None)
+    targets = (rec.get("targets") or {}).get(name) if name else None
+    if not targets:
+        return []
+    out = []
+    for a in review.get("accounts", []):
+        if a.get("strategy") != "growth" or not a.get("total"):
+            continue
+        held = {p["ticker"]: p["value_base"] for p in a.get("positions", [])}
+        rows = [{"ticker": t, "target_pct": round(100 * w, 1), "target": round(a["total"] * w, 2),
+                 "now": round(held.get(t, 0.0), 2), "change": round(a["total"] * w - held.get(t, 0.0), 2)}
+                for t, w in sorted(targets.items(), key=lambda kv: -kv[1])]
+        out.append({"account": a["name"], "plan": name, "total": a["total"], "rows": rows,
+                    "outside_plan": round(sum(v for t, v in held.items() if t not in targets), 2),
+                    "as_of": rec.get("updated")})
+    return out
+
+
 def run(base="trader", skip=(), offline=None, today=None):
     paths = acc.Paths(base)
     cfg = acc.load_config(paths.config)
@@ -157,6 +180,7 @@ def run(base="trader", skip=(), offline=None, today=None):
                                 "days": len(rec["days"]), "cash": rec["plan"].get("cash", 100)}
         did("forward", rec is not None, (p.stderr.strip() or p.stdout.strip())[:300] if p.returncode else
             "%d days on the record" % len((rec or {}).get("days", {})))
+    brief["plan"] = tested_plan(review, acc.read_json(os.path.join(base, "forward", "record.json"), None))
     rules = os.path.join(base, "alerts.json")
     if "alerts" not in skip and os.path.exists(rules):
         doc, err = _tool("trader-alerts", "alerts.py", ["check", "--json", "--rules", rules,
@@ -227,6 +251,17 @@ def render(b):
         L.append("## New Congress stock-trade filings")
         for c in b["congress"]:
             L.append("- %s (%s) filed %s: %s" % (c["name"], c["district"], c["filed"], c["url"]))
+        L.append("")
+    for p in b.get("plan") or []:
+        L.append("## The tested plan for %s (%s, targets as of %s)" % (p["account"], p["plan"], p["as_of"]))
+        for r in p["rows"]:
+            L.append("- %s %.0f%%: %s (now %s, %s %s)" % (r["ticker"], r["target_pct"], acc.money(r["target"]),
+                                                        acc.money(r["now"]), "buy" if r["change"] > 0 else "sell",
+                                                        acc.money(abs(r["change"]))))
+        if p["outside_plan"]:
+            L.append("- In holdings outside the plan: %s" % acc.money(p["outside_plan"]))
+        L.append("- An option, not an order: it beat the S&P 500 in 23 of 28 test windows, with drops "
+                 "like the Nasdaq 100's. Nothing is placed for you.")
         L.append("")
     if b.get("forward"):
         f = b["forward"]

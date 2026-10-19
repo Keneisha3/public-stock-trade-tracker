@@ -624,6 +624,8 @@ class ForwardRecord(unittest.TestCase):
         for day, vals in frozen.items():
             self.assertEqual(rec["days"][day], vals)  # ...days already recorded stay exactly as they were
         self.assertEqual(sorted(rec["days"])[-1], days[510])
+        self.assertEqual(rec["targets"]["Nasdaq 100 (QQQ)"], {"QQQ": 1.0})
+        self.assertAlmostEqual(sum(rec["targets"]["Dual"].values()), 1.0, places=3)  # today's weights, for the review
         self.assertIn("Live paper record since", replay.render_forward(rec))
         with open(replay.FORWARD_PLAN) as fh:
             real = json.load(fh)

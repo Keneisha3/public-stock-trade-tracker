@@ -530,27 +530,28 @@ def run_dual(data, start, asof, cash, **opts):
     must also be above its 200-day average); vol_target (hold target/volatility of a fund,
     at most all of it, the rest in IEF: less in wild markets); core ("QQQ"): that fund takes
     core_weight of the money, dual momentum the rest, rebalanced together every month."""
+    return run_targets(data, start, asof, cash, lambda d: dual_weights(data, d, **opts), 28)
+
+
+def dual_weights(data, d, **opts):
+    """What dual momentum (with its options) would hold after the close of `d`: {fund: weight}."""
     o = dict(DUAL_DEFAULT, **opts)
     pool = sorted({x for g in DUAL_POOLS[o["pool"]] for x in univ.ETFS[g] if not x.endswith(".TO")})
-    has_safe = o["safe"] in data.charts
-
-    def choose(d):
-        hurdle = (data.quick(o["cash_like"], d, 21 * o["months"]) or {}).get("ret", 0.0)
-        rows = [(q["ret"], f, q) for f in pool for q in [data.quick(f, d, 21 * o["months"])] if q]
-        top = [(f, q) for r, f, q in sorted(rows, key=lambda x: -x[0])[:o["k"]]
-               if r > hurdle and (q["above200"] or not o["trend"])]
-        sat = 1.0 - (o["core_weight"] if o["core"] else 0.0)
-        w = {}
-        for f, q in top:
-            scale = min(1.0, o["vol_target"] / max(q["vol"], 1.0)) if o["vol_target"] else 1.0
-            w[f] = w.get(f, 0.0) + sat / o["k"] * scale
-        if o["core"] and o["core"] in data.charts:
-            w[o["core"]] = w.get(o["core"], 0.0) + o["core_weight"]
-        rest = 1.0 - sum(w.values())
-        if rest > 1e-6 and has_safe:
-            w[o["safe"]] = w.get(o["safe"], 0.0) + rest
-        return w
-    return run_targets(data, start, asof, cash, choose, 28)
+    hurdle = (data.quick(o["cash_like"], d, 21 * o["months"]) or {}).get("ret", 0.0)
+    rows = [(q["ret"], f, q) for f in pool for q in [data.quick(f, d, 21 * o["months"])] if q]
+    top = [(f, q) for r, f, q in sorted(rows, key=lambda x: -x[0])[:o["k"]]
+           if r > hurdle and (q["above200"] or not o["trend"])]
+    sat = 1.0 - (o["core_weight"] if o["core"] else 0.0)
+    w = {}
+    for f, q in top:
+        scale = min(1.0, o["vol_target"] / max(q["vol"], 1.0)) if o["vol_target"] else 1.0
+        w[f] = w.get(f, 0.0) + sat / o["k"] * scale
+    if o["core"] and o["core"] in data.charts:
+        w[o["core"]] = w.get(o["core"], 0.0) + o["core_weight"]
+    rest = 1.0 - sum(w.values())
+    if rest > 1e-6 and o["safe"] in data.charts:
+        w[o["safe"]] = w.get(o["safe"], 0.0) + rest
+    return w
 
 
 SIGNAL_DEFAULT = {"source": "insiders", "n": 20, "days": 60, "min_count": 2, "officers": False,
@@ -2070,6 +2071,9 @@ def forward(plan, record=None, offline=None, today=None, log=print):
             continue  # never rewrite a day that is already on the record
         rec["days"][d] = {name: v.get(d) for name, v in out.items()}
     rec["holdings"] = {name: v["_holdings"] for name, v in out.items()}
+    rec["targets"] = {name: {k: round(x, 4) for k, x in (dual_weights(data, last, **st.get("opts", {}))
+                                                      if st["kind"] == "dual" else st["weights"]).items()}
+                      for name, st in plan["strategies"].items()}
     rec["updated"] = last
     return rec
 

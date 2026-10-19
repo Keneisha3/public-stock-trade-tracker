@@ -121,6 +121,23 @@ class Dashboard(unittest.TestCase):
         self.assertIn("esc(n.title)", page)  # headlines come from outside: always escaped
 
 
+class TestedPlan(unittest.TestCase):
+    def test_plan_in_the_growth_account_money(self):
+        review = {"accounts": [
+            {"name": "Questrade", "strategy": "growth", "total": 1000.0,
+             "positions": [{"ticker": "QQQ", "value_base": 300.0}, {"ticker": "NOC", "value_base": 700.0}]},
+            {"name": "Wealthsimple", "strategy": "dividend", "total": 500.0, "positions": []}]}
+        rec = {"updated": "2026-10-19", "plan": {"strategies": {"70% QQQ + 30% dual (chosen)": {}, "QQQ": {}}},
+               "targets": {"70% QQQ + 30% dual (chosen)": {"QQQ": 0.7, "SMH": 0.3}}}
+        p = daily.tested_plan(review, rec)
+        self.assertEqual(len(p), 1)  # growth accounts only
+        self.assertEqual(p[0]["rows"], [
+            {"ticker": "QQQ", "target_pct": 70.0, "target": 700.0, "now": 300.0, "change": 400.0},
+            {"ticker": "SMH", "target_pct": 30.0, "target": 300.0, "now": 0.0, "change": 300.0}])
+        self.assertEqual(p[0]["outside_plan"], 700.0)
+        self.assertEqual(daily.tested_plan(review, None), [])
+
+
 class DailyOffline(unittest.TestCase):
     def test_daily_run_writes_the_briefing(self):
         d = tempfile.mkdtemp()
