@@ -53,7 +53,7 @@ Clerk, plus `pdftotext` for the Pelosi filings.
   every strategy) of the 6-month daily returns: percentiles, P(profit),
   P(beat S&P 500), drawdowns. Curves much shorter than the rest sit out.
 - `results["6 months"][strategy]["risk"]`: volatility, Sharpe, max drawdown.
-- VIX: `results[w]["VIX agent"]` (SPY while the VIX is at or under 25, cash
+- VIX: `results[w]["VIX agent"]` (the S&P 500 as VFV.TO, in CAD so switches pay no FX, while the VIX is at or under 25, cash
   above it, decided at the close; `switches`, `risk_on_days_pct`), VIX
   variants under `scenarios` with strategy "vix", every strategy's
   `vix_regimes` (average daily return by calm/normal/nervous/fear, correlation
