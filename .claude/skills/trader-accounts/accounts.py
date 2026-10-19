@@ -440,13 +440,13 @@ def position_flags(strategy, r, p, m, weight, acct_type, cap=None):
     cap = r["max_position_pct"] if cap is None else cap
     if weight > cap + r.get("trim_band_pct", 0):
         f.append(_flag("action", "over_cap", "%.1f%% of the account, over your %g%% cap: trim" % (weight, cap)))
-    if not m:
-        f.append(_flag("watch", "no_data", "no market data (check the ticker or run market)"))
-        return f
-    gain = p.get("gain_pct")
+    gain = p.get("gain_pct")  # the stop only needs your cost and today's price, not market history
     if gain is not None and gain <= -r["stop_loss_pct"]:
         f.append(_flag("action", "stop", "down %.0f%% from your cost (stop is %g%%): decide to cut or keep, "
                        "write down why" % (-gain, r["stop_loss_pct"])))
+    if not m:
+        f.append(_flag("watch", "no_data", "no market data (check the ticker or run market)"))
+        return f
     off = m.get("off_high_pct")
     if off is not None and off <= -r["drawdown_review_pct"]:
         f.append(_flag("watch", "drawdown", "%.0f%% below its 52-week high" % -off))
@@ -623,7 +623,8 @@ def propose(acct, rows, cash_by, total, cash, market, base, contribute, notes, c
                 out.append({"side": "sell", "ticker": x["ticker"], "shares": q, "price": x["price"],
                             "currency": x["currency"], "value": round(q * x["price"], 2),
                             "value_base": round(q * x["price"] * x["fx"], 2),
-                            "reason": "trim back to the %g%% cap (lock in part of the gain)" % cap})
+                            "reason": "trim back to the %g%% cap (%s)" % (cap, "lock in part of the gain"
+                                       if (x.get("gain_pct") or 0) > 0 else "cut the concentration")})
     new_total = total + contribute
     spare = cash + proceeds + contribute - new_total * r["cash_target_pct"] / 100.0
     if spare < r["min_trade"]:
