@@ -147,6 +147,17 @@ separate **Pelosi copycat** row copies Nancy Pelosi's disclosed trades from
 the day each filing was posted, not the day she traded. A test wrecks every
 price after the as-of date and checks that no result moves.
 
+**No hindsight in the stock picks.** By default the agents choose only from
+what was in the S&P 500 on each day (a membership history back to 1996, MIT
+licence, [fja05680/sp500](https://github.com/fja05680/sp500)), plus 93 index
+funds (sectors, factors, countries, bonds, gold, Canadian funds) and about 70
+large Canadian companies. At each review a scanner ranks all of them and the
+reviewer scores the best 20 to 25; the stock bot trades any member, only on
+days it was a member. Yahoo has no prices for many companies that later left
+the market, so the report shows how many index members it could price.
+Today's hand-picked watchlists stay as comparison rows marked "hindsight".
+`--history 10y` loads ten years; `--universe watchlists` goes back to the old way.
+
 On top of the replay:
 
 - **Scenarios.** Each strategy is replayed with different settings (momentum
@@ -174,6 +185,11 @@ On top of the replay:
   is also broken down by VIX regime (calm, normal, nervous, fear) and by how
   it moves with the VIX. The daily briefing and the dashboard show today's
   VIX and what the agent would do.
+
+**Walk-forward test.** The workflow's `walk-forward` mode downloads ten years
+of prices once, replays five periods ending 2019-10, 2020-10, 2022-10, 2024-10
+and 2026-10 in parallel (the 2018 sell-off, the 2020 crash and the 2022 bear
+market included), and combines them into one table (`scripts/walkforward.py`).
 
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the

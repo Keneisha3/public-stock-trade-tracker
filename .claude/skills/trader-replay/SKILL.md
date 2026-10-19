@@ -46,6 +46,24 @@ Clerk, plus `pdftotext` for the Pelosi filings.
 - Costs: 5 bps slippage, the bots' fees, 15 % US dividend withholding (TFSA;
   none in an RRSP), dividends on ex-date only for shares owned before that day.
 
+## What the agents choose from (no hindsight)
+
+- Default (`--universe auto`): the S&P 500 as it was ON each day
+  (`sp500_members.json`, from fja05680/sp500, MIT; `universe.py update`
+  refreshes it), plus 93 index funds and about 70 large Canadian companies
+  (`universe.py`). A scanner ranks every candidate at each review with
+  point-in-time stats and the reviewer scores the best 20 (growth, medium) or
+  25 (dividend: Canadian names and income funds only). The stock bot trades
+  any member, only while it is a member.
+- Report: an "S&P 500 equal weight (RSP)" benchmark, how many index members
+  had prices at each start (coverage; self-check fails under 80%), and the
+  old hand-picked watchlists as scenario rows marked "hindsight".
+- `--history 10y` loads ten years; `--save-data DIR` then `--offline DIR`
+  reuses the download. The workflow's `walk-forward` mode replays five
+  periods (2019-2026) and combines them with `scripts/walkforward.py`.
+- Say plainly: companies Yahoo has no prices for (mostly delisted) cannot be
+  chosen, so some survivorship bias remains; the Canadian list is today's.
+
 ## Scenarios, Monte Carlo, risk
 
 - `report.json` -> `scenarios`: each strategy replayed with different settings
