@@ -48,7 +48,7 @@ import trade_log  # noqa: E402
 
 DEFAULTS = {
     "coins": ["BTC", "ETH", "SOL", "XRP", "DOGE", "LTC", "BCH", "LINK", "AVAX", "DOT"],
-    "interval_min": 360, "lookback_bars": 200,  # 6-hour bars: beat 15-minute bars in both test periods
+    "interval_min": 1440, "lookback_bars": 200,  # daily bars: the only timeframe that made money in both test periods
     "ema_fast": 9, "ema_slow": 21, "ema_trend": 50, "rsi_period": 14, "rsi_min": 50, "rsi_max": 70,
     "atr_period": 14, "stop_atr": 1.5, "tp_atr": 3.0,
     "risk_pct": 2.0, "max_position_pct": 25, "max_open": 3, "max_total_risk_pct": 6,
@@ -334,7 +334,7 @@ def run_loop(base, log=print):
             if read_kill(Paths(base)):
                 log("KILL SWITCH set after repeated errors. Stopped.")
                 return 1
-        step = min(iv, 900)  # check stops every 15 minutes even on 6-hour bars
+        step = min(iv, 900)  # check stops every 15 minutes even on daily bars
         wait = step - (time.time() % step) + 20  # 20 s after a 15-minute mark
         time.sleep(wait)
 

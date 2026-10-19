@@ -507,6 +507,10 @@ def run_crypto(candles, data, start, asof, cash, workdir, overrides=None):
     daily = {}
     for row in team.trade_log.read(paths.equity):
         daily[row["time"][:10]] = float(row["equity"]) * rate
+    if killed:  # the kill switch sold everything: US-dollar cash, flat, to the as-of close
+        for d in data.days:
+            if start <= d <= asof and d not in daily and (not daily or d > max(daily)):
+                daily[d] = eq * data.fx(d)
     by = {}
     for t in team.trade_log.read(paths.trades):
         c = t["asset"].split("/")[0]
@@ -822,9 +826,9 @@ STOCKBOT_VARIANTS = [
 ]
 PELOSI_VARIANTS = [("Pelosi: mirror buys and sells", "mirror"), ("Pelosi: keep every buy", "hold")]
 CRYPTO_VARIANTS = [
-    ("Crypto team: 6-hour bars (default)", {"interval_min": 360}),
+    ("Crypto team: 1-day bars (default)", {"interval_min": 1440}),
     ("Crypto team: 15-minute bars (the guide)", {"interval_min": 15}),
-    ("Crypto team: 1-day bars", {"interval_min": 1440}),
+    ("Crypto team: 6-hour bars", {"interval_min": 360}),
     ("Crypto team: 1-day bars, Bitcoin and Ether only", {"interval_min": 1440, "coins": ["BTC", "ETH"]}),
 ]
 

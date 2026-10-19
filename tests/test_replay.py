@@ -397,13 +397,42 @@ class AgentVariants(unittest.TestCase):
             shutil.rmtree(d)
         kinds = {x["strategy"] for x in out["scenarios"]}
         self.assertTrue({"growth", "medium", "dividend", "stock bot", "vix", "pelosi", "crypto"} <= kinds, kinds)
-        daily = [x for x in out["scenarios"] if x["name"] == "Crypto team: 1-day bars"][0]
+        daily = [x for x in out["scenarios"] if x["name"] == "Crypto team: 1-day bars (default)"][0]
         self.assertIsNotNone(daily["results"]["6 months"])
         bot = {x["name"]: x for x in out["scenarios"] if x["strategy"] == "stock bot"}
         self.assertIn("SPY", bot["Stock bot: trades + idle cash in SPY"]["results"]["6 months"]["holdings"])
         self.assertIn("QQQ", bot["Stock bot: trades + idle cash in QQQ (default)"]["results"]["6 months"]["holdings"])
         self.assertIn("Nasdaq 100 (QQQ)", out["results"]["6 months"])
-        self.assertIn("| crypto | Crypto team: 1-day bars |", text)
+        self.assertIn("| crypto | Crypto team: 1-day bars (default) |", text)
+
+
+    def test_a_kill_switch_leaves_flat_cash_to_the_end(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+            t1 = replay.market_close_utc(ASOF)
+            candles = {"BTC": [{"t": t1 - (300 - i) * 86400, "o": 100.0, "h": 101.0, "l": 99.0, "c": 100.0, "v": 1}
+                               for i in range(300)]}
+            calls = []
+            real = replay.team.cycle
+
+            def cycle(state, window, now, broker, cfg, paths, log=print):
+                calls.append(now)
+                rep = real(state, window, now, broker, cfg, paths, log)
+                if len(calls) == 20:
+                    rep["killed"] = "test"
+                return rep
+            replay.team.cycle = cycle
+            try:
+                start = data.trading_day_on_or_before("2026-07-17")
+                r = replay.run_crypto(candles, data, start, ASOF, 100, os.path.join(d, "w"))
+            finally:
+                replay.team.cycle = real
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual(r["killed"], "test")
+        self.assertEqual(r["curve"][-1][0], ASOF)  # flat cash after the kill, not a curve that stops
 
 
 class YourHoldingsAndRolling(unittest.TestCase):
