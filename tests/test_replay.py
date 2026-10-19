@@ -530,6 +530,15 @@ class PointInTimeUniverse(unittest.TestCase):
         self.assertEqual(sorted(last), ["IEF", "SPY", "XLK"])  # XLE is under the short-bond hurdle: its share goes to IEF
         one = replay.run_dual(data, data.days[300], ASOF, 100)  # default: the single best fund
         self.assertEqual(len(one["picks"][-1][1]), 1)
+        core = replay.run_dual(data, data.days[300], ASOF, 100, core="IEF", core_weight=0.7)
+        self.assertEqual(sorted(core["picks"][-1][1]), ["IEF", "XLK"])  # 70% core + the best fund
+        calm = replay.run_dual(data, data.days[300], ASOF, 100, vol_target=1)  # a tiny target: mostly bonds
+        self.assertIn("IEF", calm["picks"][-1][1])
+        self.assertIn("XLK", calm["picks"][-1][1])
+        held = {h: 1 for h in calm["holdings"]}
+        self.assertIn("IEF", held)
+        trend = replay.run_dual(data, data.days[300], ASOF, 100, k=3, trend=True)
+        self.assertNotIn("XLE", trend["picks"][-1][1])
         self.assertIn("XLK", r["holdings"])
         self.assertNotIn("XLE", r["holdings"])
 
@@ -580,8 +589,8 @@ class PointInTimeUniverse(unittest.TestCase):
                        "coverage": {"priced": 480, "members": 503}} for w, g, s in zip(
                 ["24 months", "12 months", "6 months", "1 month"], rets, spy)}
             return {"asof": asof, "windows": list(res), "checks": [{"name": "x", "ok": True}], "results": res,
-                    "scenarios": [{"strategy": "growth", "name": "A", "results": {w: {"return_pct": g + 1} for w, g in
-                                                                                  zip(res, rets)}}]}
+                    "scenarios": [{"strategy": "growth", "name": "A", "risk": {"max_dd_pct": -20.0},
+                                   "results": {w: {"return_pct": g + 1} for w, g in zip(res, rets)}}]}
         reports = [rep("2026-10-16", [30, 20, 9, 1], [25, 10, 5, 2]), rep("2020-10-16", [30, 1, 1, 1], [12, 1, 1, 1]),
                    rep("2022-10-14", [-10, 1, 1, 1], [-15, 1, 1, 1]), rep("2025-12-19", [5, 5, 5, 5], [1, 1, 1, 1])]
         train, last, cut = wf.split(reports)
@@ -590,7 +599,7 @@ class PointInTimeUniverse(unittest.TestCase):
         text = wf.table(reports)
         self.assertIn("| Growth (Questrade) | +30.0% (+18.0) | -10.0% (+5.0) | 2 of 2 | +11.5 pts |", text)
         self.assertIn("| Growth (Questrade) | +20.0% (+10.0) | +9.0% (+4.0) | +1.0% (-1.0) |", text)  # the held-out test
-        self.assertIn("| growth | A | +12.5 pts | +11.0 pts |", text)  # chosen on training, checked on the last year
+        self.assertIn("| growth | A | +12.5 pts | -20.0% | +11.0 pts |", text)  # chosen on training, checked on the last year
         self.assertIn("480 of 503 index members priced", text)
 
 

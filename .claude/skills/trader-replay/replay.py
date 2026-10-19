@@ -441,9 +441,9 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
 
 
 def run_targets(data, start, asof, cash, choose, every=28, split=None):
-    """Equal weight in whatever choose(day) returns (a name listed twice gets two shares),
-    rebalanced every `every` days. choose sees only data up to that day's close; trades
-    fill at the next open."""
+    """Equal weight in whatever choose(day) returns (a name listed twice gets two shares), or the
+    weights it returns as {ticker: weight}; rebalanced every `every` days. choose sees only data
+    up to that day's close; trades fill at the next open."""
     pf, pending = Portfolio(data, cash, split=split or {"USD": 1.0}, start=start), []
     days = [d for d in data.days if start <= d <= asof]
     reviews = _review_days(days, start, asof, every)
@@ -454,10 +454,16 @@ def run_targets(data, start, asof, cash, choose, every=28, split=None):
         pf.mark(d)
         if d not in reviews:
             continue
-        picked = [t for t in choose(d) if data.close(t, d)]
-        picks_log.append([d, list(picked)])
+        picked = choose(d)
+        if isinstance(picked, dict):
+            w = {t: x for t, x in picked.items() if x > 0 and data.close(t, d)}
+        else:
+            picked = [t for t in picked if data.close(t, d)]
+            w = {t: picked.count(t) for t in dict.fromkeys(picked)}
+        picks_log.append([d, sorted(w)])
         total = pf.value(d) * 0.995
-        share = {t: total * picked.count(t) / len(picked) for t in dict.fromkeys(picked)} if picked else {}
+        tw = sum(w.values())
+        share = {t: total * x / tw for t, x in w.items()} if tw else {}
         target = list(share)
         pending = []
         for t, p in pf.pos.items():
@@ -509,22 +515,41 @@ def run_momentum(data, uni, start, asof, cash, **opts):
     return run_targets(data, start, asof, cash, choose, o["every"])
 
 
-DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY"}  # best 1 fund: won the walk-forward
+DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY",  # best 1 fund: won the walk-forward
+                "pool": "all", "vol_target": None, "trend": False, "core": None, "core_weight": 0.5}
 DUAL_POOL = ("us_broad", "us_sector", "us_factor", "world", "commodities")
+DUAL_POOLS = {"all": DUAL_POOL, "growth": ("us_broad", "us_sector", "us_factor")}
 
 
 def run_dual(data, start, asof, cash, **opts):
     """Dual momentum on index funds: each month hold the k funds with the best 12-month return
     (relative momentum), but only those beating short bonds (SHY, absolute momentum); the
-    rest goes to IEF. A fund counts only once it has traded long enough to have the history."""
+    rest goes to IEF. A fund counts only once it has traded long enough to have the history.
+
+    Safety options: pool "growth" (US broad, sector and factor funds only); trend (a fund
+    must also be above its 200-day average); vol_target (hold target/volatility of a fund,
+    at most all of it, the rest in IEF: less in wild markets); core ("QQQ"): that fund takes
+    core_weight of the money, dual momentum the rest, rebalanced together every month."""
     o = dict(DUAL_DEFAULT, **opts)
-    pool = sorted({x for g in DUAL_POOL for x in univ.ETFS[g] if not x.endswith(".TO")})
+    pool = sorted({x for g in DUAL_POOLS[o["pool"]] for x in univ.ETFS[g] if not x.endswith(".TO")})
+    has_safe = o["safe"] in data.charts
 
     def choose(d):
         hurdle = (data.quick(o["cash_like"], d, 21 * o["months"]) or {}).get("ret", 0.0)
-        rows = [(q["ret"], f) for f in pool for q in [data.quick(f, d, 21 * o["months"])] if q]
-        top = [f for r, f in sorted(rows, reverse=True)[:o["k"]] if r > hurdle]
-        return top + [o["safe"]] * (o["k"] - len(top)) if o["safe"] in data.charts else top
+        rows = [(q["ret"], f, q) for f in pool for q in [data.quick(f, d, 21 * o["months"])] if q]
+        top = [(f, q) for r, f, q in sorted(rows, key=lambda x: -x[0])[:o["k"]]
+               if r > hurdle and (q["above200"] or not o["trend"])]
+        sat = 1.0 - (o["core_weight"] if o["core"] else 0.0)
+        w = {}
+        for f, q in top:
+            scale = min(1.0, o["vol_target"] / max(q["vol"], 1.0)) if o["vol_target"] else 1.0
+            w[f] = w.get(f, 0.0) + sat / o["k"] * scale
+        if o["core"] and o["core"] in data.charts:
+            w[o["core"]] = w.get(o["core"], 0.0) + o["core_weight"]
+        rest = 1.0 - sum(w.values())
+        if rest > 1e-6 and has_safe:
+            w[o["safe"]] = w.get(o["safe"], 0.0) + rest
+        return w
     return run_targets(data, start, asof, cash, choose, 28)
 
 
@@ -1138,9 +1163,23 @@ SIGNAL_VARIANTS = [
 ]
 DUAL_VARIANTS = [
     ("Dual momentum: best 1 fund (default)", {}),
+    ("Dual momentum: best 2 funds", {"k": 2}),
+    ("Dual momentum: growth funds only", {"pool": "growth"}),
+    ("Dual momentum: volatility target 15%", {"vol_target": 15}),
+    ("Dual momentum: volatility target 20%", {"vol_target": 20}),
+    ("Dual momentum: fund above its 200-day only", {"trend": True}),
+    ("Dual momentum: best 2, growth funds, volatility target 20%", {"k": 2, "pool": "growth", "vol_target": 20}),
     ("Dual momentum: best 3 funds", {"k": 3}),
     ("Dual momentum: best 5 funds", {"k": 5}),
     ("Dual momentum: 6-month lookback", {"months": 6}),
+]
+CORE_VARIANTS = [
+    ("Core: half Nasdaq 100, half dual momentum, rebalanced monthly", {"core": "QQQ", "core_weight": 0.5}),
+    ("Core: 70% Nasdaq 100, 30% dual momentum", {"core": "QQQ", "core_weight": 0.7}),
+    ("Core: half Nasdaq 100, half dual momentum (volatility target 15%)", {"core": "QQQ", "core_weight": 0.5,
+                                                                         "vol_target": 15}),
+    ("Core: half Nasdaq 100, half dual momentum (best 2, growth funds)", {"core": "QQQ", "core_weight": 0.5, "k": 2,
+                                                                        "pool": "growth"}),
 ]
 PELOSI_VARIANTS = [("Pelosi: mirror buys and sells", "mirror"), ("Pelosi: keep every buy", "hold")]
 CRYPTO_VARIANTS = [
@@ -1177,6 +1216,9 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
             add("momentum", name, over, lambda st, o=over: run_momentum(data, ctx["uni"], st, asof, cash, **o))
         for name, over in DUAL_VARIANTS:
             add("dual momentum", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
+        if "QQQ" in data.charts:
+            for name, over in CORE_VARIANTS:
+                add("core + dual", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
     sig = ctx.get("signals")
     if ctx.get("uni") is not None and sig:
         for fam, name, over in SIGNAL_VARIANTS:

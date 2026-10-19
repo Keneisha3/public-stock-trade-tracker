@@ -115,21 +115,31 @@ def scenarios(train, last, win):
         for sc in r.get("scenarios", []):
             res = (sc.get("results") or {}).get(w)
             if res is not None and spy is not None:
-                rows.setdefault((sc["strategy"], sc["name"]), {}).setdefault(slot, []).append(res["return_pct"] - spy)
+                g = rows.setdefault((sc["strategy"], sc["name"]), {})
+                g.setdefault(slot, []).append(res["return_pct"] - spy)
+                dd = (sc.get("risk") or {}).get("max_dd_pct")
+                if slot == "train" and dd is not None:
+                    g.setdefault("dd", []).append(dd)
     for r in train:
         gaps(r, win, "train")
     if "12 months" in last["results"]:
         gaps(last, "12 months", "test")
-    L = ["", "## Settings: chosen on the training periods, checked on the held-out last 12 months", "",
-         "Average gap to the S&P 500. Pick on the training column only; the test column is the check.", "",
-         "| agent | setting | training (%s) | test: last 12 months |" % win, "| --- | --- | ---: | ---: |"]
 
     def avg(xs):
         return sum(xs) / len(xs) if xs else None
+    qdd = avg([((r["results"][win].get("Nasdaq 100 (QQQ)") or {}).get("risk") or {}).get("max_dd_pct")
+               for r in train if ((r["results"][win].get("Nasdaq 100 (QQQ)") or {}).get("risk") or {}).get("max_dd_pct")
+               is not None])
+    L = ["", "## Settings: chosen on the training periods, checked on the held-out last 12 months", "",
+         "Average gap to the S&P 500 and average worst drop. Pick on the training columns only; the test column "
+         "is the check.%s" % ("" if qdd is None else " Nasdaq 100 average worst drop in training: %.1f%%." % qdd), "",
+         "| agent | setting | training gap (%s) | training worst drop | test: last 12 months |" % win,
+         "| --- | --- | ---: | ---: | ---: |"]
     for (st, name), g in sorted(rows.items(), key=lambda kv: (kv[0][0], -(avg(kv[1].get("train", [])) or -1e9))):
-        a, b = avg(g.get("train", [])), avg(g.get("test", []))
-        L.append("| %s | %s | %s | %s |" % (st, name, "n/a" if a is None else "%+.1f pts" % a,
-                                             "n/a" if b is None else "%+.1f pts" % b))
+        a, b, dd = avg(g.get("train", [])), avg(g.get("test", [])), avg(g.get("dd", []))
+        L.append("| %s | %s | %s | %s | %s |" % (st, name, "n/a" if a is None else "%+.1f pts" % a,
+                                                  "n/a" if dd is None else "%.1f%%" % dd,
+                                                  "n/a" if b is None else "%+.1f pts" % b))
     return L
 
 
