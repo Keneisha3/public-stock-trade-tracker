@@ -134,8 +134,8 @@ find out with evidence instead of with savings.
 
 ## Replay: what would $100 have done?
 
-`python3 trade.py replay` gives every strategy $100 CAD 1 week, 2 weeks, 1
-month and 6 months before the latest Friday close, and compares them with
+`python3 trade.py replay` gives every strategy $100 CAD 12, 6, 3 and 1 months,
+2 weeks and 1 week before the latest Friday close (`--windows` to change them), and compares them with
 holding the S&P 500, the TSX 60, Bitcoin or cash. It is strictly point in time:
 each decision sees only what was known at that day's close and fills at the
 next open. It counts FX fees, slippage, dividends and US withholding. A
@@ -152,7 +152,23 @@ On top of the replay:
 - **Monte Carlo.** 5,000 block-bootstrap runs of each strategy's own daily
   returns give the bad, median and good case for the next 6 months, the
   chance of a profit, and the chance of beating the S&P 500.
+- **Your own portfolio.** With your holdings imported (or `--holdings ACCOUNT=FILE`),
+  each account gets two extra rows: your current mix held as is, and the same mix
+  run by that account's strategy rules. Holdings stay in `trader/` on your
+  computer; the GitHub workflow never sees them.
+- **Rolling windows.** Twelve 3-month windows, one starting each month, show
+  how often each strategy beat the S&P 500. That is the evidence that matters.
+- **Self-checks.** Every run checks its own numbers: prices are fresh, every
+  window is complete, values are sane, curves line up, and the S&P 500 row
+  matches the raw price change. `--strict` (used by the workflow) fails the
+  run if any check fails.
 - **Risk stats.** Volatility, Sharpe ratio, max drawdown and share of up days.
+- **VIX agent and VIX analysis.** A rule-based agent holds the S&P 500 while
+  the VIX (the market's fear gauge) is calm and steps aside to cash when it
+  spikes (tested at 20, 25, 30 and "above its 50-day average"). Every strategy
+  is also broken down by VIX regime (calm, normal, nervous, fear) and by how
+  it moves with the VIX. The daily briefing and the dashboard show today's
+  VIX and what the agent would do.
 
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the

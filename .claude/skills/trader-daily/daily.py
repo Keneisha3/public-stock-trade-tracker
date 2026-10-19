@@ -91,6 +91,12 @@ def run(base="trader", skip=(), offline=None, today=None):
                 "%d symbols%s" % (len(res["symbols"]), ("; " + "; ".join(res["errors"][:3])) if res["errors"] else ""))
         else:
             did("market", True, "no holdings yet")
+    if "market" not in skip:
+        try:  # the VIX agent's read: fear gauge level, regime, and what it would do today
+            import vix
+            brief["vix"] = vix.status(acc.mk.get_chart("^VIX", offline=offline, range_="6mo")["bars"])
+        except acc.mk.MarketError as e:
+            did("vix", False, str(e)) if not offline else None
     market = acc.read_json(paths.market, {"symbols": {}, "fx": {}})
     review = acc.review_all(cfg, paths, market)
     if "review" not in skip:
@@ -158,6 +164,12 @@ def render(b):
         if p.get("mix"):
             L.append("Mix: " + ", ".join("%s %.0f%%%s" % (m["label"], m["pct"], (" of %.0f%% target" % m["target_pct"])
                                                          if m["target_pct"] is not None else "") for m in p["mix"]))
+        L.append("")
+    v = b.get("vix")
+    if v:
+        L.append("**VIX %.1f** (%s, %s today; 50-day average %.1f). The VIX agent says: %s (%s)." % (
+            v["level"], v["regime"], ("%+.1f%%" % v["day_change_pct"]) if v.get("day_change_pct") is not None else "n/a",
+            v["avg_50d"], v["agent"], v["reason"]))
         L.append("")
     if p.get("todo"):
         L.append("## To do")
