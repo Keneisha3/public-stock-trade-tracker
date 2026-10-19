@@ -137,9 +137,12 @@ find out with evidence instead of with savings.
 
 `python3 trade.py replay` gives every strategy $100 CAD 12, 6, 3 and 1 months,
 2 weeks and 1 week before the latest Friday close (`--windows` to change them), and compares them with
-holding the S&P 500, the TSX 60, Bitcoin or cash. It is strictly point in time:
+holding the S&P 500, the Nasdaq 100, the TSX 60, Bitcoin or cash. It is strictly point in time:
 each decision sees only what was known at that day's close and fills at the
-next open. It counts FX fees, slippage, dividends and US withholding. A
+next open. US stocks trade in US dollars and Canadian stocks in Canadian
+dollars, as in the real accounts, so nothing is converted per trade; results
+are shown in CAD at each day's rate. It counts slippage, dividends and US
+withholding. A
 separate **Pelosi copycat** row copies Nancy Pelosi's disclosed trades from
 the day each filing was posted, not the day she traded. A test wrecks every
 price after the as-of date and checks that no result moves.
@@ -164,9 +167,10 @@ On top of the replay:
   matches the raw price change. `--strict` (used by the workflow) fails the
   run if any check fails.
 - **Risk stats.** Volatility, Sharpe ratio, max drawdown and share of up days.
-- **VIX agent and VIX analysis.** A rule-based agent holds the S&P 500 while
-  the VIX (the market's fear gauge) is calm and steps aside to cash when it
-  spikes (tested at 20, 25, 30 and "above its 50-day average"). Every strategy
+- **VIX agent and VIX analysis.** A rule-based agent holds the Nasdaq 100
+  while the VIX (the market's fear gauge) is at or under 30 and steps aside to
+  US-dollar cash above it (also tested: the S&P 500, thresholds 20 and 25,
+  "above its 50-day average", and the 3-month VIX term structure). Every strategy
   is also broken down by VIX regime (calm, normal, nervous, fear) and by how
   it moves with the VIX. The daily briefing and the dashboard show today's
   VIX and what the agent would do.
