@@ -657,6 +657,52 @@ class Statistics(unittest.TestCase):
         self.assertEqual(replay.parse_rolling("365,91,28"), {"horizon_days": 365, "step_days": 91, "count": 28})
 
 
+class LearnedScore(unittest.TestCase):
+    def world(self, folder, crash_after=None):
+        off = os.path.join(folder, "off")
+        names = ["S%02d" % i for i in range(14)]
+        for i, sym in enumerate(names):
+            doc = _synth.chart(sym, p0=30 + i, growth=-0.4 + 0.08 * i, wiggle=0.012, n=700)
+            if crash_after:
+                r = doc["chart"]["result"][0]
+                q = r["indicators"]["quote"][0]
+                for j, ts in enumerate(r["timestamp"]):
+                    if _synth.datetime.datetime.utcfromtimestamp(ts).date().isoformat() > crash_after:
+                        for k in ("open", "high", "low", "close"):
+                            q[k][j] = q[k][j] * (0.3 if i % 2 else 2.5)
+            _synth.write(off, sym, doc)
+        _synth.write(off, "SPY", _synth.chart("SPY", p0=400, growth=0.2, n=700))
+        _synth.write(off, "USDCAD=X", _synth.chart("USDCAD=X", p0=1.37, n=700, wiggle=0.002, currency="CAD"))
+        data = load_data(off)
+        uni = replay.univ.Universe({"licence": "t", "last_snapshot": data.days[-1],
+                                    "members": {n: [["2014-01-01", None]] for n in names}})
+        return data, uni
+
+    def test_math_helpers(self):
+        self.assertEqual([round(x, 6) for x in replay._solve([[2, 0], [0, 4]], [2, 8])], [1.0, 2.0])
+        z = replay._zscore([[i, 1.0] for i in range(12)])
+        self.assertAlmostEqual(sum(r[0] for r in z), 0.0, places=9)
+        self.assertIsNone(replay._zscore([[1.0]] * 5))  # too few stocks that day
+
+    def test_learns_only_from_the_past(self):
+        a, b = tempfile.mkdtemp(), tempfile.mkdtemp()
+        try:
+            data, uni = self.world(a)
+            cutoff = data.days[600]
+            m1 = replay.fit_model(data, uni, None, cutoff, first="2000-01-01")
+            data2, uni2 = self.world(b, crash_after=cutoff)  # a different future after the cutoff
+            m2 = replay.fit_model(data2, uni2, None, cutoff, first="2000-01-01")
+            r = replay.run_model(data, uni, None, data.days[520], data.days[690], 100, n=3)
+        finally:
+            shutil.rmtree(a)
+            shutil.rmtree(b)
+        self.assertGreater(m1["samples"], 100)
+        self.assertEqual(m1["coef"], m2["coef"])  # identical: nothing after the cutoff was used
+        self.assertGreater(m1["coef"][0], 0)      # steady winners keep winning: momentum gets a positive weight
+        self.assertTrue(r["models"])
+        self.assertTrue(all(len(set(p) - {"SPY"}) <= 3 for _, p in r["picks"]))
+
+
 class YourHoldingsAndRolling(unittest.TestCase):
     def test_parse_windows(self):
         self.assertEqual(replay.parse_windows("1w,3m,12m"), [("12 months", 365), ("3 months", 91), ("1 week", 7)])

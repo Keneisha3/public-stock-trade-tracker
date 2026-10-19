@@ -629,6 +629,148 @@ def blend(parts, cash):
             "holdings": held, "contrib": [], "fills": []}
 
 
+# ---------------------------------------------------------------- a learned score
+
+FEATURES = ["mom_12_1", "mom_6_1", "rev_1m", "low_vol", "above200", "insiders", "congress"]
+MODEL_DEFAULT = {"n": 20, "every": 28, "horizon": 21, "ridge": 10.0, "features": FEATURES, "core": None,
+                 "core_weight": 0.7}
+
+
+def _zscore(rows):
+    """Standardise each column across the stocks of one date, capped at +-3."""
+    import statistics
+    if len(rows) < 10:
+        return None
+    cols = list(zip(*rows))
+    out = []
+    for c in cols:
+        m, sd = statistics.mean(c), statistics.pstdev(c) or 1.0
+        out.append([max(-3.0, min(3.0, (x - m) / sd)) for x in c])
+    return [list(r) for r in zip(*out)]
+
+
+def model_features(data, uni, sig, d, names=FEATURES):
+    """{ticker: [feature values]} for S&P 500 members on `d`, from data known by its close."""
+    import math
+    ins = sig.insider_buys(d, 90) if sig and sig.insiders else {}
+    con = sig.congress_buys(d, 180) if sig and sig.congress else {}
+    out = {}
+    for sym in uni.members_on(d):
+        q12, q6 = data.quick(sym, d, 252, 21), data.quick(sym, d, 126, 21)
+        q1 = data.quick(sym, d, 21)
+        if not (q12 and q6 and q1):
+            continue
+        f = {"mom_12_1": q12["ret"], "mom_6_1": q6["ret"], "rev_1m": -q1["ret"], "low_vol": -q12["vol"],
+             "above200": 1.0 if q12["above200"] else 0.0,
+             "insiders": math.log1p((ins.get(sym) or {}).get("insiders", 0)),
+             "congress": math.log1p((con.get(sym) or {}).get("members", 0))}
+        out[sym] = [f[k] for k in names]
+    return out
+
+
+def _fwd(data, sym, d, n):
+    ds = data.dates.get(sym) or []
+    i = bisect.bisect_right(ds, d) - 1
+    if i < 0 or i + n >= len(ds):
+        return None, None
+    bars = data.charts[sym]["bars"]
+    return (bars[i + n]["c"] / bars[i]["c"] - 1) if bars[i]["c"] else None, ds[i + n]
+
+
+def _solve(a, b):
+    """Gaussian elimination for a small dense system."""
+    n = len(b)
+    m = [row[:] + [b[i]] for i, row in enumerate(a)]
+    for c in range(n):
+        p = max(range(c, n), key=lambda r: abs(m[r][c]))
+        m[c], m[p] = m[p], m[c]
+        if abs(m[c][c]) < 1e-12:
+            continue
+        for r in range(n):
+            if r != c:
+                f = m[r][c] / m[c][c]
+                m[r] = [x - f * y for x, y in zip(m[r], m[c])]
+    return [m[i][n] / m[i][i] if abs(m[i][i]) > 1e-12 else 0.0 for i in range(n)]
+
+
+def fit_model(data, uni, sig, cutoff, opts=None, first="2016-01-01"):
+    """Ridge regression of each stock's next-month return relative to the other members,
+    on standardised features, using only months whose outcome was known by `cutoff`."""
+    o = dict(MODEL_DEFAULT, **(opts or {}))
+    k = len(o["features"])
+    xtx = [[0.0] * k for _ in range(k)]
+    xty = [0.0] * k
+    n = 0
+    month = None
+    for d in data.days:
+        if d < first or d > cutoff:
+            continue
+        if d[:7] == month:
+            continue
+        month = d[:7]
+        feats = model_features(data, uni, sig, d, o["features"])
+        rows, ys = [], []
+        for sym, f in feats.items():
+            y, end = _fwd(data, sym, d, o["horizon"])
+            if y is None or end > cutoff:
+                continue
+            rows.append(f)
+            ys.append(y)
+        z = _zscore(rows)
+        if not z:
+            continue
+        mean = sum(ys) / len(ys)
+        ys = [max(-0.5, min(0.5, y - mean)) for y in ys]
+        for x, y in zip(z, ys):
+            for i in range(k):
+                xty[i] += x[i] * y
+                for j in range(k):
+                    xtx[i][j] += x[i] * x[j]
+            n += 1
+    if n < 100:
+        return None
+    for i in range(k):
+        xtx[i][i] += o["ridge"]
+    return {"coef": _solve(xtx, xty), "samples": n, "cutoff": cutoff, "features": o["features"]}
+
+
+def run_model(data, uni, sig, start, asof, cash, **opts):
+    """Hold the n S&P 500 members with the best learned score, refitting every January on
+    everything known by then (expanding window, point in time). core: a fund takes
+    core_weight of the money, the model the rest."""
+    o = dict(MODEL_DEFAULT, **opts)
+    models = {}
+
+    def model_for(d):
+        cutoff = data.trading_day_on_or_before(d[:4] + "-01-01") if d[5:] != "01-01" else d
+        if cutoff not in models:
+            key = (cutoff, tuple(o["features"]), o["horizon"], o["ridge"], id(uni), id(sig))
+            cache = data.__dict__.setdefault("_fits", {})  # many runs refit the same January
+            if key not in cache:
+                cache[key] = fit_model(data, uni, sig, cutoff, o)
+            models[cutoff] = cache[key]
+        return models[cutoff]
+
+    def choose(d):
+        m = model_for(d)
+        feats = model_features(data, uni, sig, d, o["features"])
+        if not m or len(feats) < 10:
+            return {"SPY": 1.0} if "SPY" in data.charts else {}
+        syms = list(feats)
+        z = _zscore([feats[t] for t in syms])
+        score = sorted(((sum(c * x for c, x in zip(m["coef"], zr)), t) for t, zr in zip(syms, z)), reverse=True)
+        top = [t for _, t in score[:o["n"]]]
+        sat = 1.0 - (o["core_weight"] if o["core"] else 0.0)
+        w = {t: sat / len(top) for t in top}
+        if o["core"] and o["core"] in data.charts:
+            w[o["core"]] = w.get(o["core"], 0.0) + o["core_weight"]
+        return w
+    out = run_targets(data, start, asof, cash, choose, o["every"])
+    out["models"] = {c: {"coef": dict(zip(m["features"], [round(x, 5) for x in m["coef"]])), "samples": m["samples"]}
+                     for c, m in models.items() if m}
+    return out
+
+
 def run_hold(data, weights, start, asof, cash):
     pf = Portfolio(data, cash, split=currency_split(data, weights, start), start=start)
     orders = [{"side": "buy", "ticker": s, "cad": cash * w * 0.999, "decided": start} for s, w in weights.items()
@@ -1182,6 +1324,12 @@ CORE_VARIANTS = [
     ("Core: half Nasdaq 100, half dual momentum (best 2, growth funds)", {"core": "QQQ", "core_weight": 0.5, "k": 2,
                                                                         "pool": "growth"}),
 ]
+MODEL_VARIANTS = [
+    ("Learned score: top 20 (default)", {}),
+    ("Learned score: top 40", {"n": 40}),
+    ("Learned score: price features only", {"features": ["mom_12_1", "mom_6_1", "rev_1m", "low_vol", "above200"]}),
+    ("Learned score: 70% Nasdaq 100 + 30% top 20", {"core": "QQQ"}),
+]
 PELOSI_VARIANTS = [("Pelosi: mirror buys and sells", "mirror"), ("Pelosi: keep every buy", "hold")]
 CRYPTO_VARIANTS = [
     ("Crypto team: 1-day bars (default)", {"interval_min": 1440}),
@@ -1220,6 +1368,8 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
         if "QQQ" in data.charts:
             for name, over in CORE_VARIANTS:
                 add("core + dual", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
+        for name, over in MODEL_VARIANTS:
+            add("model", name, over, lambda st, o=over: run_model(data, ctx["uni"], ctx.get("signals"), st, asof, cash, **o))
     sig = ctx.get("signals")
     if ctx.get("uni") is not None and sig:
         for fam, name, over in SIGNAL_VARIANTS:
@@ -1421,6 +1571,7 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
             row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
             if "QQQ" in data.charts:
                 row["core + dual"] = run_dual(data, start, end, cash, **CORE_DEFAULT)
+            row["model"] = run_model(data, uni, sig, start, end, cash)
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
@@ -1585,6 +1736,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
             row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
             if "QQQ" in data.charts:
                 row["core + dual"] = run_dual(data, start, asof, cash, **CORE_DEFAULT)
+            row["model"] = run_model(data, uni, sig, start, asof, cash)
         if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
@@ -1656,7 +1808,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
-         "blend", "core + dual",
+         "blend", "core + dual", "model",
          "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
@@ -1666,7 +1818,8 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)",
           "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)",
           "blend": "Blend: dual momentum + momentum + Congress (thirds)",
-          "core + dual": "Core + satellite: 70% Nasdaq 100, 30% dual momentum"}
+          "core + dual": "Core + satellite: 70% Nasdaq 100, 30% dual momentum",
+          "model": "Learned score (top 20, refit every January)"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 
