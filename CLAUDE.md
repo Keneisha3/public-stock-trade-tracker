@@ -56,6 +56,14 @@ python3 .claude/skills/trader-team/team.py check         # crypto bot team; neve
 - **Canadian context matters:** account type (TFSA vs RRSP) changes US
   dividend withholding; frequent trading in a TFSA risks business-income tax.
 
+## Plugins
+
+Recommended for contributors (installed by each person, not enabled by
+default): `agent-skills@addy-agent-skills` (review, TDD, security-auditor) and
+`ponytail@ponytail` (smallest change, stdlib first). Do not add AI gateways or
+proxies (e.g. OmniRoute) that send prompts to third parties: prompts here
+contain portfolio data.
+
 ## Code conventions
 
 - Standard library only, Python 3.9+ (`tests/test_repo.py` checks imports).

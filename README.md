@@ -73,6 +73,32 @@ session-start hook sets things up. Ask in plain words:
 | "run the crypto bot", "how did the bot team do?", "kill the bot" | `/trader-team` |
 | "place the order" (paper by default, a yes per order) | `/trader-broker` |
 
+### Recommended Claude Code plugins
+
+Two plugins fit this project. Install them yourself in Claude Code:
+
+```
+/plugin marketplace add addyosmani/agent-skills
+/plugin install agent-skills@addy-agent-skills
+/plugin marketplace add DietrichGebert/ponytail
+/plugin install ponytail@ponytail
+```
+
+- **[Agent Skills](https://github.com/addyosmani/agent-skills)** (MIT) adds spec,
+  test-first, security-hardening and code-review workflows, plus security-auditor
+  and test-engineer reviewers. They fit a project that handles money and API keys:
+  run `/agent-skills:review` before merging changes to the bots.
+- **[Ponytail](https://github.com/DietrichGebert/ponytail)** (MIT) pushes Claude
+  toward the smallest, standard-library-first change. That matches this repo's
+  "no dependencies" rule. It needs Node.js. Its task log stays on your machine
+  unless you set a webhook.
+
+Left out on purpose: **Graphify** (a code knowledge graph, which is overkill for a
+repo this size and needs about 20 Python packages) and **OmniRoute** (it routes your
+Claude traffic, including portfolio details, through hundreds of third-party
+AI providers, with traffic-interception features; not something to put near
+financial data).
+
 ## The command line
 
 ```bash
