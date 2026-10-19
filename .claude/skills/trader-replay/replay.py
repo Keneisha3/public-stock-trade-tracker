@@ -65,12 +65,17 @@ def _date(s):
     return datetime.date.fromisoformat(s)
 
 
+def _gap(a, b):
+    return (_date(b) - _date(a)).days
+
+
 # ---------------------------------------------------------------- point-in-time data
 
 class Data:
     def __init__(self, charts, cfg):
         self.charts, self.cfg = charts, cfg
         self.dates = {s: [b["d"] for b in ch["bars"]] for s, ch in charts.items()}
+        self._metrics, self._sums = {}, {}
         spy = charts.get("SPY")
         if not spy:
             raise ReplayError("no SPY prices: they set the trading calendar")
@@ -92,14 +97,53 @@ class Data:
         return self.charts[sym]["bars"][i]["c"] if i >= 0 else None
 
     def upto(self, sym, day):
-        """The chart as it looked at the close of `day`."""
+        """The chart as it looked at the close of `day` (the last 300 bars: all that metrics reads)."""
         ch = self.charts[sym]
         i = bisect.bisect_right(self.dates[sym], day)
         if not i:
             return None
-        bars = ch["bars"][:i]
+        bars = ch["bars"][max(0, i - 300):i]
         return {"symbol": sym, "name": ch.get("name", ""), "currency": ch["currency"], "price": bars[-1]["c"],
                 "time": bars[-1]["d"], "bars": bars, "dividends": [x for x in ch["dividends"] if x[0] <= day]}
+
+    def metrics(self, sym, day):
+        """mk.metrics as of the close of `day`, cached: many runs review the same days."""
+        key = (sym, day)
+        if key not in self._metrics:
+            ch = self.upto(sym, day) if sym in self.charts else None
+            self._metrics[key] = mk.metrics(ch, today=day) if ch else None
+        return self._metrics[key]
+
+    def _prefix(self, sym):
+        """Prefix sums of closes, log returns and squared log returns, for O(1) screening."""
+        if sym not in self._sums:
+            import math
+            c = [b["c"] for b in self.charts[sym]["bars"]]
+            sc, sr, sq = [0.0], [0.0, 0.0], [0.0, 0.0]
+            for x in c:
+                sc.append(sc[-1] + x)
+            for a, b in zip(c, c[1:]):
+                r = math.log(b / a) if a > 0 and b > 0 else 0.0
+                sr.append(sr[-1] + r)
+                sq.append(sq[-1] + r * r)
+            self._sums[sym] = (c, sc, sr, sq)
+        return self._sums[sym]
+
+    def quick(self, sym, day, lookback):
+        """Cheap point-in-time stats for screening: {ret, above200, vol} or None (too little history)."""
+        if sym not in self.charts:
+            return None
+        i = bisect.bisect_right(self.dates[sym], day) - 1
+        if i < max(lookback, 200) or (self.dates[sym][i] < day and _gap(self.dates[sym][i], day) > 7):
+            return None  # not enough history, or no longer trading
+        c, sc, sr, sq = self._prefix(sym)
+        if not c[i - lookback]:
+            return None
+        n = 126
+        mean = (sr[i + 1] - sr[i + 1 - n]) / n
+        var = max(0.0, (sq[i + 1] - sq[i + 1 - n]) / n - mean * mean)
+        return {"ret": 100.0 * (c[i] / c[i - lookback] - 1), "above200": c[i] > (sc[i + 1] - sc[i - 199]) / 200,
+                "vol": 100.0 * (var * 252) ** 0.5}
 
     def fx(self, day):
         return self.close("USDCAD=X", day) or 1.35
@@ -318,7 +362,8 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
         if d not in reviews:
             continue
         syms = set(watch) | set(pf.pos)
-        snap = {s: mk.metrics(data.upto(s, d), today=d) for s in syms if s in data.charts and data.upto(s, d)}
+        snap = {s: data.metrics(s, d) for s in syms if s in data.charts}
+        snap = {s: m for s, m in snap.items() if m}
         r = acc.review_account(acct, pf.doc(d), {"symbols": snap, "fx": {"USDCAD": data.fx(d)}}, base="CAD")
         pending = [{"side": o["side"], "ticker": o["ticker"], "shares": o["shares"], "decided": d}
                    for o in r["proposals"]]
