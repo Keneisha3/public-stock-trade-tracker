@@ -118,6 +118,15 @@ def fetch_coinbase(coin, start, end, interval_min=15, http=http_json, pause=0.15
     return [bars[k] for k in sorted(bars)]
 
 
+def _timeframe(interval_min):
+    """Alpaca's names: 15Min, 1Hour, 6Hour, 1Day."""
+    if interval_min % 1440 == 0:
+        return "%dDay" % (interval_min // 1440)
+    if interval_min % 60 == 0:
+        return "%dHour" % (interval_min // 60)
+    return "%dMin" % interval_min
+
+
 def fetch_alpaca(coins, start, end, interval_min=15, http=http_json, keys=None):
     headers = {}
     if keys and keys.get("PAPER_API_KEY") and keys.get("PAPER_API_SECRET"):
@@ -125,7 +134,7 @@ def fetch_alpaca(coins, start, end, interval_min=15, http=http_json, keys=None):
     out = {c: [] for c in coins}
     token = None
     while True:
-        q = {"symbols": ",".join("%s/USD" % c for c in coins), "timeframe": "%dMin" % interval_min,
+        q = {"symbols": ",".join("%s/USD" % c for c in coins), "timeframe": _timeframe(interval_min),
              "start": _iso(start), "end": _iso(end), "limit": 10000, "sort": "asc"}
         if token:
             q["page_token"] = token

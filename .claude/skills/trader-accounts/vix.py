@@ -7,6 +7,9 @@ like the crypto team's roles, and only ever looks at closes up to today:
   level   risk-on while the VIX closes at or under a threshold (default 25)
   trend   risk-on while the VIX closes at or under its own N-day average (default 50):
           fear is not rising
+  term    risk-on while the VIX closes at or under the 3-month VIX (^VIX3M): the
+          normal "contango" shape. When short-term fear tops longer-term fear
+          ("backwardation") the market is in real stress.
 
 Risk-on means hold the S&P 500; risk-off means step aside to cash. The
 decision is made at the close and acted on at the next open.
@@ -26,12 +29,19 @@ def regime(level):
     return "fear"
 
 
-def decide(closes, rule=None):
-    """closes: VIX closes up to and including today, oldest first. -> (risk_on, reason)."""
+def decide(closes, rule=None, closes3m=None):
+    """closes: VIX closes up to and including today, oldest first (closes3m: the same for
+    ^VIX3M, for the term rule). -> (risk_on, reason)."""
     rule = dict(DEFAULT_RULE, **(rule or {}))
     if not closes:
         return True, "no VIX data: stay invested"
     now = closes[-1]
+    if rule["mode"] == "term":
+        if not closes3m:
+            return True, "no 3-month VIX data: stay invested"
+        on = now <= closes3m[-1]
+        return on, "VIX %.1f is %s the 3-month VIX %.1f (%s)" % (
+            now, "at or under" if on else "above", closes3m[-1], "calm shape" if on else "stress: backwardation")
     if rule["mode"] == "trend":
         n = int(rule.get("days", 50))
         if len(closes) < n:

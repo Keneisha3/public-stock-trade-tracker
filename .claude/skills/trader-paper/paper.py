@@ -13,6 +13,9 @@ days, in a bear regime they fade. So:
   stop    entry - 2 ATR (a gap below the stop fills at the open)
   exit    after 3 trading days at the close, or at the stop
   costs   5 bps a side (commission + slippage), charged on every fill
+  idle    with "idle": "SPY", cash no trade is using sits in SPY (bought and
+          sold at the open as trades need it), so the bot is the index plus
+          its trades instead of mostly cash
 
     python3 paper.py backtest                   # the rule over the last 5 years vs buy-and-hold
     python3 paper.py run                        # live paper: catch up to the latest close, trade, save
@@ -133,9 +136,20 @@ def _cost(value, p):
     return abs(value) * p["cost_bps"] / 10000.0
 
 
-def step(led, day, bars_by, regime, p=PARAMS):
+def _idle_sell(led, value, ib, p):
+    """Sell SPY (or whatever `idle` is) worth `value` at the open to fund a trade."""
+    q = min(led.get("idle_shares", 0.0), value / (ib["o"] * (1 - p["cost_bps"] / 10000.0)))
+    if q > 0:
+        led["idle_shares"] -= q
+        led["cash"] += q * ib["o"] - _cost(q * ib["o"], p)
+
+
+def step(led, day, bars_by, regime, p=PARAMS, idle_bars=None):
     """One trading day: fill yesterday's signals at the open, run stops and
-    exits, mark to market at the close, then queue today's signals."""
+    exits, mark to market at the close, then queue today's signals.
+    idle_bars ({day: bar} of p["idle"]): park unused cash there at the open."""
+    ib = (idle_bars or {}).get(day) if p.get("idle") else None
+    led.setdefault("idle_shares", 0.0)
     # 1. entries at the open
     still = []
     for o in led["pending"]:
@@ -148,7 +162,7 @@ def step(led, day, bars_by, regime, p=PARAMS):
         if o["ticker"] in led["positions"] or len(led["positions"]) >= p["max_positions"]:
             continue
         price = b["o"]
-        equity = _equity(led, bars_by, day, at_open=True)
+        equity = _equity(led, bars_by, day, at_open=True, idle_bar=ib)
         stop = price - p["stop_atr"] * o["atr"]
         risk_per_share = price - stop
         if risk_per_share <= 0:
@@ -157,12 +171,18 @@ def step(led, day, bars_by, regime, p=PARAMS):
         shares = min(shares, equity * p["max_position_pct"] / 100.0 / price)
         shares = round(shares, 6) if p.get("fractional") else math.floor(shares)
         cost = shares * price
+        if ib and cost + _cost(cost, p) > led["cash"]:
+            _idle_sell(led, cost + _cost(cost, p) - led["cash"] + 0.01, ib, p)
         if shares <= 0 or cost < p.get("min_order", 1) or cost + _cost(cost, p) > led["cash"]:
             continue
         led["cash"] -= cost + _cost(cost, p)
         led["positions"][o["ticker"]] = {"shares": shares, "entry": round(price, 4), "entry_day": day,
                                          "stop": round(stop, 4), "days": 0, "signal_atr": o["move_atr"]}
     led["pending"] = still
+    if ib and led["cash"] > 1.0:  # whatever no trade needs goes into the index at the open
+        q = (led["cash"] - 0.5) / (ib["o"] * (1 + p["cost_bps"] / 10000.0))
+        led["cash"] -= q * ib["o"] + _cost(q * ib["o"], p)
+        led["idle_shares"] += q
     # 2. stops and time exits
     for s in list(led["positions"]):
         pos = led["positions"][s]
@@ -186,7 +206,9 @@ def step(led, day, bars_by, regime, p=PARAMS):
                                   "why": why})
             del led["positions"][s]
     # 3. mark to market
-    eq = _equity(led, bars_by, day)
+    if ib:
+        led["idle_last"] = ib["c"]
+    eq = _equity(led, bars_by, day, idle_bar=ib)
     led["equity"].append([day, round(eq, 2)])
     # 4. today's signals -> tomorrow's open
     held = set(led["positions"])
@@ -203,8 +225,11 @@ def step(led, day, bars_by, regime, p=PARAMS):
     return led
 
 
-def _equity(led, bars_by, day, at_open=False):
+def _equity(led, bars_by, day, at_open=False, idle_bar=None):
     eq = led["cash"]
+    if led.get("idle_shares"):
+        eq += led["idle_shares"] * ((idle_bar["o"] if at_open else idle_bar["c"]) if idle_bar
+                                    else led.get("idle_last", 0.0))
     for s, pos in led["positions"].items():
         b = bars_by.get(s, {}).get(day)
         px = (b["o"] if at_open else b["c"]) if b else pos.get("last", pos["entry"])
@@ -255,13 +280,22 @@ def benchmark(days, bars_by, start_cash):
     return curve
 
 
-def backtest(charts, p=PARAMS, cash=None):
+def _idle_bars(p, offline=None, range_="5y", charts=None):
+    """{day: bar} for the index idle cash sits in, or None."""
+    sym = p.get("idle")
+    if not sym:
+        return None
+    ch = (charts or {}).get(sym) or mk.get_chart(sym, offline=offline, range_=range_)
+    return {b["d"]: b for b in ch["bars"]}
+
+
+def backtest(charts, p=PARAMS, cash=None, idle_bars=None):
     days, bars_by, regime = prepare(charts, p)
     if len(days) <= WARMUP + 20:
         raise PaperError("not enough history: %d days" % len(days))
     led = new_ledger(cash, p)
     for d in days[WARMUP:]:
-        step(led, d, bars_by, regime, p)
+        step(led, d, bars_by, regime, p, idle_bars)
     bench = benchmark(days[WARMUP:], bars_by, led["start_cash"])
     years = {}
     for d, v in led["equity"]:
@@ -332,6 +366,11 @@ def run_live(ledger_path, symbols, offline=None, today=None):
     p.update(led.get("params") or {})
     charts, errors = load_charts(symbols, offline=offline, range_="1y")
     days, bars_by, regime = prepare(charts, p)
+    try:
+        idle = _idle_bars(p, offline, "1y")
+    except mk.MarketError as e:
+        idle = None
+        errors.append("idle cash stays cash today: %s" % e)
     if today:
         days = [d for d in days if d <= today]
     if not led.get("created"):
@@ -339,7 +378,7 @@ def run_live(ledger_path, symbols, offline=None, today=None):
         led["last_day"] = days[-2] if len(days) > 1 else None  # start trading from the latest close
     todo = [d for i, d in enumerate(days) if i >= WARMUP and (led["last_day"] is None or d > led["last_day"])]
     for d in todo:
-        step(led, d, bars_by, regime, p)
+        step(led, d, bars_by, regime, p, idle)
     led["regime"] = regime.get(days[-1], "unknown")
     led["today_signals"] = signals_on(days[-1], bars_by, regime, p)
     led["benchmark"] = benchmark([d for d in days if d >= led["created"]], bars_by, led["start_cash"])
@@ -390,7 +429,7 @@ def main(argv=None):
             return 0
         if a.cmd == "backtest":
             charts, errors = load_charts(syms, offline=a.offline)
-            res = backtest(charts)
+            res = backtest(charts, idle_bars=_idle_bars(PARAMS, a.offline))
             res["errors"] = errors
             write(os.path.join(a.dir, "paper", "backtest.json"), res)
             if a.json:

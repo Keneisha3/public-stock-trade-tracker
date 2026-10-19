@@ -51,6 +51,7 @@ import vix  # noqa: E402
 
 WINDOWS = [("12 months", 365), ("6 months", 182), ("3 months", 91), ("1 month", 30), ("2 weeks", 14), ("1 week", 7)]
 CRYPTO_MAX_DAYS = 182  # 15-minute crypto history past 6 months is slow to fetch and replay
+CRYPTO_LONG_DAYS = 365  # hourly and slower bars are cheap: a full year
 ROLLING = {"horizon_days": 91, "step_days": 30, "count": 12}  # 3-month windows, a new one each month
 COSTS = {"fx_fee_pct": 1.5, "slippage_pct": 0.05, "us_withholding_pct": 15.0}
 PELOSI_LOOKBACK_DAYS = 120  # filings already public at the start shape the starting basket
@@ -339,24 +340,32 @@ def run_hold(data, weights, start, asof, cash):
     return pf.result(asof, cash)
 
 
-VIX_SYM = "^VIX"
+VIX_SYM, VIX3M_SYM = "^VIX", "^VIX3M"
 VIX_RULES = [
     ("VIX agent: S&P 500 unless VIX > 25", {"mode": "level", "threshold": 25}),
     ("VIX agent: S&P 500 unless VIX > 20", {"mode": "level", "threshold": 20}),
     ("VIX agent: S&P 500 unless VIX > 30", {"mode": "level", "threshold": 30}),
     ("VIX agent: S&P 500 while VIX is under its 50-day average", {"mode": "trend", "days": 50}),
+    ("VIX agent: S&P 500 unless VIX > 3-month VIX (stress)", {"mode": "term"}),
+    ("VIX agent: Nasdaq 100 unless VIX > 3-month VIX", {"mode": "term", "asset": "QQQ"}),
+    ("VIX agent: Nasdaq 100 unless VIX > 30", {"mode": "level", "threshold": 30, "asset": "QQQ"}),
 ]
 
 
 def run_vix_agent(data, start, asof, cash, rule=None):
     """Hold the S&P 500 while the VIX agent says risk-on, cash while it says risk-off.
     Decided at each close from VIX closes up to that day; acted on at the next open.
-    The money stays in US dollars: out of SPY means US-dollar cash, no conversion."""
-    fund = "SPY"
+    The money stays in US dollars: out of the fund means US-dollar cash, no conversion.
+    rule["asset"] picks the fund (SPY by default, QQQ for the Nasdaq 100)."""
+    fund = (rule or {}).get("asset") or "SPY"
+    if fund not in data.charts:
+        fund = "SPY"
+    rule = {k: v for k, v in (rule or {}).items() if k != "asset"}
     pf, pending, invested = Portfolio(data, cash, split={"USD": 1.0}, start=start), [], None
     days = [d for d in data.days if start <= d <= asof]
     on_days = switches = 0
     vix_dates = data.dates[VIX_SYM]
+    v3_dates = data.dates.get(VIX3M_SYM) or []
     for d in days:
         pf.pay_dividends(d)
         pending = pf.fill(pending, d)
@@ -364,7 +373,8 @@ def run_vix_agent(data, start, asof, cash, rule=None):
         if d == asof:
             break
         closes = [b["c"] for b in data.charts[VIX_SYM]["bars"][:bisect.bisect_right(vix_dates, d)]]
-        on, _ = vix.decide(closes, rule)
+        c3 = [b["c"] for b in data.charts[VIX3M_SYM]["bars"][:bisect.bisect_right(v3_dates, d)]] if v3_dates else None
+        on, _ = vix.decide(closes, rule, c3)
         on_days += 1 if on else 0
         if on and invested is not True:
             pending = [{"side": "buy", "ticker": fund, "cad": pf.value(d) * 0.995, "decided": d}]
@@ -410,17 +420,20 @@ def vix_regimes(curve, data):
     return out
 
 
-def run_stockbot(data, universe, start, asof, cash):
-    """The ATR bot with US-dollar cash: $cash CAD worth of USD at the start, valued in CAD."""
+def run_stockbot(data, universe, start, asof, cash, overrides=None):
+    """The ATR bot with US-dollar cash: $cash CAD worth of USD at the start, valued in CAD.
+    overrides: paper.PARAMS changes, e.g. {"idle": None} for the bot without its index sleeve."""
     fx0 = data.fx(start)
     usd0 = cash / fx0
     p = dict(paper.PARAMS, fractional=True, min_order=1)
+    p.update(overrides or {})
+    idle_bars = {b["d"]: b for b in data.charts[p["idle"]]["bars"]} if p.get("idle") in data.charts else None
     charts = {s: data.charts[s] for s in universe if s in data.charts}
     days, bars_by, regime = paper.prepare(charts, p)
     led, idle = paper.new_ledger(usd0, p), []
     for d in days:
         if start <= d <= asof:
-            paper.step(led, d, bars_by, regime, p)
+            paper.step(led, d, bars_by, regime, p, idle_bars)
             e = led["equity"][-1][1]
             idle.append(led["cash"] / e if e else 1.0)
     eq = led["equity"][-1][1] if led["equity"] else usd0
@@ -434,7 +447,8 @@ def run_stockbot(data, universe, start, asof, cash):
     return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2),
             "trades": len(led["trades"]) + len(led["positions"]),
             "fees": round(fees_usd * data.fx(asof), 2), "fx_fees": 0.0, "dividends": 0.0,
-            "holdings": sorted(led["positions"]), "cash_left": None,
+            "holdings": sorted(led["positions"]) + ([p["idle"]] if led.get("idle_shares") else []),
+            "cash_left": None, "idle": p.get("idle"),
             "cash_drag_pct": round(100.0 * sum(idle) / len(idle), 1) if idle else None,
             "contrib": sorted(({"ticker": k, "pnl": round(x, 2), "held": k in led["positions"]} for k, x in by.items()),
                               key=lambda c: -c["pnl"]),
@@ -455,8 +469,9 @@ def market_close_utc(day):
         return int(datetime.datetime.combine(_date(day), datetime.time(20, 0), datetime.timezone.utc).timestamp())
 
 
-def run_crypto(candles, data, start, asof, cash, workdir):
+def run_crypto(candles, data, start, asof, cash, workdir, overrides=None):
     cfg = dict(team.DEFAULTS)
+    cfg.update(overrides or {})
     usd0 = cash / data.fx(start)  # US-dollar cash: crypto trades in USD, nothing is converted
     cfg.update(start_cash=usd0, broker="sim")
     t0, t1, iv = market_close_utc(start), market_close_utc(asof), cfg["interval_min"] * 60
@@ -518,6 +533,22 @@ def _btc_hold(candles, keys, t0, t1, iv, usd0, data, asof, cash):
             "curve": [], "trades": 1}
 
 
+def load_candles(cfg, first, asof, offline=None):
+    """({coin: bars}, errors) at cfg["interval_min"], from `first` minus the lookback to the as-of close.
+    Offline: candles-<COIN>.json (15-minute) or candles-<COIN>-<minutes>.json."""
+    iv = cfg["interval_min"]
+    t0 = market_close_utc(first) - (cfg["lookback_bars"] + 4) * iv * 60
+    if offline:
+        out = {}
+        for c in cfg["coins"]:
+            p = os.path.join(offline, "candles-%s.json" % c if iv == 15 else "candles-%s-%d.json" % (c, iv))
+            if os.path.exists(p):
+                with open(p) as fh:
+                    out[c] = json.load(fh)
+        return out, []
+    return team.candles.fetch(cfg["coins"], cfg["data"], t0, market_close_utc(asof) + iv * 60, iv)
+
+
 # ---------------------------------------------------------------- Pelosi
 
 def pelosi_filings(years, offline=None, pdf_dir="trader/state/ptr-pdfs"):
@@ -566,8 +597,10 @@ def pelosi_signals(rows):
     return buys, sells
 
 
-def run_pelosi(data, filings, start, asof, cash):
-    """Equal weight in what she disclosed buying; act only after each filing was posted."""
+def run_pelosi(data, filings, start, asof, cash, mode="mirror"):
+    """Equal weight in what she disclosed buying; act only after each filing was posted.
+    mode "mirror" also sells what she disclosed selling; "hold" keeps every buy (her sales
+    are often old winners trimmed for taxes, and the copy learns of them weeks late)."""
     basket, pf, pending = [], Portfolio(data, cash, split={"USD": 1.0}, start=start), []
     lookback = (_date(start) - datetime.timedelta(days=PELOSI_LOOKBACK_DAYS)).isoformat()
     used = []
@@ -578,7 +611,7 @@ def run_pelosi(data, filings, start, asof, cash):
             if t not in basket and t in data.charts:
                 basket.append(t)
         for t in s:
-            if t in basket:
+            if t in basket and mode == "mirror":
                 basket.remove(t)
 
     for filed, rows in filings:  # what was already public at the start
@@ -619,7 +652,7 @@ def run_pelosi(data, filings, start, asof, cash):
 
 # ---------------------------------------------------------------- what went well, what did not
 
-BENCH = ("S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash")
+BENCH = ("S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash")
 
 
 def factors(data, start, asof, filings, candles_btc=None):
@@ -653,7 +686,11 @@ def insights(row, fac, cash):
             continue
         good, bad = [], []
         ref, ref_name = (tsx, "the TSX 60") if k == "dividend" else (spy, "the S&P 500")
-        if ref is not None:
+        qqq = (row.get("Nasdaq 100 (QQQ)") or {}).get("return_pct")
+        refs = [(ref, ref_name)] + ([(qqq, "the Nasdaq 100")] if k == "growth" and qqq is not None else [])
+        for ref, ref_name in refs:
+            if ref is None:
+                continue
             d = r["return_pct"] - ref
             (good if d >= 0 else bad).append("%s %s by %.1f points (%+.1f%% vs %+.1f%%)" % (
                 "beat" if d >= 0 else "trailed", ref_name, abs(d), r["return_pct"], ref))
@@ -730,11 +767,17 @@ SCENARIOS = [
     ("growth", "Rebalance monthly", {"review_every_days": 28}),
     ("growth", "Aggressive: 3-month momentum, 30% cap, no cash", {"momentum_months": 3, "max_position_pct": 30,
                                                                   "min_positions": 4, "cash_target_pct": 0}),
+    ("growth", "Monthly, 10% cap, 10+ names", {"review_every_days": 28, "max_position_pct": 10, "min_positions": 10}),
+    ("growth", "6-month momentum, monthly", {"momentum_months": 6, "review_every_days": 28}),
+    ("growth", "Rebalance quarterly", {"review_every_days": 91}),
     ("medium", "Default (6-month trend, 15% cap)", {}),
     ("medium", "Long trend: 12 months", {"momentum_months": 12}),
     ("medium", "Rebalance monthly", {"review_every_days": 28}),
+    ("medium", "Rebalance quarterly", {"review_every_days": 91}),
+    ("medium", "Monthly, 10% cap, 10+ names", {"review_every_days": 28, "max_position_pct": 10, "min_positions": 10}),
     ("dividend", "Default (2% yield floor, 12% cap)", {}),
     ("dividend", "Higher yield floor: 3.5%", {"min_yield_pct": 3.5}),
+    ("dividend", "Rebalance monthly", {"review_every_days": 28}),
     ("dividend", "Rebalance quarterly", {"review_every_days": 91}),
 ]
 
@@ -768,6 +811,61 @@ def run_scenarios(data, watch, starts, asof, cash, account_type, scenarios):
             if label == starts[0][0]:
                 row["risk"] = risk_stats(r["curve"]) if len(r["curve"]) > 20 else None
         rows.append(row)
+    return rows
+
+
+STOCKBOT_VARIANTS = [
+    ("Stock bot: trades only, idle cash stays cash", {"idle": None}),
+    ("Stock bot: trades + idle cash in SPY", {"idle": "SPY"}),
+    ("Stock bot: idle in SPY, hold 5 days", {"idle": "SPY", "hold_days": 5}),
+    ("Stock bot: idle in QQQ", {"idle": "QQQ"}),
+]
+PELOSI_VARIANTS = [("Pelosi: mirror buys and sells", "mirror"), ("Pelosi: keep every buy", "hold")]
+CRYPTO_VARIANTS = [
+    ("Crypto team: 15-minute bars (the guide)", {"interval_min": 15}),
+    ("Crypto team: 1-hour bars", {"interval_min": 60}),
+    ("Crypto team: 6-hour bars", {"interval_min": 360}),
+]
+
+
+def agent_scenarios(data, ctx, starts, asof, cash, longest):
+    """The bots under different settings: stock bot, VIX agent, Pelosi copycat, crypto team."""
+    rows = []
+
+    def add(strategy, name, inputs, run, max_days=None):
+        row = {"strategy": strategy, "name": name, "inputs": dict(inputs), "settings": dict(inputs), "results": {}}
+        for label, start in starts:
+            if max_days and (_date(asof) - _date(start)).days > max_days + 4:
+                row["results"][label] = None
+                continue
+            r = run(start)
+            row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
+                                     "fees": r["fees"], "holdings": r["holdings"]}
+            if label == longest:
+                row["risk"] = risk_stats(r["curve"]) if len(r.get("curve") or []) > 20 else None
+        rows.append(row)
+    for name, over in STOCKBOT_VARIANTS:
+        add("stock bot", name, over, lambda st, o=over: run_stockbot(data, ctx["universe"], st, asof, cash, o))
+    if VIX_SYM in data.charts:
+        for name, rule in VIX_RULES:
+            add("vix", name, rule, lambda st, r=rule: run_vix_agent(data, st, asof, cash, r))
+    if "pelosi" not in ctx["skip"]:
+        for name, mode in PELOSI_VARIANTS:
+            add("pelosi", name, {"mode": mode}, lambda st, m=mode: run_pelosi(data, ctx["filings"], st, asof, cash, m))
+    if "crypto" not in ctx["skip"]:
+        for name, over in CRYPTO_VARIANTS:
+            cfg = dict(team.DEFAULTS, **over)
+            limit = CRYPTO_MAX_DAYS if cfg["interval_min"] < 60 else CRYPTO_LONG_DAYS
+            first = min(st for _, st in starts if (_date(asof) - _date(st)).days <= limit + 4)
+            if cfg["interval_min"] == team.DEFAULTS["interval_min"] and ctx.get("candles"):
+                candles, errs = ctx["candles"], []  # already loaded for the main table
+            else:
+                candles, errs = load_candles(cfg, first, asof, ctx["offline"])
+            ctx["errors"].extend(errs)
+            if not candles:
+                continue
+            work = os.path.join(ctx["base"], "replay", "crypto-scenario")
+            add("crypto", name, over, lambda st, c=candles, o=over: run_crypto(c, data, st, asof, cash, work, o), limit)
     return rows
 
 
@@ -932,6 +1030,8 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
         if include_pelosi:
             row["Pelosi copycat"] = run_pelosi(data, filings, start, end, cash)
         row["S&P 500 (SPY)"] = run_hold(data, {"SPY": 1.0}, start, end, cash)
+        if "QQQ" in data.charts:
+            row["Nasdaq 100 (QQQ)"] = run_hold(data, {"QQQ": 1.0}, start, end, cash)
         row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, end, cash)
         row.update(mine_rows(data, mine, watch, start, end, cash)[0])
         for k, r in row.items():
@@ -1026,7 +1126,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                                        pdf_dir=os.path.join(base, "state", "ptr-pdfs"))
         errors += errs
     pelosi_syms = sorted({t for _, rows in filings for t in pelosi_signals(rows)[0]})
-    syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X", VIX_SYM]) | {s for v in watch.values() for s in v} | set(universe)
+    syms = sorted(set(["SPY", "QQQ", "XIU.TO", "USDCAD=X", VIX_SYM, VIX3M_SYM]) | {s for v in watch.values() for s in v} | set(universe)
                   | set(pelosi_syms) | {t for m in mine.values() for t in m["shares"]})
     charts = {}
     for s in syms:
@@ -1040,20 +1140,11 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     data = Data(charts, {})
     asof = data.trading_day_on_or_before(asof) if asof else latest_friday(data.days)
     candles = {}
+    crypto_max = CRYPTO_MAX_DAYS if team.DEFAULTS["interval_min"] < 60 else CRYPTO_LONG_DAYS
     if "crypto" not in skip:
-        cfg = dict(team.DEFAULTS)
-        first = (_date(asof) - datetime.timedelta(days=min(CRYPTO_MAX_DAYS, max(n for _, n in windows)) + 4)).isoformat()
-        t0 = market_close_utc(first) - (cfg["lookback_bars"] + 4) * cfg["interval_min"] * 60
-        if offline:
-            for c in cfg["coins"]:
-                p = os.path.join(offline, "candles-%s.json" % c)
-                if os.path.exists(p):
-                    with open(p) as fh:
-                        candles[c] = json.load(fh)
-        else:
-            candles, errs = team.candles.fetch(cfg["coins"], cfg["data"], t0, market_close_utc(asof) + 900,
-                                               cfg["interval_min"])
-            errors += errs
+        first = (_date(asof) - datetime.timedelta(days=min(crypto_max, max(n for _, n in windows)) + 4)).isoformat()
+        candles, errs = load_candles(dict(team.DEFAULTS), first, asof, offline)
+        errors += errs
     results = {}
     for label, n in windows:
         start = data.trading_day_on_or_before((_date(asof) - datetime.timedelta(days=n)).isoformat())
@@ -1062,7 +1153,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         for strat in ("growth", "medium", "dividend"):
             row[strat] = run_account(data, strat, watch[strat], start, asof, cash, account_type)
         row["stock bot"] = run_stockbot(data, universe, start, asof, cash)
-        if candles and n <= CRYPTO_MAX_DAYS:
+        if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
             if c.get("btc_hold"):
@@ -1072,6 +1163,8 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, asof, cash, VIX_RULES[0][1])
         row["S&P 500 (SPY)"] = run_hold(data, {"SPY": 1.0}, start, asof, cash)
+        if "QQQ" in data.charts:
+            row["Nasdaq 100 (QQQ)"] = run_hold(data, {"QQQ": 1.0}, start, asof, cash)
         row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, asof, cash)
         rows, lab = mine_rows(data, mine, watch, start, asof, cash)
         row.update(rows)
@@ -1093,16 +1186,9 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         mc["left_out"] = short
     starts = [(label, results[label]["start"]) for label, _ in windows]
     scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base))
-    if VIX_SYM in data.charts:
-        for name, rule in VIX_RULES:
-            row = {"strategy": "vix", "name": name, "inputs": dict(rule), "settings": dict(rule), "results": {}}
-            for label, start in starts:
-                r = run_vix_agent(data, start, asof, cash, rule)
-                row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
-                                         "fees": r["fees"], "holdings": r["holdings"]}
-                if label == windows[0][0]:
-                    row["risk"] = risk_stats(r["curve"]) if len(r["curve"]) > 20 else None
-            scen.append(row)
+    ctx = {"universe": universe, "filings": filings, "skip": skip, "offline": offline, "base": base,
+           "errors": errors, "candles": candles}
+    scen += agent_scenarios(data, ctx, starts, asof, cash, windows[0][0])
     roll = None
     if rolling_spec:
         log("rolling %d-day windows..." % rolling_spec["horizon_days"])
@@ -1127,7 +1213,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "crypto team", "VIX agent", "Pelosi copycat",
-         "S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
+         "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
 LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer",
           "dividend": "Dividend reviewer (Wealthsimple)", "stock bot": "Stock bot (ATR, paper)",
           "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (S&P 500 or cash)"}
@@ -1211,7 +1297,7 @@ def render(out):
             rk = sc.get("risk") or {}
             L.append("| %s | %s | %s | %s | %s | %s |" % (
                 sc["strategy"], sc["name"], ", ".join("%s=%s" % kv for kv in sc["inputs"].items()) or "defaults",
-                " | ".join("%+.1f%%" % sc["results"][w]["return_pct"] for w in wins),
+                " | ".join("%+.1f%%" % sc["results"][w]["return_pct"] if sc["results"].get(w) else "n/a" for w in wins),
                 rk.get("sharpe", "–"), _p(rk.get("max_dd_pct"))))
         L.append("")
     roll = out.get("rolling")

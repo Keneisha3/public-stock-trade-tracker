@@ -83,6 +83,26 @@ class Engine(unittest.TestCase):
             self.assertLessEqual(pos["shares"] * pos["entry"], eq * 0.15 + 1, s)
         self.assertLess(eq, 10000 * 1.2)
 
+    def test_idle_cash_sits_in_the_index_and_funds_trades(self):
+        ch = charts(gaps={"BBB": {N - 10: 6}})
+        idx = mk.parse_chart(json.dumps(_synth.chart("SPY", p0=400, growth=0.3, wiggle=0.004, n=N)), "SPY")
+        idle = {b["d"]: b for b in idx["bars"]}
+        days, bars_by, regime = paper.prepare(ch)
+        p = dict(paper.PARAMS, idle="SPY")
+        plain, parked = paper.new_ledger(10000), paper.new_ledger(10000, p)
+        for d in days[paper.WARMUP:]:
+            paper.step(plain, d, bars_by, regime)
+            paper.step(parked, d, bars_by, regime, p, idle)
+            self.assertGreaterEqual(parked["cash"], -1e-6)
+        self.assertGreater(parked["idle_shares"], 0)
+        bbb = [x for x in parked["trades"] if x["ticker"] == "BBB" and x["entry_day"] == days[N - 9]]
+        self.assertEqual(len(bbb), 1)  # the index was sold at the open to pay for the trade
+        start = idle[days[paper.WARMUP]]["o"]
+        gain = idle[days[-1]]["c"] / start
+        self.assertGreater(parked["equity"][-1][1], 10000 * (gain - 0.03))  # tracks the index...
+        self.assertGreater(parked["equity"][-1][1], plain["equity"][-1][1])  # ...instead of sitting in cash
+        self.assertLess(plain["cash"] / plain["equity"][-1][1], 1.01)
+
     def test_backtest_reports_bot_and_benchmark(self):
         res = paper.backtest(charts(gaps={"AAA": {150: 6, 220: 5}, "CCC": {180: 6}}))
         for k in ("total_pct", "sharpe", "max_dd_pct", "trades", "win_rate_pct"):

@@ -372,7 +372,7 @@ function paperView(P) {
 
 const RL = {"VIX agent": "VIX agent (S&P 500 or cash)", "growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer", "dividend": "Dividend reviewer (Wealthsimple)",
   "stock bot": "Stock bot (ATR)", "crypto team": "Crypto bot team", "Pelosi copycat": "Pelosi copycat"};
-const RBENCH = ["S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"];
+const RBENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"];
 
 const lbl = k => (S.replay && S.replay.labels && S.replay.labels[k]) || RL[k] || k;
 
@@ -483,13 +483,14 @@ function scenariosView(R, wins) {
   const sc = R.scenarios || [];
   if (!sc.length) return "";
   const best = {};
-  sc.forEach(x => { const v = x.results[wins[0]].return_pct; if (!(x.strategy in best) || v > best[x.strategy]) best[x.strategy] = v; });
-  return `<p style="margin:16px 0 4px"><b>Scenarios: same strategy, different settings</b> <span class="small">(inputs on the left, outputs on the right; best 6-month result per strategy in bold)</span></p>
+  const ret = (x, w) => x.results[w] ? x.results[w].return_pct : null;
+  sc.forEach(x => { const v = ret(x, wins[0]); if (v != null && (!(x.strategy in best) || v > best[x.strategy])) best[x.strategy] = v; });
+  return `<p style="margin:16px 0 4px"><b>Scenarios: same strategy, different settings</b> <span class="small">(inputs on the left, outputs on the right; best ${esc(wins[0])} result per strategy in bold)</span></p>
     <div class="scroll"><table><thead><tr><th>Strategy</th><th>Scenario</th><th class="hide-sm">Changed inputs</th>${wins.map(w => `<th class="num">${esc(w)}</th>`).join("")}<th class="num hide-sm">Sharpe</th><th class="num hide-sm">Worst drop</th></tr></thead><tbody>
-    ${sc.map(x => { const rk = x.risk || {}; const top = x.results[wins[0]].return_pct === best[x.strategy];
+    ${sc.map(x => { const rk = x.risk || {}; const top = ret(x, wins[0]) != null && ret(x, wins[0]) === best[x.strategy];
       return `<tr><td class="small">${esc(x.strategy)}</td><td>${top ? "<b>" : ""}${esc(x.name)}${top ? "</b>" : ""}</td>
         <td class="small hide-sm">${esc(Object.entries(x.inputs).map(([k, v]) => k.replace(/_/g, " ") + " " + v).join(", ") || "defaults")}</td>
-        ${wins.map(w => `<td class="num ${cls(x.results[w].return_pct)}">${pct(x.results[w].return_pct)}</td>`).join("")}
+        ${wins.map(w => `<td class="num ${cls(ret(x, w))}">${ret(x, w) == null ? "n/a" : pct(ret(x, w))}</td>`).join("")}
         <td class="num hide-sm">${rk.sharpe ?? "–"}</td><td class="num hide-sm">${pct(rk.max_dd_pct)}</td></tr>`; }).join("")}
     </tbody></table></div>
     <p class="small">Save settings on an account above, or add scenarios to <code>trader/replay/scenarios.json</code>, then run the replay again. Pick settings that win across windows, not just one.</p>`;

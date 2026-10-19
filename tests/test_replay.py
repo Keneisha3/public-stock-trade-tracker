@@ -302,6 +302,9 @@ class Vix(unittest.TestCase):
         self.assertEqual(v.decide([14, 25])[0], True)
         self.assertEqual(v.decide([30] * 49 + [29], {"mode": "trend", "days": 50})[0], True)
         self.assertEqual(v.decide([20] * 49 + [22], {"mode": "trend", "days": 50})[0], False)
+        self.assertEqual(v.decide([18, 22], {"mode": "term"}, [20, 23])[0], True)   # calm shape
+        self.assertEqual(v.decide([18, 24], {"mode": "term"}, [20, 23])[0], False)  # stress: backwardation
+        self.assertEqual(v.decide([18, 24], {"mode": "term"})[0], True)  # no 3-month data: stay in
         st = v.status([{"d": "2026-10-15", "c": 18.0}, {"d": "2026-10-16", "c": 27.0}])
         self.assertEqual((st["regime"], st["risk_on"], st["agent"]), ("nervous", False, "step aside to cash"))
         self.assertEqual(st["day_change_pct"], 50.0)
@@ -351,6 +354,51 @@ class Vix(unittest.TestCase):
         self.assertGreaterEqual(r["switches"], 2)
         self.assertEqual(r["fx_fees"], 0)
         self.assertEqual(r["cash_by"]["CAD"], 0)
+
+
+class AgentVariants(unittest.TestCase):
+    def test_pelosi_keep_every_buy(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+        finally:
+            shutil.rmtree(d)
+        filings = [("2026-06-01", [{"ticker": "BE", "type": "P"}, {"ticker": "INTC", "type": "P"}]),
+                   ("2026-08-03", [{"ticker": "BE", "type": "S"}])]
+        start = data.trading_day_on_or_before("2026-05-15")
+        mirror = replay.run_pelosi(data, filings, start, ASOF, 100)
+        hold = replay.run_pelosi(data, filings, start, ASOF, 100, mode="hold")
+        self.assertEqual(mirror["basket"], ["INTC"])
+        self.assertEqual(sorted(hold["basket"]), ["BE", "INTC"])
+
+    def test_every_agent_has_scenarios(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            _synth.write(off, "QQQ", _synth.chart("QQQ", p0=400, growth=0.3, wiggle=0.01, n=520))
+            _synth.write(off, "^VIX3M", _synth.chart("^VIX3M", p0=17, growth=0.0, wiggle=0.01, n=520))
+            t1 = replay.market_close_utc(ASOF)
+            for c in ("BTC", "ETH"):
+                bars, px = [], 100.0
+                for i in range(24 * 200):  # 200 days of hourly bars
+                    o, px = px, px * (1.0004 if (i // 48) % 3 else 0.9995)
+                    bars.append({"t": t1 - (24 * 200 - i) * 3600, "o": o, "h": max(o, px) * 1.002,
+                                 "l": min(o, px) * 0.998, "c": px, "v": 5})
+                with open(os.path.join(off, "candles-%s-60.json" % c), "w") as fh:
+                    json.dump(bars, fh)
+            out, text = replay.replay(base, ASOF, 100, offline=off, log=lambda m: None, mc_runs=100,
+                                      rolling_spec=None, windows=replay.parse_windows("6m,1m"))
+        finally:
+            shutil.rmtree(d)
+        kinds = {x["strategy"] for x in out["scenarios"]}
+        self.assertTrue({"growth", "medium", "dividend", "stock bot", "vix", "pelosi", "crypto"} <= kinds, kinds)
+        hourly = [x for x in out["scenarios"] if x["name"] == "Crypto team: 1-hour bars"][0]
+        self.assertIsNotNone(hourly["results"]["6 months"])
+        bot = {x["name"]: x for x in out["scenarios"] if x["strategy"] == "stock bot"}
+        self.assertIn("SPY", bot["Stock bot: trades + idle cash in SPY"]["results"]["6 months"]["holdings"])
+        self.assertIn("Nasdaq 100 (QQQ)", out["results"]["6 months"])
+        self.assertIn("| crypto | Crypto team: 1-hour bars |", text)
 
 
 class YourHoldingsAndRolling(unittest.TestCase):
