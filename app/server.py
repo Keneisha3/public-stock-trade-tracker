@@ -25,12 +25,13 @@ from urllib.parse import parse_qs, urlparse
 APP = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(APP)
 SKILLS = os.path.join(REPO, ".claude", "skills")
-for folder in ("trader-accounts", "trader-paper", "trader-daily", "trader-init", "trader-team"):
+for folder in ("trader-accounts", "trader-paper", "trader-daily", "trader-init", "trader-team", "trader-replay"):
     sys.path.insert(0, os.path.join(SKILLS, folder))
 import accounts as acc  # noqa: E402
 import daily  # noqa: E402
 import init  # noqa: E402
 import paper  # noqa: E402
+import replay  # noqa: E402
 import team  # noqa: E402
 
 LOCK = threading.Lock()  # one refresh / write at a time
@@ -70,10 +71,15 @@ def state(base, contribute=0.0):
         "briefing": acc.read_json(os.path.join(base, "briefing.json")),
         "paper": paper.summary(led) if led else None,
         "crypto": crypto,
+        "replay": acc.read_json(os.path.join(base, "replay", "report.json")),
         "backtest": {k: bt[k] for k in ("from", "to", "bot", "buy_hold", "per_year", "equity", "benchmark")}
         if bt else None,
-        "accounts": [{"id": a["id"], "name": a["name"], "broker": a.get("broker"), "strategy": a["strategy"]}
+        "accounts": [{"id": a["id"], "name": a["name"], "broker": a.get("broker"), "strategy": a["strategy"],
+                      "rules": {k: v for k, v in a["rules"].items() if k in acc.TUNABLE},
+                      "defaults": {k: v for k, v in acc.RULES[a["strategy"]].items() if k in acc.TUNABLE}}
                      for a in cfg["accounts"]],
+        "tunable": {k: {"label": t[0], "min": t[1], "max": t[2], "strategies": list(t[3])}
+                    for k, t in acc.TUNABLE.items()},
     }
 
 
@@ -133,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 out = self.route(url.path, body)
             return self._send(200, out)
-        except (acc.AccountsError, paper.PaperError, acc.mk.MarketError, ValueError, KeyError) as e:
+        except (acc.AccountsError, paper.PaperError, acc.mk.MarketError, replay.ReplayError, ValueError, KeyError) as e:
             return self._send(400, {"error": str(e)})
         except Exception as e:
             traceback.print_exc()
@@ -159,6 +165,16 @@ class Handler(BaseHTTPRequestHandler):
             doc["cash"] = old.get("cash", {})
             acc.write_json(paths.holdings(a["id"]), doc)
             return {"ok": True, "imported": len(doc["positions"]), "skipped": doc.get("skipped_rows", 0)}
+        if path == "/api/rules":
+            a = acc.account(cfg, body["account"])
+            raw = acc.read_json(paths.config, {})
+            target = [x for x in raw.get("accounts", []) if x.get("id") == a["id"]][0]
+            if body.get("reset"):
+                target["rules"] = {}
+            else:
+                target.setdefault("rules", {}).update(acc.check_rules(a["strategy"], body.get("rules") or {}))
+            acc.write_json(paths.config, raw)
+            return {"ok": True, "rules": target["rules"]}
         if path == "/api/cash":
             a = acc.account(cfg, body["account"])
             doc = acc.read_json(paths.holdings(a["id"]), acc.empty_holdings(a["id"]))
@@ -175,6 +191,11 @@ class Handler(BaseHTTPRequestHandler):
                 os.remove(tp.kill)
                 team.trade_log.event(tp.events, __import__("time").time(), "resume", "cleared on the dashboard")
             return {"ok": True}
+        if path == "/api/replay":
+            skip = [x for x in body.get("skip", []) if x in ("crypto", "pelosi")]
+            out, _ = replay.replay(b, body.get("asof") or None, float(body.get("cash") or 100), skip,
+                                   log=lambda m: None)
+            return {"ok": True, "asof": out["asof"], "errors": out["errors"][:5]}
         if path == "/api/backtest":
             charts, errors = paper.load_charts(paper.universe(os.path.join(b, "paper", "config.json")))
             res = paper.backtest(charts)

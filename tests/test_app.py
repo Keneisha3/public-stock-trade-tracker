@@ -72,6 +72,26 @@ class Dashboard(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertIn("no account", err["error"])
 
+    def test_strategy_settings_are_validated_and_saved(self):
+        self.req("POST", "/api/init", {})
+        st = self.req("GET", "/api/state")[1]
+        q = [a for a in st["accounts"] if a["id"] == "questrade"][0]
+        self.assertEqual(q["rules"]["momentum_months"], 12)
+        self.assertIn("momentum_months", st["tunable"])
+        code, out = self.req("POST", "/api/rules", {"account": "questrade", "rules": {"momentum_months": 3, "max_position_pct": 30}})
+        self.assertEqual(code, 200)
+        q = [a for a in self.req("GET", "/api/state")[1]["accounts"] if a["id"] == "questrade"][0]
+        self.assertEqual((q["rules"]["momentum_months"], q["rules"]["max_position_pct"]), (3, 30))
+        self.assertEqual(q["defaults"]["momentum_months"], 12)
+        code, err = self.req("POST", "/api/rules", {"account": "questrade", "rules": {"max_position_pct": 95}})
+        self.assertEqual(code, 400)
+        self.assertIn("between", err["error"])
+        code, err = self.req("POST", "/api/rules", {"account": "questrade", "rules": {"min_yield_pct": 3}})
+        self.assertEqual(code, 400)
+        self.req("POST", "/api/rules", {"account": "questrade", "reset": True})
+        q = [a for a in self.req("GET", "/api/state")[1]["accounts"] if a["id"] == "questrade"][0]
+        self.assertEqual(q["rules"]["max_position_pct"], 20)
+
     def test_crypto_team_kill_switch_buttons(self):
         self.req("POST", "/api/init", {})
         tdir = os.path.join(self.dir, "trader", "team")
