@@ -14,7 +14,7 @@ on:
         required: false
         default: "replay"
         type: choice
-        options: ["replay", "walk-forward", "build-signals", "discover"]
+        options: ["replay", "walk-forward", "build-signals", "discover", "forward"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -359,4 +359,36 @@ jobs:
           cp "$RUNNER_TEMP"/out/ideas-*.json discover/latest-ideas.json
           git add discover
           git commit -qm "Discover snapshot $day" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- forward
+  # The live paper record: every weekday, the frozen plan (forward_plan.json) is
+  # brought up to the latest close and appended to replay-results/forward/record.json.
+  # Days already on the record are never rewritten.
+
+  forward:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '41 22 * * 1-5') || inputs.mode == 'forward' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bring the live paper record up to today
+        run: |
+          mkdir -p forward
+          git fetch -q origin replay-results || true
+          git show origin/replay-results:forward/record.json > forward/record.json 2>/dev/null || rm -f forward/record.json
+          python .claude/skills/trader-replay/replay.py --forward forward/record.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        run: |
+          cp forward/record.json "$RUNNER_TEMP/record.json"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -B replay-results origin/replay-results
+          mkdir -p forward
+          cp "$RUNNER_TEMP/record.json" forward/record.json
+          git add forward
+          git commit -qm "Live paper record $(date -u +%Y-%m-%d)" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done

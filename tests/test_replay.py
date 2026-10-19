@@ -603,6 +603,33 @@ class PointInTimeUniverse(unittest.TestCase):
         self.assertIn("480 of 503 index members priced", text)
 
 
+class ForwardRecord(unittest.TestCase):
+    def test_record_grows_and_never_rewrites_a_day(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            for sym, g in (("XLK", 0.6), ("IEF", 0.03), ("SHY", 0.02), ("QQQ", 0.4)):
+                _synth.write(off, sym, _synth.chart(sym, p0=50, growth=g, wiggle=0.005, n=520))
+            days = load_data(off).days
+            plan = {"start": days[480], "cash": 100.0, "strategies": {
+                "Dual": {"kind": "dual", "opts": {}}, "Nasdaq 100 (QQQ)": {"kind": "hold", "weights": {"QQQ": 1.0}}}}
+            rec = replay.forward(plan, None, offline=off, today=days[500], log=lambda m: None)
+            self.assertEqual(sorted(rec["days"])[0], days[480])
+            self.assertEqual(sorted(rec["days"])[-1], days[500])
+            frozen = json.loads(json.dumps(rec["days"]))
+            plan["strategies"]["Dual"]["opts"] = {"k": 3}  # even if the code or settings change later...
+            rec = replay.forward(plan, rec, offline=off, today=days[510], log=lambda m: None)
+        finally:
+            shutil.rmtree(d)
+        for day, vals in frozen.items():
+            self.assertEqual(rec["days"][day], vals)  # ...days already recorded stay exactly as they were
+        self.assertEqual(sorted(rec["days"])[-1], days[510])
+        self.assertIn("Live paper record since", replay.render_forward(rec))
+        with open(replay.FORWARD_PLAN) as fh:
+            real = json.load(fh)
+        self.assertIn("S&P 500 (SPY)", real["strategies"])
+
+
 class YourHoldingsAndRolling(unittest.TestCase):
     def test_parse_windows(self):
         self.assertEqual(replay.parse_windows("1w,3m,12m"), [("12 months", 365), ("3 months", 91), ("1 week", 7)])

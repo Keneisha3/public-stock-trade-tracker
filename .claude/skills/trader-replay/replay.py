@@ -1818,6 +1818,65 @@ def render(out):
     return "\n".join(L) + "\n"
 
 
+# ---------------------------------------------------------------- forward paper record
+
+FORWARD_PLAN = os.path.join(HERE, "forward_plan.json")
+
+
+def forward(plan, record=None, offline=None, today=None, log=print):
+    """The live paper record: every strategy in the frozen plan, run from the plan's start date
+    to the latest close with only what was known each day. Values for days already in `record`
+    are kept as they were (append-only): only new days are added."""
+    start = plan["start"]
+    syms = {"SPY", "QQQ", "IEF", "SHY", "USDCAD=X"}
+    for st in plan["strategies"].values():
+        if st["kind"] == "hold":
+            syms |= set(st["weights"])
+        elif st["kind"] == "dual":
+            pool = DUAL_POOLS[dict(DUAL_DEFAULT, **st.get("opts", {}))["pool"]]
+            syms |= {x for g in pool for x in univ.ETFS[g] if not x.endswith(".TO")}
+    charts = {}
+    for s in sorted(syms):
+        try:
+            charts[s] = mk.get_chart(s, offline=offline, range_="2y")
+        except mk.MarketError as e:
+            log("forward: %s" % e)
+    data = Data(charts, {})
+    last = data.trading_day_on_or_before(today or data.days[-1])
+    first = data.trading_day_on_or_before(start)
+    rec = record or {"start": start, "plan": plan, "days": {}}
+    out = {}
+    for name, st in plan["strategies"].items():
+        if st["kind"] == "hold":
+            r = run_hold(data, st["weights"], first, last, plan.get("cash", 100.0))
+        else:
+            r = run_dual(data, first, last, plan.get("cash", 100.0), **st.get("opts", {}))
+        out[name] = {d: v for d, v in r["curve"]}
+        out[name]["_holdings"] = r.get("holdings", [])
+    days = sorted({d for v in out.values() for d in v if not d.startswith("_")})
+    for d in days:
+        if d in rec["days"]:
+            continue  # never rewrite a day that is already on the record
+        rec["days"][d] = {name: v.get(d) for name, v in out.items()}
+    rec["holdings"] = {name: v["_holdings"] for name, v in out.items()}
+    rec["updated"] = last
+    return rec
+
+
+def render_forward(rec):
+    days = sorted(rec["days"])
+    if not days:
+        return "No forward days yet."
+    first, last = rec["days"][days[0]], rec["days"][days[-1]]
+    L = ["Live paper record since %s (%d trading days), $%g each:" % (rec["start"], len(days), rec["plan"].get("cash", 100))]
+    for name in rec["plan"]["strategies"]:
+        v = last.get(name)
+        if v is not None:
+            L.append("  %-40s $%.2f (%+.1f%%)  holds %s" % (name, v, v - rec["plan"].get("cash", 100),
+                                                            ", ".join(rec.get("holdings", {}).get(name, [])[:5])))
+    return "\n".join(L)
+
+
 def parse_windows(text):
     """'12m,6m,1w' -> [('12 months', 365), ('6 months', 182), ('1 week', 7)]."""
     if not text:
@@ -1849,10 +1908,25 @@ def main(argv=None):
     ap.add_argument("--history", choices=sorted(HISTORY_YEARS), default="5y", help="price history to load")
     ap.add_argument("--save-data", metavar="DIR", help="also save every chart to DIR (reuse with --offline DIR)")
     ap.add_argument("--signals", metavar="DIR", help="congress.json.gz / insiders.json.gz from signals.py")
+    ap.add_argument("--forward", metavar="RECORD", help="update the live paper record in RECORD (JSON) from "
+                    "forward_plan.json, then stop")
     ap.add_argument("--strict", action="store_true", help="exit 3 if any self-check fails")
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
+    if a.forward:
+        with open(FORWARD_PLAN, encoding="utf-8") as fh:
+            plan = json.load(fh)
+        rec = None
+        if os.path.exists(a.forward):
+            with open(a.forward, encoding="utf-8") as fh:
+                rec = json.load(fh)
+        rec = forward(plan, rec, offline=a.offline, today=a.asof, log=lambda m: print(m, file=sys.stderr))
+        os.makedirs(os.path.dirname(os.path.abspath(a.forward)), exist_ok=True)
+        with open(a.forward, "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, indent=1)
+        print(render_forward(rec))
+        return 0
     try:
         out, text = replay(a.dir, a.asof, a.cash, a.skip, a.offline, a.account_type,
                            log=lambda m: print(m, file=sys.stderr), windows=parse_windows(a.windows),

@@ -35,8 +35,8 @@ import accounts as acc  # noqa: E402
 import paper  # noqa: E402
 import team  # noqa: E402
 
-STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover"]
-NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover"}
+STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward"]
+NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward"}
 IDEA_SOURCES = "trending,screens,news,fool,reddit"
 
 
@@ -146,6 +146,17 @@ def run(base="trader", skip=(), offline=None, today=None):
         brief["ideas"] = (doc or {}).get("ideas", [])
         did("discover", doc is not None, err2 or "%d ideas from %d candidates" % (len(brief["ideas"]),
                                                                               (doc or {}).get("candidates", 0)))
+    if "forward" not in skip:  # the live paper record of the strategies that passed the walk-forward
+        rec_path = os.path.join(base, "forward", "record.json")
+        p = subprocess.run([sys.executable, os.path.join(SKILLS, "trader-replay", "replay.py"), "--forward", rec_path],
+                           capture_output=True, text=True, timeout=600)
+        rec = acc.read_json(rec_path, None) if p.returncode == 0 else None
+        if rec and rec.get("days"):
+            last = rec["days"][max(rec["days"])]
+            brief["forward"] = {"start": rec["start"], "updated": rec.get("updated"), "values": last,
+                                "days": len(rec["days"]), "cash": rec["plan"].get("cash", 100)}
+        did("forward", rec is not None, (p.stderr.strip() or p.stdout.strip())[:300] if p.returncode else
+            "%d days on the record" % len((rec or {}).get("days", {})))
     rules = os.path.join(base, "alerts.json")
     if "alerts" not in skip and os.path.exists(rules):
         doc, err = _tool("trader-alerts", "alerts.py", ["check", "--json", "--rules", rules,
@@ -216,6 +227,13 @@ def render(b):
         L.append("## New Congress stock-trade filings")
         for c in b["congress"]:
             L.append("- %s (%s) filed %s: %s" % (c["name"], c["district"], c["filed"], c["url"]))
+        L.append("")
+    if b.get("forward"):
+        f = b["forward"]
+        L.append("## Live paper record (since %s, %d trading days, $%g each)" % (f["start"], f["days"], f["cash"]))
+        for name, v in f["values"].items():
+            if v is not None:
+                L.append("- %s: $%.2f (%+.1f%%)" % (name, v, 100.0 * (v / f["cash"] - 1)))
         L.append("")
     if b.get("ideas"):
         L.append("## Ideas from the market (leads to research, not advice)")
