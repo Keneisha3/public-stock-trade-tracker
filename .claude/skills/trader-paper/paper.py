@@ -155,9 +155,9 @@ def step(led, day, bars_by, regime, p=PARAMS):
             continue
         shares = (equity * p["risk_pct"] / 100.0) / risk_per_share
         shares = min(shares, equity * p["max_position_pct"] / 100.0 / price)
-        shares = math.floor(shares)
+        shares = round(shares, 6) if p.get("fractional") else math.floor(shares)
         cost = shares * price
-        if shares < 1 or cost + _cost(cost, p) > led["cash"]:
+        if shares <= 0 or cost < p.get("min_order", 1) or cost + _cost(cost, p) > led["cash"]:
             continue
         led["cash"] -= cost + _cost(cost, p)
         led["positions"][o["ticker"]] = {"shares": shares, "entry": round(price, 4), "entry_day": day,

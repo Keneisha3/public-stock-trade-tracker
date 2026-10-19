@@ -124,7 +124,7 @@ const money = (x, d = 2) => (x < 0 ? "-$" : "$") + Math.abs(+x || 0).toLocaleStr
 const pct = (x, d = 1) => x == null ? "–" : (x > 0 ? "+" : "") + (+x).toFixed(d) + "%";
 const cls = (x) => x == null ? "" : x > 0 ? "up" : x < 0 ? "down" : "";
 const SERIES = ["var(--s1)", "var(--s2)", "var(--s3)"];
-let S = null, tab = 0, contribute = 0;
+let S = null, tab = 0, contribute = 0, rtab = null, rsel = "growth";
 
 async function api(path, body) {
   const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Trader": "1"}, body: JSON.stringify(body)};
@@ -273,6 +273,7 @@ function render() {
   h += `</section>`;
   h += `<section class="grid two"><div class="card"><h2>Paper trading bot</h2>${paperView(P)}</div>
     <div class="card"><h2>Backtest: 5 years</h2>${backtestView(S.backtest)}</div></section>`;
+  h += `<section class="card" id="replay"><h2>Replay: what $100 would have done</h2>${replayView(S.replay)}</section>`;
   h += `<section class="card"><h2>Crypto bot team (paper money)</h2>${cryptoView(S.crypto)}</section>`;
   const news = (B && B.news) || [], cong = (B && B.congress) || [];
   h += `<section class="grid two">
@@ -316,6 +317,20 @@ function render() {
     {name: "Bot team", color: SERIES[0], points: S.crypto.curve.map(c => [c[0], c[1]])},
     {name: "Holding the same coins", color: SERIES[1], points: S.crypto.curve.filter(c => c[2] != null).map(c => [c[0], c[2]])}],
     {h: 180, label: "Crypto bot team vs buy and hold", empty: "The chart starts after a few cycles."});
+  if (S.replay && $("#rpChart")) {
+    const row = S.replay.results[rtab] || {};
+    const pick = [[rsel, SERIES[0]], ["S&P 500 (SPY)", SERIES[1]], ["TSX 60 (XIU.TO)", SERIES[2]]];
+    lineChart($("#rpChart"), pick.filter(([k]) => row[k] && row[k].curve).map(([k, c]) => (
+      {name: RL[k] || k, color: c, points: row[k].curve})), {h: 200, label: "Replay value over time", fmt: v => money(v, 2),
+      empty: "No daily curve for this one."});
+  }
+  document.querySelectorAll("[data-rtab]").forEach(b => b.onclick = () => { rtab = b.dataset.rtab; render(); });
+  document.querySelectorAll("[data-rsel]").forEach(b => b.onclick = () => { rsel = b.dataset.rsel; render(); });
+  const rg = $("#rpGo"); if (rg) rg.onclick = async () => {
+    rg.disabled = true; rg.textContent = "Replaying… (a few minutes with crypto)";
+    try { await api("/api/replay", {skip: $("#rpFast") && $("#rpFast").checked ? ["crypto"] : []}); await load(); }
+    catch (e) { rg.disabled = false; rg.textContent = "Failed: " + e.message; }
+  };
   const kb = $("#teamKill"); if (kb) kb.onclick = async () => {
     if (!confirm("Kill switch: sell every paper position on the next cycle and stop the bot?")) return;
     await api("/api/team/kill", {}); await load();
@@ -337,6 +352,59 @@ function paperView(P) {
     <p style="margin-bottom:4px"><b>Ready for real money?</b></p>
     <ul class="list" style="gap:2px">${P.readiness.map(c => `<li class="check ${c.ok ? "ok" : ""}" style="background:none;border:0;padding:2px 0">${esc(c.check)}</li>`).join("")}</ul>
     <p class="small">${esc(P.note)}</p>`;
+}
+
+const RL = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer", "dividend": "Dividend reviewer (Wealthsimple)",
+  "stock bot": "Stock bot (ATR)", "crypto team": "Crypto bot team", "Pelosi copycat": "Pelosi copycat"};
+const RBENCH = ["S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"];
+
+function replayView(R) {
+  const runBar = `<div class="row" style="margin-bottom:10px"><button id="rpGo" class="primary">${R ? "Run again" : "Run the replay"}</button>
+    <label class="small"><input type="checkbox" id="rpFast"> skip crypto (faster)</label>
+    <span class="small">Needs internet: Yahoo Finance, Coinbase, the House Clerk.</span></div>`;
+  if (!R) return runBar + `<div class="empty">Gives $100 to every strategy 1 week, 2 weeks, 1 month and 6 months before the last Friday close, deciding only with what was known each day, and compares them with holding the S&P 500, the TSX 60, Bitcoin or cash.</div>`;
+  const wins = Object.keys(R.results);
+  if (!rtab || !R.results[rtab]) rtab = wins[0];
+  const row = R.results[rtab], f = row.factors || {};
+  const strat = Object.keys(row).filter(k => row[k] && row[k].return_pct !== undefined && !RBENCH.includes(k) && k !== "Pelosi copycat");
+  if (!row[rsel]) rsel = strat[0] || "growth";
+  const spy = (row["S&P 500 (SPY)"] || {}).return_pct;
+  const line = (k, bench) => { const r = row[k]; if (!r) return "";
+    return `<tr data-rsel="${esc(k)}" style="cursor:pointer;${k === rsel ? "background:var(--chip-info)" : ""}${bench ? ";color:var(--ink-2)" : ""}">
+      <td>${k === rsel ? "▸ " : ""}${esc(RL[k] || k)}</td><td class="num">${money(r.value)}</td><td class="num ${cls(r.return_pct)}">${pct(r.return_pct, 2)}</td>
+      <td class="num hide-sm ${cls(spy == null ? null : r.return_pct - spy)}">${bench || spy == null ? "–" : (r.return_pct - spy >= 0 ? "+" : "") + (r.return_pct - spy).toFixed(1) + " pts"}</td>
+      <td class="num hide-sm">${r.trades ?? "–"}</td><td class="num hide-sm">${r.fees != null ? money(r.fees) : "–"}</td><td class="num hide-sm">${r.dividends ? money(r.dividends) : "–"}</td></tr>`; };
+  const sel = row[rsel] || {}, n = (row.insights || {})[rsel] || {going_well: [], not_going_well: []};
+  const contrib = sel.contrib || [], maxAbs = Math.max(0.01, ...contrib.map(c => Math.abs(c.pnl)));
+  const ov = Object.entries(R.overall || {}).sort((a, b) => b[1].beat_spy - a[1].beat_spy);
+  return runBar + `<div class="small" style="margin-bottom:8px">As of the close on <b>${esc(R.asof)}</b> · $${esc(R.cash)} each · ${esc(R.account_type)} · run ${esc(R.generated || "")}</div>
+    <div class="tabs">${wins.map(w => `<button data-rtab="${esc(w)}" aria-selected="${w === rtab}">${esc(w)} <span class="small">from ${esc(R.results[w].start)}</span></button>`).join("")}</div>
+    <div class="small" style="margin-bottom:10px">Backdrop: S&amp;P 500 <b class="${cls(f.spy_pct)}">${pct(f.spy_pct)}</b> · TSX 60 <b class="${cls(f.tsx_pct)}">${pct(f.tsx_pct)}</b> · USD/CAD ${pct(f.usdcad_pct)} · S&amp;P 500 ${f.spy_above_200d ? "above" : "below"} its 200-day average · Pelosi filings posted: ${(f.pelosi_filings || []).length}</div>
+    <div class="scroll"><table><thead><tr><th>Strategy (click one)</th><th class="num">Value</th><th class="num">Return</th><th class="num hide-sm">vs S&amp;P 500</th><th class="num hide-sm">Trades</th><th class="num hide-sm">Costs</th><th class="num hide-sm">Dividends</th></tr></thead><tbody>
+      ${strat.map(k => line(k)).join("")}
+      ${row["Pelosi copycat"] ? `<tr><td colspan="7" class="small" style="padding-top:14px"><b>Separate: following Nancy Pelosi</b> (copies a trade only after its filing was posted)</td></tr>${line("Pelosi copycat")}` : ""}
+      <tr><td colspan="7" class="small" style="padding-top:14px"><b>Benchmarks</b> (buy and hold)</td></tr>
+      ${RBENCH.map(k => line(k, true)).join("")}
+    </tbody></table></div>
+    <div class="grid two" style="margin-top:14px">
+      <div><b>${esc(RL[rsel] || rsel)}</b> vs the S&amp;P 500 and TSX 60<div id="rpChart" style="margin-top:6px"></div></div>
+      <div>
+        <p style="margin:0 0 4px"><b>Going well</b></p>
+        <ul class="list" style="gap:2px">${(n.going_well.length ? n.going_well : ["nothing stood out"]).map(x => `<li class="check ok" style="background:none;border:0;padding:2px 0">${esc(x)}</li>`).join("")}</ul>
+        <p style="margin:10px 0 4px"><b>Not going well</b></p>
+        <ul class="list" style="gap:2px">${(n.not_going_well.length ? n.not_going_well : ["nothing stood out"]).map(x => `<li class="check" style="background:none;border:0;padding:2px 0">${esc(x)}</li>`).join("")}</ul>
+        ${rsel === "Pelosi copycat" ? `<p class="small">Filings used: ${esc((sel.filings_used || []).join(", ") || "none")} · basket: ${esc((sel.basket || []).join(", ") || "empty")}</p>` : ""}
+      </div></div>
+    ${contrib.length ? `<p style="margin:14px 0 4px"><b>What drove it</b> <span class="small">(profit or loss per holding, CAD, after costs)</span></p>
+      <div class="scroll"><table><tbody>${contrib.slice(0, 10).map(c => `<tr><td class="tick" style="width:90px">${esc(c.ticker)}</td>
+        <td><span style="display:inline-block;height:10px;border-radius:4px;vertical-align:middle;width:${(46 * Math.abs(c.pnl) / maxAbs).toFixed(1)}%;background:${c.pnl >= 0 ? "var(--good)" : "var(--critical)"}"></span></td>
+        <td class="num ${cls(c.pnl)}" style="width:90px">${money(c.pnl)}</td><td class="small" style="width:70px">${c.held ? "still held" : "closed"}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${(sel.fills || []).length ? `<details style="margin-top:10px"><summary class="small">Last trades (${sel.fills.length})</summary><div class="scroll"><table><thead><tr><th>Day</th><th>Side</th><th>Ticker</th><th class="num">Shares</th><th class="num">Price</th><th class="num">CAD</th></tr></thead><tbody>
+      ${sel.fills.slice().reverse().map(x => `<tr><td class="small">${esc(x.day)}</td><td>${esc(x.side)}</td><td class="tick">${esc(x.ticker)}</td><td class="num">${esc(x.shares)}</td><td class="num">${esc(x.price)} ${esc(x.currency)}</td><td class="num">${money(x.cad)}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
+    ${ov.length ? `<p style="margin:14px 0 4px"><b>Across all windows</b></p><div class="scroll"><table><thead><tr><th>Strategy</th>${wins.map(w => `<th class="num">${esc(w)}</th>`).join("")}<th class="num">Beat S&amp;P 500</th></tr></thead><tbody>
+      ${ov.map(([k, t]) => `<tr><td>${esc(RL[k] || k)}</td>${wins.map(w => `<td class="num ${cls(t.returns[w])}">${pct(t.returns[w])}</td>`).join("")}<td class="num">${t.beat_spy} of ${t.windows}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${(R.errors || []).length ? `<p class="small">Data problems: ${esc(R.errors.slice(0, 4).join("; "))}</p>` : ""}
+    <p class="small">1-week and 2-week results are mostly noise. Watchlists are today's (hindsight bias). Not financial advice.</p>`;
 }
 
 function cryptoView(C) {

@@ -9,6 +9,7 @@
     python3 trade.py accounts review          your accounts against their strategies
     python3 trade.py paper status             the stock paper bot
     python3 trade.py crypto run               the crypto bot team (paper money)
+    python3 trade.py replay                   what $100 would have done in each strategy
 
 Research tools: copycat, news, pelosi, analyst, screener, budget, risk,
 broker, tax, alerts, rebalance. Add --help to any command for its options.
@@ -28,6 +29,7 @@ TOOLS = {
     "market": "trader-accounts/market.py",
     "paper": "trader-paper/paper.py",
     "crypto": "trader-team/team.py",
+    "replay": "trader-replay/replay.py",
     "copycat": "trader-copycat/edgar13f.py",
     "news": "trader-news/news.py",
     "pelosi": "trader-pelosi/ptr.py",

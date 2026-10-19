@@ -8,12 +8,13 @@ briefing and a local dashboard. Everything is standard-library Python.
 ## Layout
 
 ```
-.claude/skills/trader-*/     16 skills (11 from Jakeschincariol/trader-skill + 5 of ours)
+.claude/skills/trader-*/     17 skills (11 from Jakeschincariol/trader-skill + 6 of ours)
   trader-accounts/           accounts.py (import, Questrade sync, review), market.py (Yahoo data)
   trader-paper/              paper.py: ATR breach bot, paper money only
   trader-daily/              daily.py: the one-command daily run
   trader-init/               init.py: creates trader/
   trader-team/               team.py + scanner/analyst/risk_manager/executor: crypto bot team, paper only
+  trader-replay/             replay.py: point-in-time $100 replay of every strategy + Pelosi copycat
 app/                         server.py + index.html: the dashboard (127.0.0.1:8765)
 tests/                       unittest, offline; _synth.py builds fake Yahoo charts
 trader/                      the user's data (git-ignored, never commit it)
@@ -69,5 +70,7 @@ stdlib first).
 - Pure functions for the math (`review_account`, `metrics`, `step`), thin CLIs.
 - Every new behaviour gets an offline test; network calls take an `http=` or
   `--offline DIR` hook so tests never touch the internet.
+- Replays and backtests are point in time: a decision on day D may only read data up
+  to D's close and fills at the next open (`tests/test_replay.py` wrecks the future to check).
 - Match the upstream skill style: plain-English SKILL.md with a frontmatter
   description that lists trigger phrases, and a "Not financial advice" line.
