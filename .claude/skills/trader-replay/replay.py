@@ -1173,9 +1173,10 @@ DUAL_VARIANTS = [
     ("Dual momentum: best 5 funds", {"k": 5}),
     ("Dual momentum: 6-month lookback", {"months": 6}),
 ]
+CORE_DEFAULT = {"core": "QQQ", "core_weight": 0.7}  # chosen in the walk-forward (pit-v6-safety)
 CORE_VARIANTS = [
+    ("Core: 70% Nasdaq 100, 30% dual momentum (default)", {"core": "QQQ", "core_weight": 0.7}),
     ("Core: half Nasdaq 100, half dual momentum, rebalanced monthly", {"core": "QQQ", "core_weight": 0.5}),
-    ("Core: 70% Nasdaq 100, 30% dual momentum", {"core": "QQQ", "core_weight": 0.7}),
     ("Core: half Nasdaq 100, half dual momentum (volatility target 15%)", {"core": "QQQ", "core_weight": 0.5,
                                                                          "vol_target": 15}),
     ("Core: half Nasdaq 100, half dual momentum (best 2, growth funds)", {"core": "QQQ", "core_weight": 0.5, "k": 2,
@@ -1419,7 +1420,7 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
                 row["congress buys"] = run_signals(data, uni, sig, start, end, cash, source="congress", days=90)
             row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
             if "QQQ" in data.charts:
-                row["core + dual"] = blend([run_hold(data, {"QQQ": 1.0}, start, end, cash), row["dual momentum"]], cash)
+                row["core + dual"] = run_dual(data, start, end, cash, **CORE_DEFAULT)
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
@@ -1583,7 +1584,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                 row["congress buys"] = run_signals(data, uni, sig, start, asof, cash, source="congress", days=90)
             row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
             if "QQQ" in data.charts:
-                row["core + dual"] = blend([run_hold(data, {"QQQ": 1.0}, start, asof, cash), row["dual momentum"]], cash)
+                row["core + dual"] = run_dual(data, start, asof, cash, **CORE_DEFAULT)
         if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
@@ -1665,7 +1666,7 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)",
           "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)",
           "blend": "Blend: dual momentum + momentum + Congress (thirds)",
-          "core + dual": "Core + satellite: half Nasdaq 100, half dual momentum"}
+          "core + dual": "Core + satellite: 70% Nasdaq 100, 30% dual momentum"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 
