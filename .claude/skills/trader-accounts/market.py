@@ -75,15 +75,28 @@ def native_currency(symbol):
     return "CAD" if str(symbol).upper().endswith(CAD_SUFFIXES) else "USD"
 
 
+RETRY_WAITS = (3, 10)  # seconds before the 2nd and 3rd try when Yahoo throttles or hiccups
+
+
 def fetch(url, timeout=25):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        raise MarketError("%s answered HTTP %d" % (url.split("?")[0], e.code))
-    except urllib.error.URLError as e:
-        raise MarketError("could not reach %s: %s" % (url.split("/")[2], e.reason))
+    """GET with retries on 429 / 5xx / network errors; query1 falls back to query2."""
+    urls = [url, url.replace("//query1.", "//query2.")] if "//query1." in url else [url]
+    last = None
+    for attempt in range(len(RETRY_WAITS) + 1):
+        if attempt:
+            time.sleep(RETRY_WAITS[attempt - 1])
+        u = urls[min(attempt, len(urls) - 1)]
+        req = urllib.request.Request(u, headers={"User-Agent": UA, "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            last = MarketError("%s answered HTTP %d" % (u.split("?")[0], e.code))
+            if e.code != 429 and e.code < 500 and e.code != 403:
+                raise last  # a real "no such symbol": retrying will not help
+        except (urllib.error.URLError, OSError) as e:
+            last = MarketError("could not reach %s: %s" % (u.split("/")[2], getattr(e, "reason", e)))
+    raise last
 
 
 def _date(ts):

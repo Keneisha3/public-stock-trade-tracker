@@ -154,6 +154,14 @@ On top of the replay:
   chance of a profit, and the chance of beating the S&P 500.
 - **Risk stats.** Volatility, Sharpe ratio, max drawdown and share of up days.
 
+**It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
+on GitHub's machines every Saturday after Friday's close (or on demand from the
+Actions tab, with an optional as-of date). The report appears on the run's
+summary page and on the
+[`replay-results`](https://github.com/Keneisha3/public-stock-trade-tracker/tree/replay-results)
+branch, with one file per week in `history/`. It uses the default watchlists,
+never your holdings.
+
 Every account's settings are editable on the dashboard (**Strategy settings**)
 and are range-checked. The live review and the replay use the same rules.
 
