@@ -1877,6 +1877,14 @@ def render_forward(rec):
     return "\n".join(L)
 
 
+def parse_rolling(text):
+    """'365,91,28' -> {"horizon_days": 365, "step_days": 91, "count": 28} (None -> the default)."""
+    if not text:
+        return ROLLING
+    h, st, n = [int(x) for x in text.split(",")]
+    return {"horizon_days": h, "step_days": st, "count": n}
+
+
 def parse_windows(text):
     """'12m,6m,1w' -> [('12 months', 365), ('6 months', 182), ('1 week', 7)]."""
     if not text:
@@ -1902,6 +1910,8 @@ def main(argv=None):
                     help="replay your own holdings from a broker CSV (also read from trader/accounts/*.json)")
     ap.add_argument("--windows", help="e.g. 12m,6m,3m,1m,2w,1w (default)")
     ap.add_argument("--no-rolling", action="store_true", help="skip the rolling-window test")
+    ap.add_argument("--rolling-spec", metavar="DAYS,STEP,COUNT",
+                    help="rolling windows: length in days, days between starts, how many (default 91,30,12)")
     ap.add_argument("--universe", choices=["auto", "watchlists"], default="auto",
                     help="auto: choose from the S&P 500 as it was each day + index funds (default); "
                          "watchlists: today's hand-picked lists (hindsight)")
@@ -1930,7 +1940,7 @@ def main(argv=None):
     try:
         out, text = replay(a.dir, a.asof, a.cash, a.skip, a.offline, a.account_type,
                            log=lambda m: print(m, file=sys.stderr), windows=parse_windows(a.windows),
-                           holdings=a.holdings, rolling_spec=None if a.no_rolling else ROLLING,
+                           holdings=a.holdings, rolling_spec=None if a.no_rolling else parse_rolling(a.rolling_spec),
                            uni="auto" if a.universe == "auto" else None, history=a.history, save_dir=a.save_data,
                            signals=a.signals)
     except (ReplayError, mk.MarketError) as e:

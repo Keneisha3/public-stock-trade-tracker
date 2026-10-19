@@ -216,8 +216,44 @@ jobs:
           path: out
           if-no-files-found: ignore
 
+  wf-stats:
+    # 28 overlapping 12-month windows, a new one every quarter, all inside the training
+    # years (ending a year before the latest Friday), then confidence ranges and a reality check.
+    needs: wf-data
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: market-data
+          path: market
+      - name: Dated signals
+        run: |
+          mkdir -p signals
+          git fetch -q origin replay-results || true
+          for f in congress.json.gz insiders.json.gz; do
+            git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
+          done
+      - name: Rolling windows inside the training years
+        run: |
+          python trade.py init
+          asof=$(date -u -d "$(date -u +%Y-%m-%d) -1 year -3 days" +%Y-%m-%d)
+          python .claude/skills/trader-replay/replay.py --offline market --history 10y --asof "$asof" --windows 12m \
+            --rolling-spec 365,91,28 --skip crypto pelosi --signals signals > /dev/null
+          mkdir -p out
+          cp trader/replay/report.json out/stats-report.json
+          python scripts/stats.py out/stats.md out/stats-report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: period-stats
+          path: out
+
   wf-combine:
-    needs: wf-period
+    needs: [wf-period, wf-stats]
     if: ${{ always() && inputs.mode == 'walk-forward' }}
     runs-on: ubuntu-latest
     steps:
@@ -234,6 +270,7 @@ jobs:
         run: |
           python scripts/walkforward.py out/summary.md out/report-*.json
           cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          [ -f out/stats.md ] && cat out/stats.md >> "$GITHUB_STEP_SUMMARY" || true
       - name: Save to the replay-results branch
         env:
           LABEL: ${{ inputs.label }}
@@ -245,6 +282,7 @@ jobs:
           git checkout -q -B replay-results FETCH_HEAD
           mkdir -p "research/$LABEL"
           cp "$RUNNER_TEMP"/out/summary.md "$RUNNER_TEMP"/out/report-*.md "$RUNNER_TEMP"/out/report-*.json "research/$LABEL/"
+          cp "$RUNNER_TEMP"/out/stats.md "research/$LABEL/" 2>/dev/null || true
           git add "research/$LABEL"
           git commit -qm "Walk-forward research: $LABEL" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done

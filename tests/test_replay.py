@@ -630,6 +630,33 @@ class ForwardRecord(unittest.TestCase):
         self.assertIn("S&P 500 (SPY)", real["strategies"])
 
 
+class Statistics(unittest.TestCase):
+    def load(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("stats", os.path.join(FIX, "..", "..", "scripts", "stats.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_confidence_range_and_reality_check(self):
+        st = self.load()
+        import random
+        rng = random.Random(3)
+        spy = [rng.gauss(8, 10) for _ in range(28)]
+        table = {"S&P 500 (SPY)": {"runs": [{"return_pct": x} for x in spy]},
+                 "edge": {"runs": [{"return_pct": x + 6 + rng.gauss(0, 2)} for x in spy]},   # a steady edge
+                 "noise": {"runs": [{"return_pct": x + rng.gauss(0, 15)} for x in spy]}}      # luck only
+        a = st.analyse({"asof": "2025-10-17", "rolling": {"table": table, "horizon_days": 365, "step_days": 91}},
+                       runs=2000)
+        rows = {r["strategy"]: r for r in a["rows"]}
+        self.assertEqual(a["best"], "edge")
+        self.assertGreater(rows["edge"]["lo90"], 0)                       # its whole range is above zero
+        self.assertLess(rows["noise"]["lo90"], 0)
+        self.assertLess(a["reality_check_p"], 0.1)
+        self.assertIn("Reality check", st.render(a))
+        self.assertEqual(replay.parse_rolling("365,91,28"), {"horizon_days": 365, "step_days": 91, "count": 28})
+
+
 class YourHoldingsAndRolling(unittest.TestCase):
     def test_parse_windows(self):
         self.assertEqual(replay.parse_windows("1w,3m,12m"), [("12 months", 365), ("3 months", 91), ("1 week", 7)])
