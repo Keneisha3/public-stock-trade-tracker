@@ -112,11 +112,10 @@ python3 $S/trader-paper/paper.py backtest                     # 5 years vs buy-a
 python3 $S/trader-paper/paper.py status                       # equity, trades, readiness
 ```
 
-**Run it every weekday** after the close (macOS/Linux, `crontab -e`):
-
-```
-15 16 * * 1-5  cd /path/to/public-stock-trade-tracker && python3 .claude/skills/trader-daily/daily.py >/dev/null
-```
+**Run everything by itself:** `scripts/schedule.sh --install` (Mac/Linux)
+schedules the daily run for weekdays at 5:30 p.m. and a crypto bot team cycle every 15
+minutes. [docs/daily-use.md](docs/daily-use.md) covers Windows and the 5-minute
+daily routine.
 
 ## The strategies
 
