@@ -50,6 +50,23 @@ CANADA = [  # large TSX companies (Yahoo symbols), as listed in 2026
 ]
 
 
+# Index funds: fair to backtest without a membership list, because a fund can only be
+# chosen once it has traded long enough to have a 200-day history.
+ETFS = {
+    "us_broad": ["SPY", "QQQ", "DIA", "IWM", "RSP", "MDY", "IJR", "VTI"],
+    "us_sector": ["XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE", "XLC", "SMH", "IBB",
+                  "XBI", "KRE", "ITA", "ITB", "IGV", "CIBR", "TAN", "ICLN", "LIT", "URA", "XME", "KWEB"],
+    "us_factor": ["MTUM", "QUAL", "USMV", "VLUE", "VUG", "VTV", "SCHD", "VIG", "DVY", "NOBL", "SPLV", "MOAT"],
+    "world": ["EFA", "EEM", "VEA", "VWO", "EWJ", "EWZ", "INDA", "FXI", "EWG", "EWU", "EWC", "EWT", "EWY"],
+    "bonds": ["TLT", "IEF", "SHY", "AGG", "LQD", "HYG", "TIP"],
+    "commodities": ["GLD", "SLV", "GDX", "DBC", "USO"],
+    "canada": ["XIU.TO", "XIC.TO", "VFV.TO", "XEQT.TO", "VEQT.TO", "ZSP.TO", "HXT.TO", "XEG.TO", "XIT.TO",
+               "ZEB.TO", "XFN.TO", "ZAG.TO", "XBB.TO", "CGL-C.TO"],
+    "canada_income": ["XEI.TO", "VDY.TO", "XDIV.TO", "ZDV.TO", "CDZ.TO", "ZWC.TO", "XUT.TO", "ZRE.TO", "XRE.TO"],
+}
+EQUITY_ETFS = ETFS["us_broad"] + ETFS["us_sector"] + ETFS["us_factor"]
+
+
 def yahoo(ticker):
     """S&P CSV ticker -> Yahoo symbol (BRK.B -> BRK-B)."""
     return ticker.strip().upper().replace(".", "-")
@@ -129,8 +146,8 @@ def main(argv=None):
         print("%d members on %s" % (len(m), argv[1]))
         print(" ".join(m))
         return 0
-    print("S&P 500 history: %d tickers since %s, last snapshot %s; Canada list: %d" % (
-        len(u.spans), u.doc["since"], u.doc["last_snapshot"], len(CANADA)))
+    print("S&P 500 history: %d tickers since %s, last snapshot %s; Canada list: %d; index funds: %d" % (
+        len(u.spans), u.doc["since"], u.doc["last_snapshot"], len(CANADA), sum(len(v) for v in ETFS.values())))
     return 0
 
 

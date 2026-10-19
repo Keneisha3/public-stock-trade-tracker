@@ -42,9 +42,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(HERE)
 for _f in ("trader-accounts", "trader-paper", "trader-team", "trader-pelosi", "trader-init"):
     sys.path.insert(0, os.path.join(SKILLS, _f))
+sys.path.insert(0, HERE)
 import accounts as acc  # noqa: E402
 import market as mk  # noqa: E402
 import paper  # noqa: E402
+import universe as univ  # noqa: E402
 import ptr  # noqa: E402
 import team  # noqa: E402
 import vix  # noqa: E402
@@ -128,6 +130,14 @@ class Data:
                 sq.append(sq[-1] + r * r)
             self._sums[sym] = (c, sc, sr, sq)
         return self._sums[sym]
+
+    def yield_ttm(self, sym, day):
+        """Trailing 12-month dividend yield (%) at the close of `day`."""
+        px = self.close(sym, day)
+        if not px:
+            return 0.0
+        a = (_date(day) - datetime.timedelta(days=365)).isoformat()
+        return 100.0 * sum(x for d, x in self.charts[sym]["dividends"] if a < d <= day) / px
 
     def quick(self, sym, day, lookback):
         """Cheap point-in-time stats for screening: {ret, above200, vol} or None (too little history)."""
@@ -343,9 +353,61 @@ def run_mix(data, shares, start, asof, cash, account_type="TFSA"):
     return pf.result(asof, cash)
 
 
-def run_account(data, strategy, watch, start, asof, cash, account_type, overrides=None, seed=None):
+SHORTLIST = {"growth": 20, "medium": 20, "dividend": 25}  # names the reviewer scores at each review
+
+
+def candidates(uni, strategy, day):
+    """What a strategy may choose from on `day`: index members that day, plus index funds
+    and the Canadian list. The dividend account is Canadian: TSX names and Canadian income funds."""
+    if strategy == "dividend":
+        return set(univ.CANADA) | set(univ.ETFS["canada_income"])
+    out = set(uni.members_on(day)) | set(univ.EQUITY_ETFS)
+    if strategy == "medium":
+        out |= set(univ.CANADA) | {s for v in univ.ETFS.values() for s in v}
+    return out
+
+
+def shortlist(data, strategy, day, rules, uni, k=None):
+    """The scanner: rank every candidate with cheap point-in-time stats and pass the best
+    to the reviewer. growth: strongest momentum above the 200-day average. medium: best
+    momentum per unit of volatility, above the 200-day average, volatility under 45%.
+    dividend: yield 2-8% and volatility under 30%, highest yield first."""
+    k = k or SHORTLIST[strategy]
+    mm = int(rules.get("momentum_months") or (6 if strategy == "medium" else 3))
+    rows = []
+    for sym in candidates(uni, strategy, day):
+        q = data.quick(sym, day, 21 * mm)
+        if not q:
+            continue
+        if strategy == "growth":
+            if q["above200"]:
+                rows.append((q["ret"], sym))
+        elif strategy == "medium":
+            if q["above200"] and q["vol"] < 45:
+                rows.append((q["ret"] / max(q["vol"], 5.0), sym))
+        else:
+            y = data.yield_ttm(sym, day)
+            if 2.0 <= y <= 8.0 and q["vol"] < 30:
+                rows.append((y, sym))
+    rows.sort(reverse=True)
+    return [sym for _, sym in rows[:k]]
+
+
+def coverage(data, uni, day):
+    """How many index members that day have prices we can use (the rest are mostly companies
+    that later left the market: the survivorship bias that remains)."""
+    m = uni.members_on(day)
+    priced = sum(1 for sym in m if data.quick(sym, day, 21))
+    return {"day": day, "members": len(m), "priced": priced, "pct": round(100.0 * priced / len(m), 1) if m else None}
+
+
+def run_account(data, strategy, watch, start, asof, cash, account_type, overrides=None, seed=None, uni=None):
+    """uni: a point-in-time universe; the watchlist is then rebuilt at every review by the scanner."""
     rules = dict(acc.RULES[strategy], min_trade=1)
     rules.update(overrides or {})
+    fixed = list(watch or []) if uni is not None else []  # e.g. your own holdings: always scored
+    if uni is not None:
+        watch = sorted(set(shortlist(data, strategy, start, rules, uni)) | set(watch or []))
     acct = {"id": strategy, "name": strategy, "strategy": strategy, "type": account_type, "fractional": True,
             "watchlist": watch, "rules": rules, "broker": ""}
     split = currency_split(data, _held_values(data, seed, start) if seed else {t: 1.0 for t in watch}, start)
@@ -361,6 +423,8 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
         pf.mark(d)
         if d not in reviews:
             continue
+        if uni is not None and d != start:
+            acct["watchlist"] = watch = sorted(set(shortlist(data, strategy, d, rules, uni)) | set(fixed))
         syms = set(watch) | set(pf.pos)
         snap = {s: data.metrics(s, d) for s in syms if s in data.charts}
         snap = {s: m for s, m in snap.items() if m}
@@ -465,20 +529,32 @@ def vix_regimes(curve, data):
     return out
 
 
-def run_stockbot(data, universe, start, asof, cash, overrides=None):
+def run_stockbot(data, universe, start, asof, cash, overrides=None, uni=None):
     """The ATR bot with US-dollar cash: $cash CAD worth of USD at the start, valued in CAD.
-    overrides: paper.PARAMS changes, e.g. {"idle": None} for the bot without its index sleeve."""
+    overrides: paper.PARAMS changes, e.g. {"idle": None} for the bot without its index sleeve.
+    uni: trade any S&P 500 member, but only on days it was a member (instead of `universe`)."""
     fx0 = data.fx(start)
     usd0 = cash / fx0
     p = dict(paper.PARAMS, fractional=True, min_order=1)
     p.update(overrides or {})
     idle_bars = {b["d"]: b for b in data.charts[p["idle"]]["bars"]} if p.get("idle") in data.charts else None
-    charts = {s: data.charts[s] for s in universe if s in data.charts}
+    eligible = None
+    if uni is not None:
+        universe = [s for s in uni.ever(start, asof) if s in data.charts]
+        eligible = uni.members_on
+    first = (_date(start) - datetime.timedelta(days=150)).isoformat()  # enough for the ATR and the regime
+    charts = {}
+    for s in universe:
+        if s in data.charts:
+            ds = data.dates[s]
+            bars = data.charts[s]["bars"][bisect.bisect_left(ds, first):bisect.bisect_right(ds, asof)]
+            if bars:
+                charts[s] = {"bars": bars}
     days, bars_by, regime = paper.prepare(charts, p)
     led, idle = paper.new_ledger(usd0, p), []
     for d in days:
         if start <= d <= asof:
-            paper.step(led, d, bars_by, regime, p, idle_bars)
+            paper.step(led, d, bars_by, regime, p, idle_bars, eligible)
             e = led["equity"][-1][1]
             idle.append(led["cash"] / e if e else 1.0)
     eq = led["equity"][-1][1] if led["equity"] else usd0
@@ -701,7 +777,7 @@ def run_pelosi(data, filings, start, asof, cash, mode="mirror"):
 
 # ---------------------------------------------------------------- what went well, what did not
 
-BENCH = ("S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash")
+BENCH = ("S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash")
 
 
 def factors(data, start, asof, filings, candles_btc=None):
@@ -847,14 +923,20 @@ def scenario_list(base):
     return out
 
 
-def run_scenarios(data, watch, starts, asof, cash, account_type, scenarios):
+def run_scenarios(data, watch, starts, asof, cash, account_type, scenarios, uni=None):
     rows = []
+    if uni is not None:  # the old way, for comparison: today's hand-picked watchlists, replayed into the past
+        scenarios = list(scenarios) + [(st, "Today's hand-picked watchlist (hindsight)", {"_fixed": True})
+                                       for st in ("growth", "medium", "dividend")]
     for strategy, name, over in scenarios:
-        row = {"strategy": strategy, "name": name, "inputs": dict(over),
+        fixed = over.get("_fixed")
+        over = {k: v for k, v in over.items() if k != "_fixed"}
+        row = {"strategy": strategy, "name": name, "inputs": dict(over) if not fixed else {"watchlist": "today's picks"},
                "settings": {k: dict(acc.RULES[strategy], **over).get(k) for k in acc.TUNABLE
                             if strategy in acc.TUNABLE[k][3]}, "results": {}}
         for label, start in starts:
-            r = run_account(data, strategy, watch[strategy], start, asof, cash, account_type, over)
+            r = run_account(data, strategy, watch[strategy] if (fixed or uni is None) else [], start, asof, cash,
+                            account_type, over, uni=None if fixed else uni)
             row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
                                      "fees": r["fees"], "holdings": r["holdings"]}
             if label == starts[0][0]:
@@ -895,7 +977,11 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
                 row["risk"] = risk_stats(r["curve"]) if len(r.get("curve") or []) > 20 else None
         rows.append(row)
     for name, over in STOCKBOT_VARIANTS:
-        add("stock bot", name, over, lambda st, o=over: run_stockbot(data, ctx["universe"], st, asof, cash, o))
+        add("stock bot", name, over, lambda st, o=over: run_stockbot(data, ctx["universe"], st, asof, cash, o,
+                                                                     uni=ctx.get("uni")))
+    if ctx.get("uni") is not None:
+        add("stock bot", "Stock bot: today's 30 hand-picked large caps (hindsight)", {"universe": "today's picks"},
+            lambda st: run_stockbot(data, ctx["universe"], st, asof, cash))
     if VIX_SYM in data.charts:
         for name, rule in VIX_RULES:
             add("vix", name, rule, lambda st, r=rule: run_vix_agent(data, st, asof, cash, r))
@@ -1043,7 +1129,7 @@ def my_holdings(base, extra=None):
     return out
 
 
-def mine_rows(data, mine, watch, start, end, cash):
+def mine_rows(data, mine, watch, start, end, cash, uni=None):
     rows, labels = {}, {}
     for aid, m in mine.items():
         held = {t: q for t, q in m["shares"].items() if t in data.charts}
@@ -1052,8 +1138,8 @@ def mine_rows(data, mine, watch, start, end, cash):
         k1, k2 = "mine:%s:held" % aid, "mine:%s:rules" % aid
         rows[k1] = run_mix(data, held, start, end, cash, m["type"])
         over = {k: v for k, v in m["rules"].items() if k in acc.TUNABLE}
-        rows[k2] = run_account(data, m["strategy"], sorted(set(watch[m["strategy"]]) | set(held)), start, end, cash,
-                               m["type"], over, seed=held)
+        rows[k2] = run_account(data, m["strategy"], sorted(set(held) if uni else set(watch[m["strategy"]]) | set(held)),
+                               start, end, cash, m["type"], over, seed=held, uni=uni)
         labels[k1] = "Your %s, held as is" % m["name"]
         labels[k2] = "Your %s, run by its %s rules" % (m["name"], m["strategy"])
     return rows, labels
@@ -1061,7 +1147,7 @@ def mine_rows(data, mine, watch, start, end, cash):
 
 # ---------------------------------------------------------------- rolling windows: does it KEEP working?
 
-def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec=ROLLING, include_pelosi=True):
+def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec=ROLLING, include_pelosi=True, uni=None):
     """Many equal-length windows (default 3 months, a new one each month for a year). The
     question is not 'did it win once' but 'how often did it beat the S&P 500'."""
     starts = []
@@ -1073,8 +1159,9 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
             starts.append((start, end))
     runs = {}
     for start, end in reversed(starts):
-        row = {s: run_account(data, s, watch[s], start, end, cash, account_type) for s in ("growth", "medium", "dividend")}
-        row["stock bot"] = run_stockbot(data, universe, start, end, cash)
+        row = {s: run_account(data, s, [] if uni else watch[s], start, end, cash, account_type, uni=uni)
+               for s in ("growth", "medium", "dividend")}
+        row["stock bot"] = run_stockbot(data, universe, start, end, cash, uni=uni)
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
@@ -1083,7 +1170,7 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
         if "QQQ" in data.charts:
             row["Nasdaq 100 (QQQ)"] = run_hold(data, {"QQQ": 1.0}, start, end, cash)
         row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, end, cash)
-        row.update(mine_rows(data, mine, watch, start, end, cash)[0])
+        row.update(mine_rows(data, mine, watch, start, end, cash, uni)[0])
         for k, r in row.items():
             runs.setdefault(k, []).append((start, end, r["return_pct"], row["S&P 500 (SPY)"]["return_pct"]))
     import statistics
@@ -1136,6 +1223,11 @@ def checks(out, data, rolling_spec):
             worst = max(worst, abs(spy["return_pct"] - expect))
     add("S&P 500 row matches the raw price change in CAD (overnight gap, slippage and dividends allowed)",
         worst <= 2.5, "largest gap %.2f points" % worst)
+    cov = [(w, row["coverage"]) for w, row in out["results"].items() if row.get("coverage")]
+    if cov:
+        low = [(w, c) for w, c in cov if (c["pct"] or 0) < 80]
+        add("point-in-time universe has prices for most index members (80%+)", not low,
+            ", ".join("%s: %d of %d (%.0f%%)" % (w, c["priced"], c["members"], c["pct"] or 0) for w, c in (low or cov)[:6]))
     if rolling_spec and out.get("rolling"):
         n = max((x["windows"] for x in out["rolling"]["table"].values()), default=0)
         add("rolling windows all ran", n == rolling_spec["count"], "%d of %d" % (n, rolling_spec["count"]))
@@ -1161,9 +1253,17 @@ def latest_friday(days):
     return days[-1]
 
 
+HISTORY_YEARS = {"2y": 2, "5y": 5, "10y": 10}
+
+
 def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print, mc_runs=5000,
-           windows=None, holdings=None, rolling_spec=ROLLING):
+           windows=None, holdings=None, rolling_spec=ROLLING, uni=None, history="5y", save_dir=None):
+    """uni: "auto" (the point-in-time S&P 500 + index funds + the Canadian list), a Universe, or
+    None (today's hand-picked watchlists). history: how much price data to load ("5y", "10y").
+    save_dir: also write every chart there, for later runs with offline=save_dir."""
     windows = windows or WINDOWS
+    if uni == "auto":
+        uni = univ.load()
     watch = watchlists(base)
     mine = my_holdings(base, holdings)
     labels = {}
@@ -1176,14 +1276,23 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                                        pdf_dir=os.path.join(base, "state", "ptr-pdfs"))
         errors += errs
     pelosi_syms = sorted({t for _, rows in filings for t in pelosi_signals(rows)[0]})
-    syms = sorted(set(["SPY", "QQQ", "XIU.TO", "USDCAD=X", VIX_SYM, VIX3M_SYM]) | {s for v in watch.values() for s in v} | set(universe)
-                  | set(pelosi_syms) | {t for m in mine.values() for t in m["shares"]})
+    syms = set(["SPY", "QQQ", "RSP", "XIU.TO", "USDCAD=X", VIX_SYM, VIX3M_SYM]) | {s for v in watch.values() for s in v} \
+        | set(universe) | set(pelosi_syms) | {t for m in mine.values() for t in m["shares"]}
+    if uni is not None:
+        end = asof or datetime.date.today().isoformat()
+        since = (_date(end) - datetime.timedelta(days=365 * HISTORY_YEARS.get(history, 5))).isoformat()
+        syms |= set(uni.ever(since, end)) | set(univ.CANADA) | {x for v in univ.ETFS.values() for x in v}
+    syms = sorted(syms)
     charts = {}
-    for s in syms:
+    if not offline and len(syms) > 100:
+        log("loading %d price histories (%s)..." % (len(syms), history))
+    for i, s in enumerate(syms):
         try:
-            charts[s] = mk.get_chart(s, offline=offline, range_="5y")
+            charts[s] = mk.get_chart(s, offline=offline, range_=history, save=save_dir)
         except mk.MarketError as e:
             errors.append(str(e))
+        if not offline and len(syms) > 100 and i % 100 == 99:
+            log("  %d of %d" % (i + 1, len(syms)))
     if "SPY" not in charts:
         raise ReplayError("no SPY prices, so no trading calendar. Data problems: %s"
                           % "; ".join(errors[:3] or ["none reported"]))
@@ -1201,8 +1310,10 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         log("replaying %s (from the close of %s)..." % (label, start))
         row = {"start": start}
         for strat in ("growth", "medium", "dividend"):
-            row[strat] = run_account(data, strat, watch[strat], start, asof, cash, account_type)
-        row["stock bot"] = run_stockbot(data, universe, start, asof, cash)
+            row[strat] = run_account(data, strat, [] if uni else watch[strat], start, asof, cash, account_type, uni=uni)
+        row["stock bot"] = run_stockbot(data, universe, start, asof, cash, uni=uni)
+        if uni is not None:
+            row["coverage"] = coverage(data, uni, start)
         if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
@@ -1215,8 +1326,10 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         row["S&P 500 (SPY)"] = run_hold(data, {"SPY": 1.0}, start, asof, cash)
         if "QQQ" in data.charts:
             row["Nasdaq 100 (QQQ)"] = run_hold(data, {"QQQ": 1.0}, start, asof, cash)
+        if uni is not None and "RSP" in data.charts:
+            row["S&P 500 equal weight (RSP)"] = run_hold(data, {"RSP": 1.0}, start, asof, cash)
         row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, asof, cash)
-        rows, lab = mine_rows(data, mine, watch, start, asof, cash)
+        rows, lab = mine_rows(data, mine, watch, start, asof, cash, uni)
         row.update(rows)
         labels.update(lab)
         row["cash"] = {"value": round(cash, 2), "return_pct": 0.0}
@@ -1235,22 +1348,30 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     if mc:
         mc["left_out"] = short
     starts = [(label, results[label]["start"]) for label, _ in windows]
-    scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base))
-    ctx = {"universe": universe, "filings": filings, "skip": skip, "offline": offline, "base": base,
+    scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base), uni)
+    ctx = {"universe": universe, "filings": filings, "skip": skip, "offline": offline, "base": base, "uni": uni,
            "errors": errors, "candles": candles}
     scen += agent_scenarios(data, ctx, starts, asof, cash, windows[0][0])
     roll = None
     if rolling_spec:
         log("rolling %d-day windows..." % rolling_spec["horizon_days"])
         roll = rolling(data, watch, universe, filings, mine, asof, cash, account_type, rolling_spec,
-                       include_pelosi="pelosi" not in skip)
+                       include_pelosi="pelosi" not in skip, uni=uni)
     out = {"asof": asof, "cash": cash, "account_type": account_type, "costs": COSTS, "results": results,
            "monte_carlo": mc, "scenarios": scen, "rolling": roll, "labels": labels,
            "windows": [w for w, _ in windows], "has_holdings": bool(mine),
            "overall": overall(results), "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
            "errors": errors, "pelosi_filings": [f for f, _ in filings], "watchlists": watch,
+           "universe": None if uni is None else {
+               "kind": "point-in-time S&P 500 members + %d index funds + %d Canadian companies" % (
+                   sum(len(v) for v in univ.ETFS.values()), len(univ.CANADA)),
+               "source": uni.doc.get("licence"), "last_snapshot": uni.doc.get("last_snapshot"),
+               "shortlist": SHORTLIST, "history": history},
            "note": "Point-in-time replay: decisions use data up to each day's close, fills at the next open. "
-                   "Watchlists are today's, which is a hindsight bias. Not financial advice."}
+                   + ("Stocks are chosen only from what was in the S&P 500 that day (plus index funds and a "
+                      "Canadian list made today); companies Yahoo has no prices for (mostly delisted) cannot be "
+                      "chosen, a survivorship bias that remains. " if uni is not None else
+                      "Watchlists are today's, which is a hindsight bias. ") + "Not financial advice."}
     out["checks"] = checks(out, data, rolling_spec)
     folder = os.path.join(base, "replay")
     os.makedirs(folder, exist_ok=True)
@@ -1263,7 +1384,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "crypto team", "VIX agent", "Pelosi copycat",
-         "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
+         "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
 LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer",
           "dividend": "Dividend reviewer (Wealthsimple)", "stock bot": "Stock bot (ATR, paper)",
           "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (Nasdaq 100 or cash)"}
@@ -1286,6 +1407,13 @@ def render(out):
          "Each cell: value at the close on %s (return). Starts: %s." % (
              out["asof"], ", ".join("%s = %s" % (w, out["results"][w]["start"]) for w in wins)), "",
          "| strategy | " + " | ".join(wins) + " |", "| --- |" + " ---: |" * len(wins)]
+    if out.get("universe"):
+        u = out["universe"]
+        cov = ["%s: %d of %d priced" % (w, out["results"][w]["coverage"]["priced"], out["results"][w]["coverage"]["members"])
+               for w in wins if out["results"][w].get("coverage")]
+        L[2:2] = ["**Universe:** %s (%s history). Each review the scanner ranks them all and the reviewer scores the "
+                  "best %s. Index members at each start: %s." % (
+                      u["kind"], u["history"], "/".join(str(v) for v in u["shortlist"].values()), "; ".join(cov)), ""]
     for k in keys:
         cells = []
         for w in wins:
@@ -1436,6 +1564,11 @@ def main(argv=None):
                     help="replay your own holdings from a broker CSV (also read from trader/accounts/*.json)")
     ap.add_argument("--windows", help="e.g. 12m,6m,3m,1m,2w,1w (default)")
     ap.add_argument("--no-rolling", action="store_true", help="skip the rolling-window test")
+    ap.add_argument("--universe", choices=["auto", "watchlists"], default="auto",
+                    help="auto: choose from the S&P 500 as it was each day + index funds (default); "
+                         "watchlists: today's hand-picked lists (hindsight)")
+    ap.add_argument("--history", choices=sorted(HISTORY_YEARS), default="5y", help="price history to load")
+    ap.add_argument("--save-data", metavar="DIR", help="also save every chart to DIR (reuse with --offline DIR)")
     ap.add_argument("--strict", action="store_true", help="exit 3 if any self-check fails")
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--json", action="store_true")
@@ -1443,7 +1576,8 @@ def main(argv=None):
     try:
         out, text = replay(a.dir, a.asof, a.cash, a.skip, a.offline, a.account_type,
                            log=lambda m: print(m, file=sys.stderr), windows=parse_windows(a.windows),
-                           holdings=a.holdings, rolling_spec=None if a.no_rolling else ROLLING)
+                           holdings=a.holdings, rolling_spec=None if a.no_rolling else ROLLING,
+                           uni="auto" if a.universe == "auto" else None, history=a.history, save_dir=a.save_data)
     except (ReplayError, mk.MarketError) as e:
         print("replay: %s" % e, file=sys.stderr)
         return 2

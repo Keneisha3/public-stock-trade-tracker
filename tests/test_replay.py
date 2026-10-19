@@ -54,6 +54,13 @@ def write_world(folder, end=_synth.END, crash_after=None):
     return base, off
 
 
+def fake_universe(days):
+    """AAA and MMM in the index all along, BBB joins on day 450, INTC leaves on day 400."""
+    return replay.univ.Universe({"licence": "test", "last_snapshot": days[-1], "members": {
+        "AAA": [["2014-01-01", None]], "MMM": [["2014-01-01", None]], "BBB": [[days[450], None]],
+        "INTC": [["2014-01-01", days[400]]], "BE": [["2014-01-01", None]]}})
+
+
 def load_data(off):
     charts = {f[6:-5]: replay.mk.get_chart(f[6:-5], offline=off) for f in os.listdir(off) if f.startswith("chart-")}
     return replay.Data(charts, {})
@@ -435,6 +442,78 @@ class AgentVariants(unittest.TestCase):
         self.assertEqual(r["curve"][-1][0], ASOF)  # flat cash after the kill, not a curve that stops
 
 
+class PointInTimeUniverse(unittest.TestCase):
+    def test_membership_spans(self):
+        doc = replay.univ.build("date,tickers\n2013-06-03,\"AAA,BRK.B\"\n2015-01-05,\"AAA,BRK.B,CCC\"\n"
+                                "2016-03-01,\"BRK.B,CCC\"\n")
+        u = replay.univ.Universe(doc)
+        self.assertEqual(sorted(u.members_on("2014-06-01")), ["AAA", "BRK-B"])
+        self.assertEqual(sorted(u.members_on("2015-06-01")), ["AAA", "BRK-B", "CCC"])
+        self.assertEqual(sorted(u.members_on("2016-03-01")), ["BRK-B", "CCC"])  # AAA left that day
+        self.assertEqual(u.ever("2016-06-01", "2016-12-31"), ["BRK-B", "CCC"])
+        real = replay.univ.load()
+        self.assertGreater(len(real.members_on("2020-03-20")), 490)
+        self.assertNotIn("TSLA", real.members_on("2020-06-01"))  # joined in December 2020
+        self.assertIn("TSLA", real.members_on("2021-06-01"))
+
+    def test_never_picks_a_stock_before_it_joined_or_after_it_left(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+            uni = fake_universe(data.days)
+            join, left = data.days[450], data.days[400]
+            for st in ("growth", "medium"):
+                r = replay.run_account(data, st, [], data.days[300], ASOF, 100, "TFSA", uni=uni)
+                self.assertTrue(r["fills"], st)
+                for f in r["fills"]:
+                    if f["side"] == "buy":
+                        self.assertFalse(f["ticker"] == "BBB" and f["day"] <= join, f)
+                        self.assertFalse(f["ticker"] == "INTC" and f["day"] > left, f)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto", "pelosi"), offline=off, log=lambda m: None,
+                                      mc_runs=100, rolling_spec=None, uni=uni)
+        finally:
+            shutil.rmtree(d)
+        six = out["results"]["6 months"]
+        self.assertEqual(six["coverage"]["members"], 4)  # AAA, MMM, BBB, BE (INTC has left)
+        self.assertIn("**Universe:**", text)
+        names = {x["name"] for x in out["scenarios"]}
+        self.assertIn("Today's hand-picked watchlist (hindsight)", names)
+        self.assertIn("Stock bot: today's 30 hand-picked large caps (hindsight)", names)
+        self.assertTrue(any(c["name"].startswith("point-in-time universe") for c in out["checks"]))
+
+    def test_scanner_ranks_by_momentum_above_the_trend(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+        finally:
+            shutil.rmtree(d)
+        uni = fake_universe(data.days)
+        top = replay.shortlist(data, "growth", data.days[500], {"momentum_months": 3}, uni, k=2)
+        q = {s: data.quick(s, data.days[500], 63) for s in top}
+        self.assertEqual(len(top), 2)
+        self.assertTrue(all(x["above200"] for x in q.values()))
+        self.assertGreaterEqual(q[top[0]]["ret"], q[top[1]]["ret"])
+        self.assertIsNone(data.quick("BBB", data.days[150], 63))  # under 200 days of history
+
+
+    def test_walk_forward_table(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("walkforward", os.path.join(FIX, "..", "..", "scripts", "walkforward.py"))
+        wf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wf)
+
+        def rep(asof, g, spy):
+            return {"asof": asof, "windows": ["12 months"], "checks": [{"name": "x", "ok": True}],
+                    "results": {"12 months": {"growth": {"return_pct": g}, "S&P 500 (SPY)": {"return_pct": spy},
+                                              "coverage": {"priced": 480, "members": 503}}}}
+        text = wf.table([rep("2022-10-14", -10.0, -15.0), rep("2020-10-16", 30.0, 12.0)])
+        self.assertIn("| 2020-10-16 | 2022-10-14 |", text)  # oldest first
+        self.assertIn("| Growth (Questrade) | +30.0% (+18.0) | -10.0% (+5.0) | 2 of 2 | +11.5 pts |", text)
+        self.assertIn("480 of 503 index members priced", text)
+
+
 class YourHoldingsAndRolling(unittest.TestCase):
     def test_parse_windows(self):
         self.assertEqual(replay.parse_windows("1w,3m,12m"), [("12 months", 365), ("3 months", 91), ("1 week", 7)])
@@ -508,7 +587,10 @@ class NoLookahead(unittest.TestCase):
         try:
             base_a, off_a = write_world(a)
             base_b, off_b = write_world(b)
+            uni = fake_universe(load_data(off_a).days)
             out_a, _ = replay.replay(base_a, ASOF, 100, skip=("crypto",), offline=off_a, log=lambda m: None, mc_runs=200, rolling_spec=None)
+            ua, _ = replay.replay(base_a, ASOF, 100, skip=("crypto",), offline=off_a, log=lambda m: None, mc_runs=200,
+                                  rolling_spec=None, uni=uni)
             for f in os.listdir(off_b):  # world B: same past, then 20 days of prices collapsing 80%
                 if f.startswith("chart-"):
                     with open(os.path.join(off_b, f)) as fh:
@@ -526,12 +608,16 @@ class NoLookahead(unittest.TestCase):
                     with open(os.path.join(off_b, f), "w") as fh:
                         json.dump(doc, fh)
             out_b, _ = replay.replay(base_b, ASOF, 100, skip=("crypto",), offline=off_b, log=lambda m: None, mc_runs=200, rolling_spec=None)
+            ub, _ = replay.replay(base_b, ASOF, 100, skip=("crypto",), offline=off_b, log=lambda m: None, mc_runs=200,
+                                  rolling_spec=None, uni=uni)
         finally:
             shutil.rmtree(a)
             shutil.rmtree(b)
-        for w in out_a["results"]:  # values, curves, holdings, fills, insights, factors: all identical
-            for k, va in out_a["results"][w].items():
-                self.assertEqual(va, out_b["results"][w][k], "%s %s" % (w, k))
+        for x, y in ((out_a, out_b), (ua, ub)):  # watchlists, then the point-in-time universe
+            for w in x["results"]:  # values, curves, holdings, fills, insights, factors: all identical
+                for k, va in x["results"][w].items():
+                    self.assertEqual(va, y["results"][w][k], "%s %s" % (w, k))
+            self.assertEqual(x["scenarios"], y["scenarios"])
 
 
 class Crypto(unittest.TestCase):

@@ -9,6 +9,12 @@ name: replay
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "replay (one as-of date) or walk-forward (five periods 2019-2026, 10 years of prices, needs a label)"
+        required: false
+        default: "replay"
+        type: choice
+        options: ["replay", "walk-forward"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -37,6 +43,7 @@ concurrency:
 
 jobs:
   replay:
+    if: ${{ inputs.mode != 'walk-forward' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -116,4 +123,107 @@ jobs:
             git add report.md report.json "history/$asof.md"
             git commit -qm "Replay as of the close on $asof" || echo "no change"
           fi
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- walk-forward
+  # Download 10 years of prices once (every S&P 500 member since 2016 + index
+  # funds + a Canadian list), replay five periods in parallel (including the 2020
+  # crash and the 2022 bear market), combine them into research/<label>/.
+
+  wf-data:
+    if: ${{ inputs.mode == 'walk-forward' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check inputs
+        env:
+          LABEL: ${{ inputs.label }}
+          WINDOWS: ${{ inputs.windows }}
+        run: |
+          [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
+          [[ -z "$WINDOWS" || "$WINDOWS" =~ ^[0-9]+[dwmy](,[0-9]+[dwmy])*$ ]] || { echo "windows like 24m,12m"; exit 1; }
+      - name: Download 10 years of prices
+        run: |
+          python trade.py init
+          python .claude/skills/trader-replay/replay.py --history 10y --save-data market --windows 1m \
+            --no-rolling --skip crypto pelosi > /dev/null
+          ls market | wc -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: market-data
+          path: market
+          retention-days: 3
+
+  wf-period:
+    needs: wf-data
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        asof: ["2019-10-18", "2020-10-16", "2022-10-14", "2024-10-18", "2026-10-16"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: market-data
+          path: market
+      - name: Replay the period ending ${{ matrix.asof }}
+        env:
+          WINDOWS: ${{ inputs.windows || '24m,12m' }}
+          ASOF: ${{ matrix.asof }}
+        run: |
+          python trade.py init
+          mkdir -p out
+          status=0
+          python .claude/skills/trader-replay/replay.py --offline market --history 10y --asof "$ASOF" \
+            --windows "$WINDOWS" --skip crypto pelosi --strict > /dev/null || status=$?
+          cp trader/replay/report.md "out/report-$ASOF.md"
+          cp trader/replay/report.json "out/report-$ASOF.json"
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: period-${{ matrix.asof }}
+          path: out
+          if-no-files-found: ignore
+
+  wf-combine:
+    needs: wf-period
+    if: ${{ always() && inputs.mode == 'walk-forward' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: period-*
+          path: out
+          merge-multiple: true
+      - name: Walk-forward table
+        run: |
+          python scripts/walkforward.py out/summary.md out/report-*.json
+          cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        env:
+          LABEL: ${{ inputs.label }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out" && cp out/* "$RUNNER_TEMP/out/"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p "research/$LABEL"
+          cp "$RUNNER_TEMP"/out/summary.md "$RUNNER_TEMP"/out/report-*.md "$RUNNER_TEMP"/out/report-*.json "research/$LABEL/"
+          git add "research/$LABEL"
+          git commit -qm "Walk-forward research: $LABEL" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done

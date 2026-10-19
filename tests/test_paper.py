@@ -103,6 +103,16 @@ class Engine(unittest.TestCase):
         self.assertGreater(parked["equity"][-1][1], plain["equity"][-1][1])  # ...instead of sitting in cash
         self.assertLess(plain["cash"] / plain["equity"][-1][1], 1.01)
 
+    def test_only_index_members_are_traded(self):
+        ch = charts(gaps={"BBB": {N - 10: 6}, "CCC": {N - 10: 6}})
+        days, bars_by, regime = paper.prepare(ch)
+        led = paper.new_ledger(10000)
+        for d in days[paper.WARMUP:]:
+            paper.step(led, d, bars_by, regime, eligible=lambda day: {"AAA", "CCC", "DDD"})
+        traded = {t["ticker"] for t in led["trades"]} | set(led["positions"])
+        self.assertIn("CCC", traded)
+        self.assertNotIn("BBB", traded)  # not a member: its breach is ignored
+
     def test_backtest_reports_bot_and_benchmark(self):
         res = paper.backtest(charts(gaps={"AAA": {150: 6, 220: 5}, "CCC": {180: 6}}))
         for k in ("total_pct", "sharpe", "max_dd_pct", "trades", "win_rate_pct"):

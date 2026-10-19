@@ -113,11 +113,15 @@ def prepare(charts, p=PARAMS):
     return days, bars_by, regime_series(bars_by, days, p["regime_ma"])
 
 
-def signals_on(day, bars_by, regime, p=PARAMS):
+def signals_on(day, bars_by, regime, p=PARAMS, eligible=None):
+    """eligible(day) -> set of tickers allowed that day (point-in-time index members), or None."""
     if regime.get(day) != "bull":
         return []
     out = []
+    allowed = eligible(day) if eligible else None
     for s, idx in bars_by.items():
+        if allowed is not None and s not in allowed:
+            continue
         b = idx.get(day)
         if b and b["move_atr"] is not None and b["move_atr"] >= p["breach_atr"] and b["atr"]:
             out.append({"ticker": s, "move_atr": round(b["move_atr"], 2), "atr": b["atr"], "close": b["c"]})
@@ -144,7 +148,7 @@ def _idle_sell(led, value, ib, p):
         led["cash"] += q * ib["o"] - _cost(q * ib["o"], p)
 
 
-def step(led, day, bars_by, regime, p=PARAMS, idle_bars=None):
+def step(led, day, bars_by, regime, p=PARAMS, idle_bars=None, eligible=None):
     """One trading day: fill yesterday's signals at the open, run stops and
     exits, mark to market at the close, then queue today's signals.
     idle_bars ({day: bar} of p["idle"]): park unused cash there at the open."""
@@ -213,7 +217,7 @@ def step(led, day, bars_by, regime, p=PARAMS, idle_bars=None):
     # 4. today's signals -> tomorrow's open
     held = set(led["positions"])
     room = p["max_positions"] - len(held)
-    for sig in signals_on(day, bars_by, regime, p):
+    for sig in signals_on(day, bars_by, regime, p, eligible):
         if room <= 0:
             break
         if sig["ticker"] in held:
