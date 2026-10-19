@@ -64,7 +64,7 @@ class Replay(unittest.TestCase):
     def setUpClass(cls):
         cls.dir = tempfile.mkdtemp()
         cls.base, cls.off = write_world(cls.dir)
-        cls.out, cls.text = replay.replay(cls.base, ASOF, 100, skip=("crypto",), offline=cls.off, log=lambda m: None, mc_runs=200)
+        cls.out, cls.text = replay.replay(cls.base, ASOF, 100, skip=("crypto",), offline=cls.off, log=lambda m: None, mc_runs=200, rolling_spec=None)
 
     @classmethod
     def tearDownClass(cls):
@@ -72,7 +72,7 @@ class Replay(unittest.TestCase):
 
     def test_windows_and_report(self):
         r = self.out["results"]
-        self.assertEqual(list(r), ["6 months", "1 month", "2 weeks", "1 week"])
+        self.assertEqual(list(r), ["12 months", "6 months", "3 months", "1 month", "2 weeks", "1 week"])
         self.assertEqual(r["1 week"]["start"], "2026-10-09")
         self.assertEqual(r["2 weeks"]["start"], "2026-10-02")
         for w in r.values():
@@ -169,7 +169,7 @@ class Insights(unittest.TestCase):
         d = tempfile.mkdtemp()
         try:
             base, off = write_world(d)
-            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200, rolling_spec=None)
         finally:
             shutil.rmtree(d)
         six = out["results"]["6 months"]
@@ -212,11 +212,11 @@ class MonteCarlo(unittest.TestCase):
         d = tempfile.mkdtemp()
         try:
             base, off = write_world(d)
-            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200, rolling_spec=None)
         finally:
             shutil.rmtree(d)
         self.assertIn("growth", out["monte_carlo"]["strategies"])
-        self.assertIn("risk", out["results"]["6 months"]["growth"])
+        self.assertIn("risk", out["results"]["12 months"]["growth"])  # risk stats on the longest window
         self.assertIn("## Monte Carlo", text)
 
 
@@ -254,7 +254,7 @@ class Settings(unittest.TestCase):
             cfg["accounts"][0]["rules"] = {"momentum_months": 3, "max_position_pct": 40}
             with open(os.path.join(base, "accounts.json"), "w") as fh:
                 json.dump(cfg, fh)
-            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200, rolling_spec=None)
         finally:
             shutil.rmtree(d)
         sc = {x["name"]: x for x in out["scenarios"]}
@@ -264,7 +264,7 @@ class Settings(unittest.TestCase):
         div = sc["Diversified: 10% cap, 10+ names"]
         self.assertEqual(conc["settings"]["max_position_pct"], 35)
         self.assertNotEqual(conc["results"]["6 months"]["value"], div["results"]["6 months"]["value"])
-        self.assertEqual(set(conc["results"]), {"6 months", "1 month", "2 weeks", "1 week"})
+        self.assertEqual(set(conc["results"]), {"12 months", "6 months", "3 months", "1 month", "2 weeks", "1 week"})
         self.assertIn("## Scenarios", text)
 
     def test_monte_carlo_leaves_out_short_histories(self):
@@ -295,7 +295,7 @@ class Vix(unittest.TestCase):
         d = tempfile.mkdtemp()
         try:
             base, off = write_world(d)
-            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200, rolling_spec=None)
             days = load_data(off).days
         finally:
             shutil.rmtree(d)
@@ -326,6 +326,72 @@ class Vix(unittest.TestCase):
         self.assertEqual(r["value"], 100)
 
 
+class YourHoldingsAndRolling(unittest.TestCase):
+    def test_parse_windows(self):
+        self.assertEqual(replay.parse_windows("1w,3m,12m"), [("12 months", 365), ("3 months", 91), ("1 week", 7)])
+        self.assertIsNone(replay.parse_windows(""))
+
+    def test_your_holdings_rows_and_rolling_windows(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            os.makedirs(os.path.join(base, "accounts"), exist_ok=True)
+            with open(os.path.join(base, "accounts", "q.json"), "w") as fh:  # your real Questrade mix
+                json.dump({"account": "q", "source": "questrade-api", "cash": {}, "positions": [
+                    {"ticker": "AAA", "shares": 3}, {"ticker": "BE", "shares": 20}]}, fh)
+            csv = os.path.join(d, "ws.csv")
+            with open(csv, "w") as fh:
+                fh.write("Symbol,Exchange,Quantity\nDIV,TSX,40\n")
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None,
+                                      mc_runs=100, holdings=["w=" + csv],
+                                      rolling_spec={"horizon_days": 30, "step_days": 30, "count": 3})
+        finally:
+            shutil.rmtree(d)
+        one = out["results"]["1 month"]
+        for k in ("mine:q:held", "mine:q:rules", "mine:w:held", "mine:w:rules"):
+            self.assertIn(k, one)
+            self.assertIn(k, out["labels"])
+        self.assertEqual(sorted(one["mine:q:held"]["holdings"]), ["AAA", "BE"])
+        self.assertEqual(one["mine:w:held"]["holdings"], ["DIV.TO"])
+        self.assertIn("Your q, held as is", text)
+        roll = out["rolling"]["table"]
+        self.assertEqual(roll["growth"]["windows"], 3)
+        self.assertIn("mine:q:held", roll)
+        self.assertIsNone(roll["S&P 500 (SPY)"]["beat_spy"])
+        self.assertLessEqual(roll["growth"]["beat_spy"], 3)
+        self.assertIn("## Rolling 30-day windows", text)
+
+    def test_self_checks_pass_on_a_clean_run_and_catch_bad_numbers(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None,
+                                      mc_runs=100, rolling_spec={"horizon_days": 30, "step_days": 30, "count": 3})
+            data = load_data(off)
+        finally:
+            shutil.rmtree(d)
+        self.assertTrue(all(c["ok"] for c in out["checks"]), out["checks"])
+        self.assertIn("## Self-checks", text)
+        out["results"]["1 week"]["growth"]["value"] = float("nan")
+        out["results"]["1 week"]["S&P 500 (SPY)"]["return_pct"] += 9
+        del out["results"]["1 month"]["dividend"]
+        failed = {c["name"] for c in replay.checks(out, data, None) if not c["ok"]}
+        self.assertIn("values are positive and finite", failed)
+        self.assertIn("every window has every core strategy", failed)
+        self.assertTrue(any(n.startswith("S&P 500 row matches") for n in failed))
+
+    def test_demo_holdings_are_ignored(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            os.makedirs(os.path.join(base, "accounts"), exist_ok=True)
+            with open(os.path.join(base, "accounts", "q.json"), "w") as fh:
+                json.dump({"account": "q", "source": "demo", "positions": [{"ticker": "AAA", "shares": 3}]}, fh)
+            self.assertEqual(replay.my_holdings(base), {})
+        finally:
+            shutil.rmtree(d)
+
+
 class NoLookahead(unittest.TestCase):
     def test_identical_results_with_a_different_future(self):
         """Same past, different future: every number up to the as-of date is identical."""
@@ -333,7 +399,7 @@ class NoLookahead(unittest.TestCase):
         try:
             base_a, off_a = write_world(a)
             base_b, off_b = write_world(b)
-            out_a, _ = replay.replay(base_a, ASOF, 100, skip=("crypto",), offline=off_a, log=lambda m: None, mc_runs=200)
+            out_a, _ = replay.replay(base_a, ASOF, 100, skip=("crypto",), offline=off_a, log=lambda m: None, mc_runs=200, rolling_spec=None)
             for f in os.listdir(off_b):  # world B: same past, then 20 days of prices collapsing 80%
                 if f.startswith("chart-"):
                     with open(os.path.join(off_b, f)) as fh:
@@ -350,7 +416,7 @@ class NoLookahead(unittest.TestCase):
                     r["meta"]["regularMarketTime"] = r["timestamp"][-1]
                     with open(os.path.join(off_b, f), "w") as fh:
                         json.dump(doc, fh)
-            out_b, _ = replay.replay(base_b, ASOF, 100, skip=("crypto",), offline=off_b, log=lambda m: None, mc_runs=200)
+            out_b, _ = replay.replay(base_b, ASOF, 100, skip=("crypto",), offline=off_b, log=lambda m: None, mc_runs=200, rolling_spec=None)
         finally:
             shutil.rmtree(a)
             shutil.rmtree(b)
@@ -376,7 +442,7 @@ class Crypto(unittest.TestCase):
                     bars.append({"t": t, "o": o, "h": max(o, px) * 1.001, "l": min(o, px) * 0.999, "c": px, "v": 5})
                 with open(os.path.join(off, "candles-%s.json" % c), "w") as fh:
                     json.dump(bars, fh)
-            out, text = replay.replay(base, ASOF, 100, skip=("pelosi",), offline=off, log=lambda m: None, mc_runs=200)
+            out, text = replay.replay(base, ASOF, 100, skip=("pelosi",), offline=off, log=lambda m: None, mc_runs=200, rolling_spec=None)
         finally:
             shutil.rmtree(d)
         one = out["results"]["1 week"]["crypto team"]

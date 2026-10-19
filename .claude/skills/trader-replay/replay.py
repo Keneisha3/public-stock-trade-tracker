@@ -45,7 +45,9 @@ import ptr  # noqa: E402
 import team  # noqa: E402
 import vix  # noqa: E402
 
-WINDOWS = [("6 months", 182), ("1 month", 30), ("2 weeks", 14), ("1 week", 7)]
+WINDOWS = [("12 months", 365), ("6 months", 182), ("3 months", 91), ("1 month", 30), ("2 weeks", 14), ("1 week", 7)]
+CRYPTO_MAX_DAYS = 182  # 15-minute crypto history past 6 months is slow to fetch and replay
+ROLLING = {"horizon_days": 91, "step_days": 30, "count": 12}  # 3-month windows, a new one each month
 COSTS = {"fx_fee_pct": 1.5, "slippage_pct": 0.05, "us_withholding_pct": 15.0}
 PELOSI_LOOKBACK_DAYS = 120  # filings already public at the start shape the starting basket
 
@@ -236,7 +238,31 @@ def _review_days(days, start, asof, every=7):
 
 # ---------------------------------------------------------------- strategies
 
-def run_account(data, strategy, watch, start, asof, cash, account_type, overrides=None):
+def _seed_orders(data, shares, start, cash):
+    """Buy today's mix (share counts) in the same proportions at the first open after `start`."""
+    vals = {}
+    for t, q in shares.items():
+        px = data.close(t, start)
+        if px and q > 0:
+            ccy = (data.charts[t]["currency"] or "USD").upper()
+            vals[t] = q * px * (data.fx(start) if ccy == "USD" else 1.0)
+    tot = sum(vals.values())
+    return [{"side": "buy", "ticker": t, "cad": cash * 0.995 * v / tot, "decided": start} for t, v in vals.items()] \
+        if tot else []
+
+
+def run_mix(data, shares, start, asof, cash, account_type="TFSA"):
+    """Your current holdings, in today's proportions, bought at the start and simply held."""
+    pf = Portfolio(data, cash, account_type)
+    orders = _seed_orders(data, shares, start, cash)
+    for d in [d for d in data.days if start <= d <= asof]:
+        pf.pay_dividends(d)
+        orders = pf.fill(orders, d)
+        pf.mark(d)
+    return pf.result(asof, cash)
+
+
+def run_account(data, strategy, watch, start, asof, cash, account_type, overrides=None, seed=None):
     rules = dict(acc.RULES[strategy], min_trade=1)
     rules.update(overrides or {})
     acct = {"id": strategy, "name": strategy, "strategy": strategy, "type": account_type, "fractional": True,
@@ -244,6 +270,9 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
     pf, pending, notes = Portfolio(data, cash, account_type), [], []
     days = [d for d in data.days if start <= d <= asof]
     reviews = _review_days(days, start, asof, int(rules.get("review_every_days") or 7))
+    if seed:  # start from your current mix; the rules take over at the first review after that
+        pending = _seed_orders(data, seed, start, cash)
+        reviews.discard(start)
     for d in days:
         pf.pay_dividends(d)  # ex-date: only shares owned before today's open are paid
         pending = pf.fill(pending, d)
@@ -705,7 +734,7 @@ def run_scenarios(data, watch, starts, asof, cash, account_type, scenarios):
             r = run_account(data, strategy, watch[strategy], start, asof, cash, account_type, over)
             row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
                                      "fees": r["fees"], "holdings": r["holdings"]}
-            if label == WINDOWS[0][0]:
+            if label == starts[0][0]:
                 row["risk"] = risk_stats(r["curve"]) if len(r["curve"]) > 20 else None
         rows.append(row)
     return rows
@@ -808,6 +837,130 @@ def monte_carlo(curves, bench="S&P 500 (SPY)", runs=5000, horizon=126, block=5, 
     return out
 
 
+# ---------------------------------------------------------------- your holdings
+
+def my_holdings(base, extra=None):
+    """{account id: {name, strategy, type, shares}} from trader/accounts/<id>.json, plus any
+    --holdings ID=FILE CSVs. These stay on your computer: the replay writes them only to trader/."""
+    cfg = acc.read_json(os.path.join(base, "accounts.json"), {}) or {}
+    out = {}
+    for a in cfg.get("accounts", []):
+        h = acc.read_json(os.path.join(base, "accounts", "%s.json" % a.get("id")), {}) or {}
+        shares = {}
+        for p in h.get("positions", []):
+            shares[mk.yahoo_symbol(p["ticker"])] = shares.get(mk.yahoo_symbol(p["ticker"]), 0) + float(p["shares"])
+        if shares and h.get("source") != "demo":
+            out[a["id"]] = {"name": a.get("name", a["id"]), "strategy": a.get("strategy", "growth"),
+                            "type": a.get("type", "TFSA"), "shares": shares, "rules": a.get("rules") or {}}
+    for spec in extra or []:
+        aid, _, path = spec.partition("=")
+        with open(path, encoding="utf-8-sig", errors="replace") as fh:
+            doc = acc.parse_holdings_csv(fh.read(), aid)
+        a = [x for x in cfg.get("accounts", []) if x.get("id") == aid]
+        shares = {p["ticker"]: float(p["shares"]) for p in doc["positions"]}
+        out[aid] = {"name": a[0].get("name", aid) if a else aid, "strategy": a[0].get("strategy", "growth") if a else "growth",
+                    "type": a[0].get("type", "TFSA") if a else "TFSA", "shares": shares,
+                    "rules": (a[0].get("rules") or {}) if a else {}}
+    return out
+
+
+def mine_rows(data, mine, watch, start, end, cash):
+    rows, labels = {}, {}
+    for aid, m in mine.items():
+        held = {t: q for t, q in m["shares"].items() if t in data.charts}
+        if not held:
+            continue
+        k1, k2 = "mine:%s:held" % aid, "mine:%s:rules" % aid
+        rows[k1] = run_mix(data, held, start, end, cash, m["type"])
+        over = {k: v for k, v in m["rules"].items() if k in acc.TUNABLE}
+        rows[k2] = run_account(data, m["strategy"], sorted(set(watch[m["strategy"]]) | set(held)), start, end, cash,
+                               m["type"], over, seed=held)
+        labels[k1] = "Your %s, held as is" % m["name"]
+        labels[k2] = "Your %s, run by its %s rules" % (m["name"], m["strategy"])
+    return rows, labels
+
+
+# ---------------------------------------------------------------- rolling windows: does it KEEP working?
+
+def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec=ROLLING, include_pelosi=True):
+    """Many equal-length windows (default 3 months, a new one each month for a year). The
+    question is not 'did it win once' but 'how often did it beat the S&P 500'."""
+    starts = []
+    for i in range(spec["count"]):
+        end_target = _date(asof) - datetime.timedelta(days=i * spec["step_days"])
+        end = data.trading_day_on_or_before(end_target.isoformat())
+        start = data.trading_day_on_or_before((end_target - datetime.timedelta(days=spec["horizon_days"])).isoformat())
+        if start < end:
+            starts.append((start, end))
+    runs = {}
+    for start, end in reversed(starts):
+        row = {s: run_account(data, s, watch[s], start, end, cash, account_type) for s in ("growth", "medium", "dividend")}
+        row["stock bot"] = run_stockbot(data, universe, start, end, cash)
+        if VIX_SYM in data.charts:
+            row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
+        if include_pelosi:
+            row["Pelosi copycat"] = run_pelosi(data, filings, start, end, cash)
+        row["S&P 500 (SPY)"] = run_hold(data, {"SPY": 1.0}, start, end, cash)
+        row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, end, cash)
+        row.update(mine_rows(data, mine, watch, start, end, cash)[0])
+        for k, r in row.items():
+            runs.setdefault(k, []).append((start, end, r["return_pct"], row["S&P 500 (SPY)"]["return_pct"]))
+    import statistics
+    table = {}
+    for k, xs in runs.items():
+        rets = [x[2] for x in xs]
+        table[k] = {"windows": len(xs), "avg_pct": round(statistics.mean(rets), 2),
+                    "median_pct": round(statistics.median(rets), 2), "best_pct": max(rets), "worst_pct": min(rets),
+                    "positive": sum(1 for r in rets if r > 0),
+                    "beat_spy": None if k == "S&P 500 (SPY)" else sum(1 for x in xs if x[2] > x[3]),
+                    "runs": [{"start": a, "end": b, "return_pct": r} for a, b, r, _ in xs]}
+    return {"horizon_days": spec["horizon_days"], "step_days": spec["step_days"], "table": table}
+
+
+# ---------------------------------------------------------------- self-checks
+
+CORE = ("growth", "medium", "dividend", "stock bot", "S&P 500 (SPY)", "TSX 60 (XIU.TO)")
+
+
+def checks(out, data, rolling_spec):
+    """Sanity checks on the finished replay. Each is {name, ok, detail}; any failure means
+    the numbers should not be trusted (--strict exits non-zero)."""
+    import math
+    res, asof = [], out["asof"]
+
+    def add(name, ok, detail):
+        res.append({"name": name, "ok": bool(ok), "detail": detail})
+    last = data.days[-1] if data.days else None
+    add("prices reach the as-of date", last is not None and last >= asof, "last SPY bar %s, as of %s" % (last, asof))
+    missing = ["%s: %s" % (w, k) for w, row in out["results"].items() for k in CORE if k not in row]
+    add("every window has every core strategy", not missing, ", ".join(missing[:6]) or "all present")
+    bad = ["%s: %s" % (w, k) for w, row in out["results"].items() for k, r in row.items()
+           if isinstance(r, dict) and "value" in r and not (isinstance(r["value"], (int, float))
+                                                            and math.isfinite(r["value"]) and r["value"] > 0)]
+    add("values are positive and finite", not bad, ", ".join(bad[:6]) or "all good")
+    off = []
+    for w, row in out["results"].items():
+        for k, r in row.items():
+            c = isinstance(r, dict) and r.get("curve")
+            if c and (c[0][0] != row["start"] or c[-1][0] != asof):
+                off.append("%s: %s" % (w, k))
+    add("daily curves run from each start to the as-of close", not off, ", ".join(off[:6]) or "all aligned")
+    worst = 0.0
+    for w, row in out["results"].items():
+        spy = row.get("S&P 500 (SPY)")
+        p0, p1 = data.close("SPY", row["start"]), data.close("SPY", asof)
+        f0, f1 = data.fx(row["start"]), data.fx(asof)
+        if spy and p0 and p1:
+            expect = 100 * ((p1 / p0) * (f1 / f0) * (1 - COSTS["fx_fee_pct"] / 100) - 1)
+            worst = max(worst, abs(spy["return_pct"] - expect))
+    add("S&P 500 row matches the raw price change (after FX, costs; overnight gap and dividends allowed)",
+        worst <= 2.5, "largest gap %.2f points" % worst)
+    if rolling_spec and out.get("rolling"):
+        n = max((x["windows"] for x in out["rolling"]["table"].values()), default=0)
+        add("rolling windows all ran", n == rolling_spec["count"], "%d of %d" % (n, rolling_spec["count"]))
+    return res
+
+
 # ---------------------------------------------------------------- the whole replay
 
 def watchlists(base):
@@ -827,8 +980,12 @@ def latest_friday(days):
     return days[-1]
 
 
-def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print, mc_runs=5000):
+def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print, mc_runs=5000,
+           windows=None, holdings=None, rolling_spec=ROLLING):
+    windows = windows or WINDOWS
     watch = watchlists(base)
+    mine = my_holdings(base, holdings)
+    labels = {}
     universe = [mk.yahoo_symbol(s) for s in paper.universe(os.path.join(base, "paper", "config.json"))]
     errors = []
     filings = []
@@ -839,11 +996,11 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         errors += errs
     pelosi_syms = sorted({t for _, rows in filings for t in pelosi_signals(rows)[0]})
     syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X", VIX_SYM]) | {s for v in watch.values() for s in v} | set(universe)
-                  | set(pelosi_syms))
+                  | set(pelosi_syms) | {t for m in mine.values() for t in m["shares"]})
     charts = {}
     for s in syms:
         try:
-            charts[s] = mk.get_chart(s, offline=offline, range_="2y")
+            charts[s] = mk.get_chart(s, offline=offline, range_="5y")
         except mk.MarketError as e:
             errors.append(str(e))
     if "SPY" not in charts:
@@ -854,7 +1011,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     candles = {}
     if "crypto" not in skip:
         cfg = dict(team.DEFAULTS)
-        first = (_date(asof) - datetime.timedelta(days=max(n for _, n in WINDOWS) + 4)).isoformat()
+        first = (_date(asof) - datetime.timedelta(days=min(CRYPTO_MAX_DAYS, max(n for _, n in windows)) + 4)).isoformat()
         t0 = market_close_utc(first) - (cfg["lookback_bars"] + 4) * cfg["interval_min"] * 60
         if offline:
             for c in cfg["coins"]:
@@ -867,14 +1024,14 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                                                cfg["interval_min"])
             errors += errs
     results = {}
-    for label, n in WINDOWS:
+    for label, n in windows:
         start = data.trading_day_on_or_before((_date(asof) - datetime.timedelta(days=n)).isoformat())
         log("replaying %s (from the close of %s)..." % (label, start))
         row = {"start": start}
         for strat in ("growth", "medium", "dividend"):
             row[strat] = run_account(data, strat, watch[strat], start, asof, cash, account_type)
         row["stock bot"] = run_stockbot(data, universe, start, asof, cash)
-        if candles:
+        if candles and n <= CRYPTO_MAX_DAYS:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
             if c.get("btc_hold"):
@@ -885,6 +1042,9 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
             row["VIX agent"] = run_vix_agent(data, start, asof, cash, VIX_RULES[0][1])
         row["S&P 500 (SPY)"] = run_hold(data, {"SPY": 1.0}, start, asof, cash)
         row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, asof, cash)
+        rows, lab = mine_rows(data, mine, watch, start, asof, cash)
+        row.update(rows)
+        labels.update(lab)
         row["cash"] = {"value": round(cash, 2), "return_pct": 0.0}
         row["factors"] = factors(data, start, asof, filings)
         if VIX_SYM in data.charts:
@@ -893,14 +1053,14 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                     r["vix_regimes"] = vix_regimes(r["curve"], data)
         row["insights"] = insights(row, row["factors"], cash)
         results[label] = row
-    longest = results[WINDOWS[0][0]]
+    longest = results[windows[0][0]]
     curves, short = mc_curves(longest)
     for k, c in curves.items():
         longest[k]["risk"] = risk_stats(c)
     mc = monte_carlo(curves, cash=cash, runs=mc_runs)
     if mc:
         mc["left_out"] = short
-    starts = [(label, results[label]["start"]) for label, _ in WINDOWS]
+    starts = [(label, results[label]["start"]) for label, _ in windows]
     scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base))
     if VIX_SYM in data.charts:
         for name, rule in VIX_RULES:
@@ -909,15 +1069,22 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                 r = run_vix_agent(data, start, asof, cash, rule)
                 row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
                                          "fees": r["fees"], "holdings": r["holdings"]}
-                if label == WINDOWS[0][0]:
+                if label == windows[0][0]:
                     row["risk"] = risk_stats(r["curve"]) if len(r["curve"]) > 20 else None
             scen.append(row)
+    roll = None
+    if rolling_spec:
+        log("rolling %d-day windows..." % rolling_spec["horizon_days"])
+        roll = rolling(data, watch, universe, filings, mine, asof, cash, account_type, rolling_spec,
+                       include_pelosi="pelosi" not in skip)
     out = {"asof": asof, "cash": cash, "account_type": account_type, "costs": COSTS, "results": results,
-           "monte_carlo": mc, "scenarios": scen,
+           "monte_carlo": mc, "scenarios": scen, "rolling": roll, "labels": labels,
+           "windows": [w for w, _ in windows], "has_holdings": bool(mine),
            "overall": overall(results), "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
            "errors": errors, "pelosi_filings": [f for f, _ in filings], "watchlists": watch,
            "note": "Point-in-time replay: decisions use data up to each day's close, fills at the next open. "
                    "Watchlists are today's, which is a hindsight bias. Not financial advice."}
+    out["checks"] = checks(out, data, rolling_spec)
     folder = os.path.join(base, "replay")
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, "report.json"), "w", encoding="utf-8") as fh:
@@ -940,12 +1107,19 @@ def _p(x):
 
 
 def render(out):
-    wins = [w for w, _ in WINDOWS if w in out["results"]]
+    wins = out.get("windows") or list(out["results"])
+    labels = out.get("labels") or {}
+
+    def lab(k):
+        return labels.get(k) or LABELS.get(k, k)
+    mine = sorted(k for w in wins for k in out["results"][w] if k.startswith("mine:"))
+    mine = list(dict.fromkeys(mine))
+    keys = ORDER[:7] + mine + ORDER[7:]
     L = ["# $%g replay, as of the close on %s" % (out["cash"], out["asof"]), "",
          "Each cell: value at the close on %s (return). Starts: %s." % (
              out["asof"], ", ".join("%s = %s" % (w, out["results"][w]["start"]) for w in wins)), "",
          "| strategy | " + " | ".join(wins) + " |", "| --- |" + " ---: |" * len(wins)]
-    for k in ORDER:
+    for k in keys:
         cells = []
         for w in wins:
             r = out["results"][w].get(k)
@@ -954,12 +1128,12 @@ def render(out):
             if k == "Pelosi copycat":
                 L.append("| **%s** | " % "Pelosi copycat (separate)" + " | ".join(cells) + " |")
             else:
-                L.append("| %s | " % LABELS.get(k, k) + " | ".join(cells) + " |")
+                L.append("| %s | " % (("**%s**" % lab(k)) if k.startswith("mine:") else lab(k)) + " | ".join(cells) + " |")
     L += ["", "## Details", ""]
     for w in wins:
         r = out["results"][w]
         L.append("**%s** (from %s)" % (w, r["start"]))
-        for k in ORDER[:6]:
+        for k in ORDER[:7] + mine:
             x = r.get(k)
             if not x:
                 continue
@@ -976,11 +1150,13 @@ def render(out):
                 bits.append("kill switch: " + x["killed"])
             if k == "Pelosi copycat":
                 bits.append("filings used: %s" % (", ".join(x["filings_used"]) or "none yet"))
-            L.append("- %s: %s" % (LABELS.get(k, k), "; ".join(bits)))
+            if x.get("switches") is not None:
+                bits.append("in the market %s%% of days, %d switches" % (x["risk_on_days_pct"], x["switches"]))
+            L.append("- %s: %s" % (lab(k), "; ".join(bits)))
         L.append("")
     L += ["## What is going well, what is not", ""]
     for k, t in sorted(out.get("overall", {}).items(), key=lambda kv: -kv[1]["beat_spy"]):
-        L.append("- **%s** beat the S&P 500 in %d of %d windows" % (LABELS.get(k, k), t["beat_spy"], t["windows"]))
+        L.append("- **%s** beat the S&P 500 in %d of %d windows" % (lab(k), t["beat_spy"], t["windows"]))
     L.append("")
     for w in wins:
         r = out["results"][w]
@@ -992,12 +1168,12 @@ def render(out):
             (", VIX %.1f -> %.1f (high %.1f, now %s)" % (f["vix_start"], f["vix_end"], f["vix_max"], f["vix_regime"]))
             if f.get("vix_end") else ""))
         for k, n in (r.get("insights") or {}).items():
-            L.append("- **%s**: + %s / - %s" % (LABELS.get(k, k), "; ".join(n["going_well"]) or "nothing stood out",
+            L.append("- **%s**: + %s / - %s" % (lab(k), "; ".join(n["going_well"]) or "nothing stood out",
                                                  "; ".join(n["not_going_well"]) or "nothing stood out"))
         L.append("")
     if out.get("scenarios"):
         L += ["## Scenarios: same strategy, different settings", "",
-              "| strategy | scenario | changed inputs | " + " | ".join(wins) + " | Sharpe (6 mo) | worst drop |",
+              "| strategy | scenario | changed inputs | " + " | ".join(wins) + " | Sharpe (%s) | worst drop |" % wins[0],
               "| --- | --- | --- |" + " ---: |" * (len(wins) + 2)]
         for sc in out["scenarios"]:
             rk = sc.get("risk") or {}
@@ -1006,17 +1182,33 @@ def render(out):
                 " | ".join("%+.1f%%" % sc["results"][w]["return_pct"] for w in wins),
                 rk.get("sharpe", "–"), _p(rk.get("max_dd_pct"))))
         L.append("")
-    six = out["results"][WINDOWS[0][0]]
+    roll = out.get("rolling")
+    if roll and roll.get("table"):
+        t = roll["table"]
+        L += ["## Rolling %d-day windows: does it keep working?" % roll["horizon_days"], "",
+              "%d windows of %d days, a new one every %d days. Beating the S&P 500 in most of them is "
+              "evidence; one good window is luck." % (max(x["windows"] for x in t.values()), roll["horizon_days"],
+                                                       roll["step_days"]), "",
+              "| strategy | beat S&P 500 | made money | average | median | best | worst |",
+              "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+        for k in sorted(t, key=lambda k: (-(t[k]["beat_spy"] or 0), -t[k]["avg_pct"])):
+            x = t[k]
+            L.append("| %s | %s | %d of %d | %s | %s | %s | %s |" % (
+                lab(k), "–" if x["beat_spy"] is None else "%d of %d" % (x["beat_spy"], x["windows"]),
+                x["positive"], x["windows"], _p(x["avg_pct"]), _p(x["median_pct"]), _p(x["best_pct"]),
+                _p(x["worst_pct"])))
+        L.append("")
+    six = out["results"][wins[0]]
     if any(isinstance(r, dict) and r.get("vix_regimes") for r in six.values()):
         names = [n for _, n in vix.REGIMES]
-        L += ["## By VIX regime (6 months)", "",
+        L += ["## By VIX regime (%s)" % wins[0], "",
               "Average daily return on days after the VIX closed calm (<15), normal (15-20), nervous (20-30) "
               "or in fear (30+), and how each strategy moved with the VIX (-1 = falls when fear rises).", "",
               "| strategy | " + " | ".join(names) + " | corr. with VIX |", "| --- |" + " ---: |" * (len(names) + 1)]
-        for k in ORDER:
+        for k in keys:
             vr = (six.get(k) or {}).get("vix_regimes")
             if vr:
-                L.append("| %s | %s | %s |" % (LABELS.get(k, k), " | ".join(
+                L.append("| %s | %s | %s |" % (lab(k), " | ".join(
                     ("%+.2f%% (%dd)" % (vr[n]["avg_daily_pct"], vr[n]["days"])) if vr[n]["avg_daily_pct"] is not None
                     else "–" for n in names), vr.get("corr_with_vix", "–")))
         L.append("")
@@ -1028,23 +1220,41 @@ def render(out):
                   mc["runs"], mc["block_days"], mc["sample_days"], out["cash"]), "",
               "| strategy | bad case (5%) | median | good case (95%) | P(profit) | P(beat S&P 500) | typical max drop | Sharpe (past) |",
               "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
-        for k in ORDER:
+        for k in keys:
             m = mc["strategies"].get(k)
             if not m:
                 continue
             rk = (six.get(k) or {}).get("risk") or {}
             L.append("| %s | $%.2f | $%.2f | $%.2f | %.0f%% | %s | %.1f%% | %s |" % (
-                LABELS.get(k, k), m["p5"], m["median"], m["p95"], m["prob_profit_pct"],
+                lab(k), m["p5"], m["median"], m["p95"], m["prob_profit_pct"],
                 "–" if m["prob_beat_bench_pct"] is None else "%.0f%%" % m["prob_beat_bench_pct"],
                 m["median_max_dd_pct"], rk.get("sharpe", "–")))
         L += ["", "A bootstrap of one past period: it shows the spread that period implies, not a forecast.%s" % (
             (" Left out (too little history): " + ", ".join(mc["left_out"])) if mc.get("left_out") else ""), ""]
+    if out.get("checks"):
+        L += ["## Self-checks", ""]
+        L += ["- %s %s: %s" % ("PASS" if c["ok"] else "FAIL", c["name"], c["detail"]) for c in out["checks"]]
+        L.append("")
     if out["errors"]:
         L.append("## Data problems")
         L += ["- " + e for e in out["errors"][:15]]
         L.append("")
     L.append("_%s_" % out["note"])
     return "\n".join(L) + "\n"
+
+
+def parse_windows(text):
+    """'12m,6m,1w' -> [('12 months', 365), ('6 months', 182), ('1 week', 7)]."""
+    if not text:
+        return None
+    out = []
+    for part in text.split(","):
+        part = part.strip().lower()
+        n, unit = int(part[:-1]), part[-1]
+        days = {"d": 1, "w": 7, "m": 30.4, "y": 365}[unit] * n
+        name = {"d": "day", "w": "week", "m": "month", "y": "year"}[unit]
+        out.append(("%d %s%s" % (n, name, "" if n == 1 else "s"), int(round(min(days, 365 * n if unit == "y" else days)))))
+    return sorted(out, key=lambda w: -w[1])
 
 
 def main(argv=None):
@@ -1054,16 +1264,25 @@ def main(argv=None):
     ap.add_argument("--cash", type=float, default=100.0)
     ap.add_argument("--account-type", default="TFSA")
     ap.add_argument("--skip", nargs="*", default=[], choices=["crypto", "pelosi"])
+    ap.add_argument("--holdings", action="append", metavar="ACCOUNT=FILE",
+                    help="replay your own holdings from a broker CSV (also read from trader/accounts/*.json)")
+    ap.add_argument("--windows", help="e.g. 12m,6m,3m,1m,2w,1w (default)")
+    ap.add_argument("--no-rolling", action="store_true", help="skip the rolling-window test")
+    ap.add_argument("--strict", action="store_true", help="exit 3 if any self-check fails")
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     try:
         out, text = replay(a.dir, a.asof, a.cash, a.skip, a.offline, a.account_type,
-                           log=lambda m: print(m, file=sys.stderr))
+                           log=lambda m: print(m, file=sys.stderr), windows=parse_windows(a.windows),
+                           holdings=a.holdings, rolling_spec=None if a.no_rolling else ROLLING)
     except (ReplayError, mk.MarketError) as e:
         print("replay: %s" % e, file=sys.stderr)
         return 2
     print(json.dumps(out, indent=1) if a.json else text)
+    if a.strict and not all(c["ok"] for c in out.get("checks", [])):
+        print("replay: a self-check failed (see Self-checks)", file=sys.stderr)
+        return 3
     return 0
 
 
