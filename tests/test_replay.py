@@ -498,6 +498,39 @@ class PointInTimeUniverse(unittest.TestCase):
         self.assertIsNone(data.quick("BBB", data.days[150], 63))  # under 200 days of history
 
 
+    def test_momentum_agent_holds_the_strongest_members_only(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+        finally:
+            shutil.rmtree(d)
+        uni = fake_universe(data.days)
+        r = replay.run_momentum(data, uni, data.days[300], ASOF, 100, n=2)
+        self.assertTrue(r["fills"])
+        for day, picks in r["picks"]:
+            self.assertLessEqual(len(picks), 2)
+            members = uni.members_on(day)
+            self.assertTrue(all(t in members for t in picks), (day, picks))
+        for f in r["fills"]:
+            self.assertFalse(f["side"] == "buy" and f["ticker"] == "BBB" and f["day"] <= data.days[450], f)
+        self.assertEqual(r["cash_by"]["CAD"], 0)  # US stocks, US dollars
+
+    def test_dual_momentum_falls_back_to_bonds(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            for sym, g in (("XLK", 0.6), ("XLE", -0.5), ("SHY", 0.02), ("IEF", 0.03)):
+                _synth.write(off, sym, _synth.chart(sym, p0=50, growth=g, wiggle=0.005, n=520))
+            data = load_data(off)
+        finally:
+            shutil.rmtree(d)
+        r = replay.run_dual(data, data.days[300], ASOF, 100, k=3)
+        last = r["picks"][-1][1]
+        self.assertEqual(sorted(last), ["IEF", "SPY", "XLK"])  # XLE is under the short-bond hurdle: its share goes to IEF
+        self.assertIn("XLK", r["holdings"])
+        self.assertNotIn("XLE", r["holdings"])
+
     def test_walk_forward_table(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("walkforward", os.path.join(FIX, "..", "..", "scripts", "walkforward.py"))

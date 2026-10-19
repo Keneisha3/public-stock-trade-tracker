@@ -11,10 +11,12 @@ strategy worth keeping beats the index in most periods, including the bad ones.
 import json
 import sys
 
-KEYS = ["growth", "medium", "dividend", "stock bot", "VIX agent"]
+KEYS = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "VIX agent"]
+SELECT = 3  # the first three periods choose the settings; the rest confirm them
 BENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)"]
 NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "Dividend (Wealthsimple)",
-         "stock bot": "Stock bot", "VIX agent": "VIX agent"}
+         "stock bot": "Stock bot", "VIX agent": "VIX agent", "momentum": "Momentum (top 20 S&P 500)",
+         "dual momentum": "Dual momentum (funds)"}
 
 
 def pct(x):
@@ -53,6 +55,7 @@ def table(reports):
             t = ((r.get("rolling") or {}).get("table") or {}).get(k)
             cells.append("%s of %s" % (t["beat_spy"], t["windows"]) if t else "n/a")
         L.append("| %s | %s |" % (NAMES[k], " | ".join(cells)))
+    L += scenarios(reports, win)
     L += ["", "## Coverage and self-checks", ""]
     for r in reports:
         cov = r["results"][win].get("coverage") or {}
@@ -61,6 +64,32 @@ def table(reports):
             r["asof"], cov.get("priced", "?"), cov.get("members", "?"), "all passed" if not bad else "FAILED: " + ", ".join(bad)))
     L += ["", "_Point in time; survivorship bias remains for companies Yahoo has no prices for. Not financial advice._"]
     return "\n".join(L) + "\n"
+
+
+def scenarios(reports, win):
+    """Every setting of every agent: average gap to the S&P 500 in the selection periods
+    (the first SELECT) and in the confirmation periods (the rest)."""
+    rows = {}
+    for i, r in enumerate(reports):
+        spy = (r["results"][win].get("S&P 500 (SPY)") or {}).get("return_pct")
+        for sc in r.get("scenarios", []):
+            res = (sc.get("results") or {}).get(win)
+            if res is None or spy is None:
+                continue
+            rows.setdefault((sc["strategy"], sc["name"]), {})[i] = res["return_pct"] - spy
+    sel = [r["asof"] for r in reports[:SELECT]]
+    L = ["", "## Settings: chosen on %s, confirmed on %s" % (", ".join(sel), ", ".join(r["asof"] for r in reports[SELECT:])), "",
+         "Average gap to the S&P 500 over %s. Pick on the left column only; the right column is the test." % win, "",
+         "| agent | setting | selection periods | confirmation periods |", "| --- | --- | ---: | ---: |"]
+
+    def avg(xs):
+        return sum(xs) / len(xs) if xs else None
+    for (st, name), g in sorted(rows.items(), key=lambda kv: (kv[0][0], -(avg([v for i, v in kv[1].items() if i < SELECT]) or -1e9))):
+        a = avg([v for i, v in g.items() if i < SELECT])
+        b = avg([v for i, v in g.items() if i >= SELECT])
+        L.append("| %s | %s | %s | %s |" % (st, name, "n/a" if a is None else "%+.1f pts" % a,
+                                             "n/a" if b is None else "%+.1f pts" % b))
+    return L
 
 
 def main(argv=None):
