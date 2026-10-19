@@ -223,19 +223,26 @@ class Portfolio:
                 if self.cash_share else None, "fills": self.log[-40:]}
 
 
-def _review_days(days, start, asof):
-    return {d for d in days if start <= d < asof and (d == start or _date(d).weekday() == 4)}
+def _review_days(days, start, asof, every=7):
+    """The start, then the first trading day at least `every` calendar days after the last review."""
+    out, last = set(), None
+    for d in days:
+        if start <= d < asof and (last is None or (_date(d) - _date(last)).days >= every):
+            out.add(d)
+            last = d
+    return out
 
 
 # ---------------------------------------------------------------- strategies
 
-def run_account(data, strategy, watch, start, asof, cash, account_type):
+def run_account(data, strategy, watch, start, asof, cash, account_type, overrides=None):
     rules = dict(acc.RULES[strategy], min_trade=1)
+    rules.update(overrides or {})
     acct = {"id": strategy, "name": strategy, "strategy": strategy, "type": account_type, "fractional": True,
             "watchlist": watch, "rules": rules, "broker": ""}
     pf, pending, notes = Portfolio(data, cash, account_type), [], []
     days = [d for d in data.days if start <= d <= asof]
-    reviews = _review_days(days, start, asof)
+    reviews = _review_days(days, start, asof, int(rules.get("review_every_days") or 7))
     for d in days:
         pf.pay_dividends(d)  # ex-date: only shares owned before today's open are paid
         pending = pf.fill(pending, d)
@@ -570,6 +577,156 @@ def overall(results):
     return tally
 
 
+# ---------------------------------------------------------------- scenarios: same strategy, different settings
+
+SCENARIOS = [
+    ("growth", "Default (12-month momentum, 20% cap)", {}),
+    ("growth", "Short momentum: 3 months", {"momentum_months": 3}),
+    ("growth", "Medium momentum: 6 months", {"momentum_months": 6}),
+    ("growth", "Concentrated: 35% cap, 3+ names", {"max_position_pct": 35, "min_positions": 3}),
+    ("growth", "Diversified: 10% cap, 10+ names", {"max_position_pct": 10, "min_positions": 10}),
+    ("growth", "Tight stop: 15%", {"stop_loss_pct": 15}),
+    ("growth", "Rebalance monthly", {"review_every_days": 28}),
+    ("growth", "Aggressive: 3-month momentum, 30% cap, no cash", {"momentum_months": 3, "max_position_pct": 30,
+                                                                  "min_positions": 4, "cash_target_pct": 0}),
+    ("medium", "Default (6-month trend, 15% cap)", {}),
+    ("medium", "Long trend: 12 months", {"momentum_months": 12}),
+    ("medium", "Rebalance monthly", {"review_every_days": 28}),
+    ("dividend", "Default (2% yield floor, 12% cap)", {}),
+    ("dividend", "Higher yield floor: 3.5%", {"min_yield_pct": 3.5}),
+    ("dividend", "Rebalance quarterly", {"review_every_days": 91}),
+]
+
+
+def scenario_list(base):
+    """Built-in scenarios + 'Your settings' (rules saved in accounts.json) + trader/replay/scenarios.json."""
+    out = list(SCENARIOS)
+    cfg = acc.read_json(os.path.join(base, "accounts.json"), {}) or {}
+    for a in cfg.get("accounts", []):
+        mine = {k: v for k, v in (a.get("rules") or {}).items() if k in acc.TUNABLE}
+        if mine and a.get("strategy") in acc.RULES:
+            out.append((a["strategy"], "Your settings (%s)" % a.get("name", a["id"]), mine))
+    for x in acc.read_json(os.path.join(base, "replay", "scenarios.json"), []) or []:
+        try:
+            out.append((x["strategy"], x["name"], acc.check_rules(x["strategy"], x.get("rules"))))
+        except (KeyError, acc.AccountsError):
+            continue
+    return out
+
+
+def run_scenarios(data, watch, starts, asof, cash, account_type, scenarios):
+    rows = []
+    for strategy, name, over in scenarios:
+        row = {"strategy": strategy, "name": name, "inputs": dict(over),
+               "settings": {k: dict(acc.RULES[strategy], **over).get(k) for k in acc.TUNABLE
+                            if strategy in acc.TUNABLE[k][3]}, "results": {}}
+        for label, start in starts:
+            r = run_account(data, strategy, watch[strategy], start, asof, cash, account_type, over)
+            row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
+                                     "fees": r["fees"], "holdings": r["holdings"]}
+            if label == WINDOWS[0][0]:
+                row["risk"] = risk_stats(r["curve"]) if len(r["curve"]) > 20 else None
+        rows.append(row)
+    return rows
+
+
+# ---------------------------------------------------------------- risk stats and Monte Carlo
+
+def daily_returns(curve):
+    vals = [v for _, v in curve]
+    return [b / a - 1 for a, b in zip(vals, vals[1:]) if a]
+
+
+def risk_stats(curve):
+    """Annualised volatility, Sharpe (risk-free 0), max drawdown, share of up days."""
+    import math
+    import statistics
+    r = daily_returns(curve)
+    if len(r) < 10:
+        return None
+    vals = [v for _, v in curve]
+    peak, dd = vals[0], 0.0
+    for v in vals:
+        peak = max(peak, v)
+        dd = min(dd, v / peak - 1)
+    sd = statistics.pstdev(r)
+    return {"vol_pct": round(100 * sd * math.sqrt(252), 2),
+            "sharpe": round(statistics.mean(r) / sd * math.sqrt(252), 2) if sd else None,
+            "max_dd_pct": round(100 * dd, 2), "up_days_pct": round(100.0 * sum(1 for x in r if x > 0) / len(r), 1),
+            "days": len(r)}
+
+
+def _pct(sorted_vals, q):
+    i = min(len(sorted_vals) - 1, max(0, int(round(q * (len(sorted_vals) - 1)))))
+    return sorted_vals[i]
+
+
+def mc_curves(row):
+    """Daily curves long enough to simulate. One short curve (e.g. crypto with little history)
+    would shrink everyone's sample, because all strategies share the same days, so it sits out."""
+    curves = {k: r["curve"] for k, r in row.items()
+              if isinstance(r, dict) and r.get("curve") and len(r["curve"]) > 20}
+    full = max((len(c) for c in curves.values()), default=0)
+    short = sorted(k for k, c in curves.items() if len(c) < 0.8 * full)
+    for k in short:
+        del curves[k]
+    return curves, short
+
+
+def monte_carlo(curves, bench="S&P 500 (SPY)", runs=5000, horizon=126, block=5, seed=7, cash=100.0):
+    """Block bootstrap of the strategies' own daily returns, the same days for every strategy
+    (so their link to the market is kept). Returns outcome percentiles and success rates."""
+    import random
+    rets = {k: daily_returns(c) for k, c in curves.items()}
+    n = min((len(r) for r in rets.values()), default=0)
+    if n < 2 * block or bench not in rets:
+        return None
+    rets = {k: r[-n:] for k, r in rets.items()}  # align on the same last n days
+    rng = random.Random(seed)
+    ends = {k: [] for k in rets}
+    dds = {k: [] for k in rets}
+    beat = {k: 0 for k in rets}
+    fan_days = list(range(0, horizon + 1, max(1, horizon // 25)))
+    fan = {k: {d: [] for d in fan_days} for k in rets}
+    for _ in range(runs):
+        idx = []
+        while len(idx) < horizon:
+            s0 = rng.randrange(0, n - block + 1)
+            idx.extend(range(s0, s0 + block))
+        idx = idx[:horizon]
+        final = {}
+        for k, r in rets.items():
+            v, peak, dd = cash, cash, 0.0
+            fk = fan[k]
+            if 0 in fk:
+                fk[0].append(v)
+            for step, i in enumerate(idx, 1):
+                v *= 1 + r[i]
+                peak = max(peak, v)
+                dd = min(dd, v / peak - 1)
+                if step in fk:
+                    fk[step].append(v)
+            final[k] = v
+            ends[k].append(v)
+            dds[k].append(dd)
+        for k in rets:
+            if final[k] > final[bench]:
+                beat[k] += 1
+    out = {"runs": runs, "horizon_days": horizon, "block_days": block, "sample_days": n, "strategies": {}}
+    for k in rets:
+        e, d = sorted(ends[k]), sorted(dds[k])
+        out["strategies"][k] = {
+            "p5": round(_pct(e, 0.05), 2), "p25": round(_pct(e, 0.25), 2), "median": round(_pct(e, 0.5), 2),
+            "p75": round(_pct(e, 0.75), 2), "p95": round(_pct(e, 0.95), 2),
+            "prob_profit_pct": round(100.0 * sum(1 for x in e if x > cash) / runs, 1),
+            "prob_loss_10_pct": round(100.0 * sum(1 for x in e if x < cash * 0.9) / runs, 1),
+            "prob_beat_bench_pct": None if k == bench else round(100.0 * beat[k] / runs, 1),
+            "median_max_dd_pct": round(100 * _pct(d, 0.5), 2), "bad_max_dd_pct": round(100 * _pct(d, 0.05), 2),
+            "fan": [[day, round(_pct(sorted(v), 0.05), 2), round(_pct(sorted(v), 0.5), 2), round(_pct(sorted(v), 0.95), 2)]
+                    for day, v in sorted(fan[k].items()) if v]}
+    return out
+
+
 # ---------------------------------------------------------------- the whole replay
 
 def watchlists(base):
@@ -589,7 +746,7 @@ def latest_friday(days):
     return days[-1]
 
 
-def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print):
+def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print, mc_runs=5000):
     watch = watchlists(base)
     universe = [mk.yahoo_symbol(s) for s in paper.universe(os.path.join(base, "paper", "config.json"))]
     errors = []
@@ -649,7 +806,17 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         row["factors"] = factors(data, start, asof, filings)
         row["insights"] = insights(row, row["factors"], cash)
         results[label] = row
+    longest = results[WINDOWS[0][0]]
+    curves, short = mc_curves(longest)
+    for k, c in curves.items():
+        longest[k]["risk"] = risk_stats(c)
+    mc = monte_carlo(curves, cash=cash, runs=mc_runs)
+    if mc:
+        mc["left_out"] = short
+    starts = [(label, results[label]["start"]) for label, _ in WINDOWS]
+    scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base))
     out = {"asof": asof, "cash": cash, "account_type": account_type, "costs": COSTS, "results": results,
+           "monte_carlo": mc, "scenarios": scen,
            "overall": overall(results), "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
            "errors": errors, "pelosi_filings": [f for f, _ in filings], "watchlists": watch,
            "note": "Point-in-time replay: decisions use data up to each day's close, fills at the next open. "
@@ -729,6 +896,37 @@ def render(out):
             L.append("- **%s**: + %s / - %s" % (LABELS.get(k, k), "; ".join(n["going_well"]) or "nothing stood out",
                                                  "; ".join(n["not_going_well"]) or "nothing stood out"))
         L.append("")
+    if out.get("scenarios"):
+        L += ["## Scenarios: same strategy, different settings", "",
+              "| strategy | scenario | changed inputs | " + " | ".join(wins) + " | Sharpe (6 mo) | worst drop |",
+              "| --- | --- | --- |" + " ---: |" * (len(wins) + 2)]
+        for sc in out["scenarios"]:
+            rk = sc.get("risk") or {}
+            L.append("| %s | %s | %s | %s | %s | %s |" % (
+                sc["strategy"], sc["name"], ", ".join("%s=%s" % kv for kv in sc["inputs"].items()) or "defaults",
+                " | ".join("%+.1f%%" % sc["results"][w]["return_pct"] for w in wins),
+                rk.get("sharpe", "–"), _p(rk.get("max_dd_pct"))))
+        L.append("")
+    mc = out.get("monte_carlo")
+    if mc:
+        six = out["results"][WINDOWS[0][0]]
+        L += ["## Monte Carlo: the next %d trading days" % mc["horizon_days"], "",
+              "%d runs, resampling %d-day blocks of each strategy's own daily returns from the last %d days "
+              "(the same days for every strategy). $%g today becomes:" % (
+                  mc["runs"], mc["block_days"], mc["sample_days"], out["cash"]), "",
+              "| strategy | bad case (5%) | median | good case (95%) | P(profit) | P(beat S&P 500) | typical max drop | Sharpe (past) |",
+              "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+        for k in ORDER:
+            m = mc["strategies"].get(k)
+            if not m:
+                continue
+            rk = (six.get(k) or {}).get("risk") or {}
+            L.append("| %s | $%.2f | $%.2f | $%.2f | %.0f%% | %s | %.1f%% | %s |" % (
+                LABELS.get(k, k), m["p5"], m["median"], m["p95"], m["prob_profit_pct"],
+                "–" if m["prob_beat_bench_pct"] is None else "%.0f%%" % m["prob_beat_bench_pct"],
+                m["median_max_dd_pct"], rk.get("sharpe", "–")))
+        L += ["", "A bootstrap of one past period: it shows the spread that period implies, not a forecast.%s" % (
+            (" Left out (too little history): " + ", ".join(mc["left_out"])) if mc.get("left_out") else ""), ""]
     if out["errors"]:
         L.append("## Data problems")
         L += ["- " + e for e in out["errors"][:15]]

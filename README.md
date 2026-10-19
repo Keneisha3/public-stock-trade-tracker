@@ -143,6 +143,20 @@ separate **Pelosi copycat** row copies Nancy Pelosi's disclosed trades from
 the day each filing was posted, not the day she traded. A test wrecks every
 price after the as-of date and checks that no result moves.
 
+On top of the replay:
+
+- **Scenarios.** Each strategy is replayed with different settings (momentum
+  lookback, per-stock cap, number of holdings, stop-loss, cash, rebalance
+  frequency, yield floor). The table shows the inputs beside the outputs,
+  including a **Your settings** row for whatever you saved on the dashboard.
+- **Monte Carlo.** 5,000 block-bootstrap runs of each strategy's own daily
+  returns give the bad, median and good case for the next 6 months, the
+  chance of a profit, and the chance of beating the S&P 500.
+- **Risk stats.** Volatility, Sharpe ratio, max drawdown and share of up days.
+
+Every account's settings are editable on the dashboard (**Strategy settings**)
+and are range-checked. The live review and the replay use the same rules.
+
 ## The crypto bot team
 
 Four roles trade 10 big coins every 15 minutes, on fake money only:

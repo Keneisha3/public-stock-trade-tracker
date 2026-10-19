@@ -42,6 +42,18 @@ Clerk, plus `pdftotext` for the Pelosi filings.
   15 % US dividend withholding (TFSA; none in an RRSP), dividends on ex-date
   only for shares owned before that day.
 
+## Scenarios, Monte Carlo, risk
+
+- `report.json` -> `scenarios`: each strategy replayed with different settings
+  (built-ins, "Your settings" from accounts.json rules, and any in
+  `trader/replay/scenarios.json` as `[{"strategy": "growth", "name": "...",
+  "rules": {"momentum_months": 3}}]`). Tunable rules and their ranges are in
+  `accounts.TUNABLE`.
+- `monte_carlo`: 5,000 block-bootstrap runs (5-day blocks, the same days for
+  every strategy) of the 6-month daily returns: percentiles, P(profit),
+  P(beat S&P 500), drawdowns. Curves much shorter than the rest sit out.
+- `results["6 months"][strategy]["risk"]`: volatility, Sharpe, max drawdown.
+
 ## Reading it to the user
 
 Lead with the table. Then say plainly:
