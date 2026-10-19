@@ -191,6 +191,26 @@ of prices once, replays five periods ending 2019-10, 2020-10, 2022-10, 2024-10
 and 2026-10 in parallel (the 2018 sell-off, the 2020 crash and the 2022 bear
 market included), and combines them into one table (`scripts/walkforward.py`).
 
+**What the walk-forward found** (24-month periods ending 2019, 2020, 2022,
+2024 and 2026; gap to the S&P 500 averaged over the five; full table on the
+`replay-results` branch in `research/pit-v3/`):
+
+| agent | beat the S&P 500 | average gap | worst drop |
+| --- | ---: | ---: | ---: |
+| Dual momentum (the single strongest index fund, bonds when nothing beats short bonds) | 4 of 5 | +28.5 pts | -32 % to -46 % |
+| Just holding the Nasdaq 100 (QQQ) | 4 of 5 | +13.6 pts | -13 % to -32 % |
+| Momentum (top 20 S&P 500 members, 12-1 months) | 3 of 5 | -0.8 pts | -15 % to -36 % |
+| VIX agent | 2 of 5 | -2.4 pts | |
+| Dividend reviewer (vs the S&P 500; it targets Canada) | 2 of 5 | -5.9 pts | |
+| Medium-term reviewer | 0 of 5 | -10.2 pts | |
+| Stock bot | 2 of 5 | -15.7 pts | |
+| Growth reviewer | 0 of 5 | -17.3 pts | |
+
+Without hindsight, most agents trail the index; the earlier wins came from
+today's hand-picked lists (those rows beat the index by 30 to 115 points,
+which is exactly the bias). Settings were chosen on the 2019, 2020 and 2022
+periods and kept only if they also won 2024 and 2026.
+
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the
 Actions tab, with an optional as-of date). The report appears on the run's
