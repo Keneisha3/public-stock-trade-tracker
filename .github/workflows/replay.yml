@@ -14,7 +14,7 @@ on:
         required: false
         default: "replay"
         type: choice
-        options: ["replay", "walk-forward", "build-signals"]
+        options: ["replay", "walk-forward", "build-signals", "discover"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -32,7 +32,8 @@ on:
         required: false
         default: ""
   schedule:
-    - cron: "17 13 * * 6"  # Saturdays, 13:17 UTC
+    - cron: "17 13 * * 6"  # Saturdays, 13:17 UTC: the weekly replay
+    - cron: "41 22 * * 1-5"  # weekdays after the close: archive the idea lists (discover)
 
 permissions:
   contents: write
@@ -43,7 +44,7 @@ concurrency:
 
 jobs:
   replay:
-    if: ${{ inputs.mode != 'walk-forward' }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 13 * * 6') || inputs.mode == 'replay' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -301,4 +302,44 @@ jobs:
           cp "$RUNNER_TEMP"/out/*.json.gz signals/ 2>/dev/null || true
           git add signals
           git commit -qm "Dated signals: Congress trades and insider purchases" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- discover
+  # Every weekday: snapshot every source (the whole market and the idea lists),
+  # rank the whole market, and archive both to replay-results/discover/, so the
+  # lists build a dated history that can be backtested later.
+
+  discover:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '41 22 * * 1-5') || inputs.mode == 'discover' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Snapshot every source, rank the whole market
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'public-stock-trade-tracker research bot (github.com/Keneisha3/public-stock-trade-tracker) 41898282+github-actions[bot]@users.noreply.github.com' }}
+        run: |
+          python trade.py init
+          python trade.py discover snapshot
+          python trade.py discover funnel --deep --top 100 > /dev/null
+          python trade.py discover show
+      - name: Save to the replay-results branch
+        run: |
+          day=$(date -u +%Y-%m-%d)
+          mkdir -p "$RUNNER_TEMP/out"
+          cp trader/discover/archive/*.json.gz "$RUNNER_TEMP/out/"
+          cp trader/discover/ideas.json "$RUNNER_TEMP/out/ideas-$day.json"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p discover/archive discover/ideas
+          cp "$RUNNER_TEMP"/out/*.json.gz discover/archive/
+          cp "$RUNNER_TEMP"/out/ideas-*.json discover/ideas/
+          cp "$RUNNER_TEMP"/out/ideas-*.json discover/latest-ideas.json
+          git add discover
+          git commit -qm "Discover snapshot $day" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
