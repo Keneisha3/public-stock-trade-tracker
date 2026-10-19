@@ -1,0 +1,3 @@
+# Personal trading data written by the trader skills (portfolio, orders, state)
+trader/
+__pycache__/
