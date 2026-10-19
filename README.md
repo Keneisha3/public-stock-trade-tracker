@@ -191,25 +191,26 @@ of prices once, replays five periods ending 2019-10, 2020-10, 2022-10, 2024-10
 and 2026-10 in parallel (the 2018 sell-off, the 2020 crash and the 2022 bear
 market included), and combines them into one table (`scripts/walkforward.py`).
 
-**What the walk-forward found** (24-month periods ending 2019, 2020, 2022,
-2024 and 2026; gap to the S&P 500 averaged over the five; full table on the
-`replay-results` branch in `research/pit-v3/`):
+**What the walk-forward found** (`research/pit-v5-holdout/` on the
+`replay-results` branch). Settings were chosen on the training periods only:
+24-month windows ending 2019, 2020, 2022 and 2024. The last 12 months were
+held out and used only to check.
 
-| agent | beat the S&P 500 | average gap | worst drop |
-| --- | ---: | ---: | ---: |
-| Dual momentum (the single strongest index fund, bonds when nothing beats short bonds) | 4 of 5 | +28.5 pts | -32 % to -46 % |
-| Just holding the Nasdaq 100 (QQQ) | 4 of 5 | +13.6 pts | -13 % to -32 % |
-| Momentum (top 20 S&P 500 members, 12-1 months) | 3 of 5 | -0.8 pts | -15 % to -36 % |
-| VIX agent | 2 of 5 | -2.4 pts | |
-| Dividend reviewer (vs the S&P 500; it targets Canada) | 2 of 5 | -5.9 pts | |
-| Medium-term reviewer | 0 of 5 | -10.2 pts | |
-| Stock bot | 2 of 5 | -15.7 pts | |
-| Growth reviewer | 0 of 5 | -17.3 pts | |
+| agent | training: beat the S&P 500 | training: average gap | test, last 12 months | worst drop |
+| --- | ---: | ---: | ---: | ---: |
+| Half Nasdaq 100, half dual momentum | 3 of 4 | +12.9 pts | +28.1 % (S&P 500 +17.9 %) | -18 % to -33 % |
+| Dual momentum (single strongest index fund) | 3 of 4 | +11.8 pts | +35.8 % | -24 % to -46 % |
+| Just holding the Nasdaq 100 (QQQ) | 3 of 4 | +14.0 pts | +20.3 % | -12 % to -32 % |
+| Congress buying (2+ members, 90 days) | 1 of 4 | -1.7 pts | +32.6 % | |
+| Momentum (top 20 S&P 500, 12-1) | 2 of 4 | -10.6 pts | +46.3 % | |
+| Insider buying (2+ insiders, 60 days) | 1 of 4 | -8.0 pts | +2.8 % | |
+| Growth, medium, dividend reviewers, stock bot, VIX agent | 0 to 2 of 4 | -3.6 to -18.6 pts | | |
 
-Without hindsight, most agents trail the index; the earlier wins came from
-today's hand-picked lists (those rows beat the index by 30 to 115 points,
-which is exactly the bias). Settings were chosen on the 2019, 2020 and 2022
-periods and kept only if they also won 2024 and 2026.
+Only dual momentum and the half-and-half blend beat the S&P 500 in both
+training and the held-out year, and only by taking bigger drops. One strong
+year (the test) flatters momentum-style agents; the training years are the
+better guide. Without hindsight, the reviewers and the insider signal trail
+the index.
 
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the
