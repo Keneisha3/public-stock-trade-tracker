@@ -14,9 +14,13 @@ day's close; its trades fill at the next open. Nothing from the future is used.
                                disclosed selling, from the day each filing was POSTED
   benchmarks                   buy and hold S&P 500 (SPY), TSX 60 (XIU.TO), Bitcoin, cash
 
-Costs: 1.5% currency conversion each way for USD assets, 5 bps slippage, the
-bots' own fees, 15% US dividend withholding (TFSA). Dividends are paid on the
-ex-date.
+Currency: US stocks trade in US dollars and Canadian ones in Canadian dollars,
+as in a real Questrade or Wealthsimple account; each strategy's $100 CAD worth
+starts in the currency it trades, so nothing is converted per trade. A 1.5%
+fee applies only if a buy needs a currency the account has run out of. Values
+are reported in CAD at each day's rate, so USD/CAD moves still count.
+Costs: 5 bps slippage, the bots' own fees, 15% US dividend withholding (TFSA).
+Dividends are paid on the ex-date, in the stock's own currency.
 
     python3 replay.py                       # as of the latest Friday close
     python3 replay.py --asof 2026-10-16 --cash 100
@@ -38,15 +42,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(HERE)
 for _f in ("trader-accounts", "trader-paper", "trader-team", "trader-pelosi", "trader-init"):
     sys.path.insert(0, os.path.join(SKILLS, _f))
+sys.path.insert(0, HERE)
 import accounts as acc  # noqa: E402
 import market as mk  # noqa: E402
 import paper  # noqa: E402
+import universe as univ  # noqa: E402
+import signals as sigs  # noqa: E402
 import ptr  # noqa: E402
 import team  # noqa: E402
 import vix  # noqa: E402
 
 WINDOWS = [("12 months", 365), ("6 months", 182), ("3 months", 91), ("1 month", 30), ("2 weeks", 14), ("1 week", 7)]
 CRYPTO_MAX_DAYS = 182  # 15-minute crypto history past 6 months is slow to fetch and replay
+CRYPTO_LONG_DAYS = 365  # hourly and slower bars are cheap: a full year
 ROLLING = {"horizon_days": 91, "step_days": 30, "count": 12}  # 3-month windows, a new one each month
 COSTS = {"fx_fee_pct": 1.5, "slippage_pct": 0.05, "us_withholding_pct": 15.0}
 PELOSI_LOOKBACK_DAYS = 120  # filings already public at the start shape the starting basket
@@ -60,12 +68,17 @@ def _date(s):
     return datetime.date.fromisoformat(s)
 
 
+def _gap(a, b):
+    return (_date(b) - _date(a)).days
+
+
 # ---------------------------------------------------------------- point-in-time data
 
 class Data:
     def __init__(self, charts, cfg):
         self.charts, self.cfg = charts, cfg
         self.dates = {s: [b["d"] for b in ch["bars"]] for s, ch in charts.items()}
+        self._metrics, self._sums = {}, {}
         spy = charts.get("SPY")
         if not spy:
             raise ReplayError("no SPY prices: they set the trading calendar")
@@ -87,14 +100,62 @@ class Data:
         return self.charts[sym]["bars"][i]["c"] if i >= 0 else None
 
     def upto(self, sym, day):
-        """The chart as it looked at the close of `day`."""
+        """The chart as it looked at the close of `day` (the last 300 bars: all that metrics reads)."""
         ch = self.charts[sym]
         i = bisect.bisect_right(self.dates[sym], day)
         if not i:
             return None
-        bars = ch["bars"][:i]
+        bars = ch["bars"][max(0, i - 300):i]
         return {"symbol": sym, "name": ch.get("name", ""), "currency": ch["currency"], "price": bars[-1]["c"],
                 "time": bars[-1]["d"], "bars": bars, "dividends": [x for x in ch["dividends"] if x[0] <= day]}
+
+    def metrics(self, sym, day):
+        """mk.metrics as of the close of `day`, cached: many runs review the same days."""
+        key = (sym, day)
+        if key not in self._metrics:
+            ch = self.upto(sym, day) if sym in self.charts else None
+            self._metrics[key] = mk.metrics(ch, today=day) if ch else None
+        return self._metrics[key]
+
+    def _prefix(self, sym):
+        """Prefix sums of closes, log returns and squared log returns, for O(1) screening."""
+        if sym not in self._sums:
+            import math
+            c = [b["c"] for b in self.charts[sym]["bars"]]
+            sc, sr, sq = [0.0], [0.0, 0.0], [0.0, 0.0]
+            for x in c:
+                sc.append(sc[-1] + x)
+            for a, b in zip(c, c[1:]):
+                r = math.log(b / a) if a > 0 and b > 0 else 0.0
+                sr.append(sr[-1] + r)
+                sq.append(sq[-1] + r * r)
+            self._sums[sym] = (c, sc, sr, sq)
+        return self._sums[sym]
+
+    def yield_ttm(self, sym, day):
+        """Trailing 12-month dividend yield (%) at the close of `day`."""
+        px = self.close(sym, day)
+        if not px:
+            return 0.0
+        a = (_date(day) - datetime.timedelta(days=365)).isoformat()
+        return 100.0 * sum(x for d, x in self.charts[sym]["dividends"] if a < d <= day) / px
+
+    def quick(self, sym, day, lookback, skip=0):
+        """Cheap point-in-time stats for screening: {ret, above200, vol} or None (too little history).
+        skip: leave out the last `skip` days of the return (12-1 momentum skips the last month)."""
+        if sym not in self.charts:
+            return None
+        i = bisect.bisect_right(self.dates[sym], day) - 1
+        if i < max(lookback, 200) or (self.dates[sym][i] < day and _gap(self.dates[sym][i], day) > 7):
+            return None  # not enough history, or no longer trading
+        c, sc, sr, sq = self._prefix(sym)
+        if not c[i - lookback]:
+            return None
+        n = 126
+        mean = (sr[i + 1] - sr[i + 1 - n]) / n
+        var = max(0.0, (sq[i + 1] - sq[i + 1 - n]) / n - mean * mean)
+        return {"ret": 100.0 * (c[i - skip] / c[i - lookback] - 1), "above200": c[i] > (sc[i + 1] - sc[i - 199]) / 200,
+                "vol": 100.0 * (var * 252) ** 0.5}
 
     def fx(self, day):
         return self.close("USDCAD=X", day) or 1.35
@@ -107,27 +168,48 @@ class Data:
 
 
 class Portfolio:
-    """$ in CAD; positions in their own currency. Every fill pays slippage, and USD pays FX."""
+    """Cash and positions in their own currency, the way a Questrade or Wealthsimple account
+    holds them: a US stock is bought with US dollars and sold back into US dollars, a Canadian
+    one in Canadian dollars, with no conversion. A conversion (and its fee) happens only when
+    a buy needs a currency the account has run out of. Values are reported in CAD."""
 
-    def __init__(self, data, cash=100.0, account_type="TFSA"):
-        self.data, self.cash, self.pos = data, float(cash), {}
+    def __init__(self, data, cash=100.0, account_type="TFSA", split=None, start=None):
+        self.data, self.pos = data, {}
+        self.cash_by = {"CAD": 0.0, "USD": 0.0}
+        split = split or {"CAD": 1.0}
+        tot = sum(split.values()) or 1.0
+        for ccy, w in split.items():  # $cash CAD worth, already sitting in each currency
+            self.cash_by[ccy] = float(cash) * w / tot / (data.fx(start) if ccy == "USD" else 1.0)
         self.fees, self.trades, self.dividends_cad = 0.0, 0, 0.0
         self.fx_fees, self.slippage = 0.0, 0.0
         self.us_tax = COSTS["us_withholding_pct"] / 100.0 if account_type.upper() not in acc.NO_US_WITHHOLDING else 0
         self.log = []      # every fill, for the dashboard
-        self.flow = {}     # ticker -> CAD paid in, CAD taken out (sales + dividends)
+        self.flow = {}     # ticker -> CAD paid in, CAD taken out (sales + dividends), at each day's rate
         self.curve = []    # [day, value at the close]
         self.cash_share = []
 
     def _ccy(self, sym):
         return (self.data.charts[sym]["currency"] or mk.native_currency(sym)).upper()
 
-    def _to_cad(self, amount, ccy, day, buying):
-        if ccy == "CAD":
-            return amount, 0.0
-        rate, fee = self.data.fx(day), COSTS["fx_fee_pct"] / 100.0
-        gross = amount * rate
-        return (gross * (1 + fee), gross * fee) if buying else (gross * (1 - fee), gross * fee)
+    def _rate(self, ccy, day):
+        return self.data.fx(day) if ccy == "USD" else 1.0
+
+    def cash_cad(self, day):
+        return self.cash_by["CAD"] + self.cash_by["USD"] * self.data.fx(day)
+
+    def _ensure(self, ccy, amount, day):
+        """Make `amount` of `ccy` available, converting a shortfall from the other currency
+        (paying the FX fee). Returns how much of `ccy` is there afterwards."""
+        short = amount - self.cash_by[ccy]
+        other = "CAD" if ccy == "USD" else "USD"
+        if short > 1e-9 and self.cash_by[other] > 1e-9:
+            fee, rate = COSTS["fx_fee_pct"] / 100.0, self.data.fx(day)
+            per = (rate if ccy == "USD" else 1.0 / rate) * (1 + fee)  # other-currency cost of 1 unit of ccy
+            got = min(short, self.cash_by[other] / per)
+            self.cash_by[other] -= got * per
+            self.cash_by[ccy] += got
+            self._cost(got * per * self._rate(other, day) * fee / (1 + fee), 0.0)
+        return self.cash_by[ccy]
 
     def fill(self, orders, day):
         """Fill orders decided before `day` at today's open; sells first. Returns the ones still waiting."""
@@ -139,33 +221,31 @@ class Portfolio:
                 continue
             slip = COSTS["slippage_pct"] / 100.0
             ccy = self._ccy(o["ticker"])
+            rate = self._rate(ccy, day)
             if o["side"] == "sell":
                 p = self.pos.get(o["ticker"])
                 if not p:
                     continue
                 q = min(o["shares"], p["shares"])
                 px = b["o"] * (1 - slip)
-                cad, fxfee = self._to_cad(q * px, ccy, day, False)
-                self.cash += cad
-                self._cost(fxfee, q * b["o"] * slip * (self.data.fx(day) if ccy == "USD" else 1))
+                self.cash_by[ccy] += q * px
+                cad = q * px * rate
+                self._cost(0.0, q * b["o"] * slip * rate)
                 self.flow.setdefault(o["ticker"], [0.0, 0.0])[1] += cad
                 p["shares"] -= q
                 if p["shares"] <= 1e-9:
                     del self.pos[o["ticker"]]
             else:
                 px = b["o"] * (1 + slip)
-                q = o["shares"] if o.get("shares") else None
-                if q is None:  # sized in CAD
-                    rate = self.data.fx(day) * (1 + COSTS["fx_fee_pct"] / 100.0) if ccy == "USD" else 1.0
-                    q = o["cad"] / (px * rate)
-                cad, fxfee = self._to_cad(q * px, ccy, day, True)
-                if cad > self.cash:
-                    q *= self.cash / cad if cad else 0
-                    cad, fxfee = self._to_cad(q * px, ccy, day, True)
-                if q <= 0 or cad < 0.5:
+                q = o["shares"] if o.get("shares") else o["cad"] / rate / px  # sized in CAD at today's rate
+                have = self._ensure(ccy, q * px, day)
+                if q * px > have:
+                    q = have / px
+                if q <= 0 or q * px * rate < 0.5:
                     continue
-                self.cash -= cad
-                self._cost(fxfee, q * b["o"] * slip * (self.data.fx(day) if ccy == "USD" else 1))
+                self.cash_by[ccy] -= q * px
+                cad = q * px * rate
+                self._cost(0.0, q * b["o"] * slip * rate)
                 self.flow.setdefault(o["ticker"], [0.0, 0.0])[0] += cad
                 p = self.pos.setdefault(o["ticker"], {"shares": 0.0, "cost": 0.0, "currency": ccy})
                 p["cost"] += q * px
@@ -183,28 +263,27 @@ class Portfolio:
     def mark(self, day):
         v = self.value(day)
         self.curve.append([day, round(v, 2)])
-        self.cash_share.append(self.cash / v if v > 0 else 1.0)
+        self.cash_share.append(self.cash_cad(day) / v if v > 0 else 1.0)
 
     def pay_dividends(self, day):
         for sym, p in self.pos.items():
             for d, amt in self.data.charts[sym]["dividends"]:
                 if d == day:
-                    gross = amt * p["shares"] * (1 - (self.us_tax if p["currency"] == "USD" else 0))
-                    cad, fxfee = self._to_cad(gross, p["currency"], day, False)
-                    self.cash += cad
+                    net = amt * p["shares"] * (1 - (self.us_tax if p["currency"] == "USD" else 0))
+                    self.cash_by[p["currency"]] += net  # paid in the stock's own currency
+                    cad = net * self._rate(p["currency"], day)
                     self.dividends_cad += cad
-                    self._cost(fxfee, 0.0)
                     self.flow.setdefault(sym, [0.0, 0.0])[1] += cad
 
     def value(self, day):
-        v = self.cash
+        v = self.cash_cad(day)
         for sym, p in self.pos.items():
             px = self.data.close(sym, day) or 0.0
-            v += px * p["shares"] * (self.data.fx(day) if p["currency"] == "USD" else 1.0)
+            v += px * p["shares"] * self._rate(p["currency"], day)
         return v
 
     def doc(self, day):
-        return {"cash": {"CAD": self.cash}, "as_of": day, "positions": [
+        return {"cash": dict(self.cash_by), "as_of": day, "positions": [
             {"ticker": s, "shares": p["shares"], "currency": p["currency"],
              "avg_cost": p["cost"] / p["shares"] if p["shares"] else None,
              "last_price": self.data.close(s, day)} for s, p in self.pos.items()]}
@@ -214,16 +293,35 @@ class Portfolio:
         contrib = []
         for sym, (paid, back) in self.flow.items():
             p = self.pos.get(sym)
-            now = (self.data.close(sym, day) or 0) * p["shares"] * (
-                self.data.fx(day) if p["currency"] == "USD" else 1.0) if p else 0.0
+            now = (self.data.close(sym, day) or 0) * p["shares"] * self._rate(p["currency"], day) if p else 0.0
             contrib.append({"ticker": sym, "pnl": round(back + now - paid, 2), "held": bool(p)})
         contrib.sort(key=lambda c: -c["pnl"])
         return {"value": round(v, 2), "return_pct": round(100.0 * (v / start_cash - 1), 2), "trades": self.trades,
                 "fees": round(self.fees, 2), "fx_fees": round(self.fx_fees, 2), "slippage": round(self.slippage, 2),
                 "dividends": round(self.dividends_cad, 2), "holdings": sorted(self.pos),
-                "cash_left": round(self.cash, 2), "contrib": contrib, "curve": self.curve,
+                "cash_left": round(self.cash_cad(day), 2), "cash_by": {k: round(x, 2) for k, x in self.cash_by.items()},
+                "contrib": contrib, "curve": self.curve,
                 "cash_drag_pct": round(100.0 * sum(self.cash_share) / len(self.cash_share), 1)
                 if self.cash_share else None, "fills": self.log[-40:]}
+
+
+def currency_split(data, weights, day):
+    """{'USD': w, 'CAD': w} for symbols {sym: weight}: the money starts where it will be spent."""
+    out = {}
+    for s, w in weights.items():
+        if s in data.charts and w > 0:
+            ccy = (data.charts[s]["currency"] or mk.native_currency(s)).upper()
+            out[ccy] = out.get(ccy, 0.0) + w
+    return out or {"CAD": 1.0}
+
+
+def _held_values(data, shares, day):
+    out = {}
+    for t, q in shares.items():
+        px = data.close(t, day)
+        if px and q > 0:
+            out[t] = q * px * (data.fx(day) if (data.charts[t]["currency"] or "USD").upper() == "USD" else 1.0)
+    return out
 
 
 def _review_days(days, start, asof, every=7):
@@ -240,12 +338,7 @@ def _review_days(days, start, asof, every=7):
 
 def _seed_orders(data, shares, start, cash):
     """Buy today's mix (share counts) in the same proportions at the first open after `start`."""
-    vals = {}
-    for t, q in shares.items():
-        px = data.close(t, start)
-        if px and q > 0:
-            ccy = (data.charts[t]["currency"] or "USD").upper()
-            vals[t] = q * px * (data.fx(start) if ccy == "USD" else 1.0)
+    vals = _held_values(data, shares, start)
     tot = sum(vals.values())
     return [{"side": "buy", "ticker": t, "cad": cash * 0.995 * v / tot, "decided": start} for t, v in vals.items()] \
         if tot else []
@@ -253,7 +346,7 @@ def _seed_orders(data, shares, start, cash):
 
 def run_mix(data, shares, start, asof, cash, account_type="TFSA"):
     """Your current holdings, in today's proportions, bought at the start and simply held."""
-    pf = Portfolio(data, cash, account_type)
+    pf = Portfolio(data, cash, account_type, currency_split(data, _held_values(data, shares, start), start), start)
     orders = _seed_orders(data, shares, start, cash)
     for d in [d for d in data.days if start <= d <= asof]:
         pf.pay_dividends(d)
@@ -262,12 +355,65 @@ def run_mix(data, shares, start, asof, cash, account_type="TFSA"):
     return pf.result(asof, cash)
 
 
-def run_account(data, strategy, watch, start, asof, cash, account_type, overrides=None, seed=None):
+SHORTLIST = {"growth": 20, "medium": 20, "dividend": 25}  # names the reviewer scores at each review
+
+
+def candidates(uni, strategy, day):
+    """What a strategy may choose from on `day`: index members that day, plus index funds
+    and the Canadian list. The dividend account is Canadian: TSX names and Canadian income funds."""
+    if strategy == "dividend":
+        return set(univ.CANADA) | set(univ.ETFS["canada_income"])
+    out = set(uni.members_on(day)) | set(univ.EQUITY_ETFS)
+    if strategy == "medium":
+        out |= set(univ.CANADA) | {s for v in univ.ETFS.values() for s in v}
+    return out
+
+
+def shortlist(data, strategy, day, rules, uni, k=None):
+    """The scanner: rank every candidate with cheap point-in-time stats and pass the best
+    to the reviewer. growth: strongest momentum above the 200-day average. medium: best
+    momentum per unit of volatility, above the 200-day average, volatility under 45%.
+    dividend: yield 2-8% and volatility under 30%, highest yield first."""
+    k = k or SHORTLIST[strategy]
+    mm = int(rules.get("momentum_months") or (6 if strategy == "medium" else 3))
+    rows = []
+    for sym in candidates(uni, strategy, day):
+        q = data.quick(sym, day, 21 * mm)
+        if not q:
+            continue
+        if strategy == "growth":
+            if q["above200"]:
+                rows.append((q["ret"], sym))
+        elif strategy == "medium":
+            if q["above200"] and q["vol"] < 45:
+                rows.append((q["ret"] / max(q["vol"], 5.0), sym))
+        else:
+            y = data.yield_ttm(sym, day)
+            if 2.0 <= y <= 8.0 and q["vol"] < 30:
+                rows.append((y, sym))
+    rows.sort(reverse=True)
+    return [sym for _, sym in rows[:k]]
+
+
+def coverage(data, uni, day):
+    """How many index members that day have prices we can use (the rest are mostly companies
+    that later left the market: the survivorship bias that remains)."""
+    m = uni.members_on(day)
+    priced = sum(1 for sym in m if data.quick(sym, day, 21))
+    return {"day": day, "members": len(m), "priced": priced, "pct": round(100.0 * priced / len(m), 1) if m else None}
+
+
+def run_account(data, strategy, watch, start, asof, cash, account_type, overrides=None, seed=None, uni=None):
+    """uni: a point-in-time universe; the watchlist is then rebuilt at every review by the scanner."""
     rules = dict(acc.RULES[strategy], min_trade=1)
     rules.update(overrides or {})
+    fixed = list(watch or []) if uni is not None else []  # e.g. your own holdings: always scored
+    if uni is not None:
+        watch = sorted(set(shortlist(data, strategy, start, rules, uni)) | set(watch or []))
     acct = {"id": strategy, "name": strategy, "strategy": strategy, "type": account_type, "fractional": True,
             "watchlist": watch, "rules": rules, "broker": ""}
-    pf, pending, notes = Portfolio(data, cash, account_type), [], []
+    split = currency_split(data, _held_values(data, seed, start) if seed else {t: 1.0 for t in watch}, start)
+    pf, pending, notes = Portfolio(data, cash, account_type, split, start), [], []
     days = [d for d in data.days if start <= d <= asof]
     reviews = _review_days(days, start, asof, int(rules.get("review_every_days") or 7))
     if seed:  # start from your current mix; the rules take over at the first review after that
@@ -279,8 +425,11 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
         pf.mark(d)
         if d not in reviews:
             continue
+        if uni is not None and d != start:
+            acct["watchlist"] = watch = sorted(set(shortlist(data, strategy, d, rules, uni)) | set(fixed))
         syms = set(watch) | set(pf.pos)
-        snap = {s: mk.metrics(data.upto(s, d), today=d) for s in syms if s in data.charts and data.upto(s, d)}
+        snap = {s: data.metrics(s, d) for s in syms if s in data.charts}
+        snap = {s: m for s, m in snap.items() if m}
         r = acc.review_account(acct, pf.doc(d), {"symbols": snap, "fx": {"USDCAD": data.fx(d)}}, base="CAD")
         pending = [{"side": o["side"], "ticker": o["ticker"], "shares": o["shares"], "decided": d}
                    for o in r["proposals"]]
@@ -291,8 +440,172 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
     return out
 
 
+def run_targets(data, start, asof, cash, choose, every=28, split=None):
+    """Equal weight in whatever choose(day) returns (a name listed twice gets two shares),
+    rebalanced every `every` days. choose sees only data up to that day's close; trades
+    fill at the next open."""
+    pf, pending = Portfolio(data, cash, split=split or {"USD": 1.0}, start=start), []
+    days = [d for d in data.days if start <= d <= asof]
+    reviews = _review_days(days, start, asof, every)
+    picks_log = []
+    for d in days:
+        pf.pay_dividends(d)
+        pending = pf.fill(pending, d)
+        pf.mark(d)
+        if d not in reviews:
+            continue
+        picked = [t for t in choose(d) if data.close(t, d)]
+        picks_log.append([d, list(picked)])
+        total = pf.value(d) * 0.995
+        share = {t: total * picked.count(t) / len(picked) for t in dict.fromkeys(picked)} if picked else {}
+        target = list(share)
+        pending = []
+        for t, p in pf.pos.items():
+            px = data.close(t, d) or 0.0
+            now = px * p["shares"] * (data.fx(d) if p["currency"] == "USD" else 1.0)
+            if t not in share:
+                pending.append({"side": "sell", "ticker": t, "shares": p["shares"], "decided": d})
+            elif now > share[t] * 1.2 and px:  # trim a winner that grew 20% past its share
+                pending.append({"side": "sell", "ticker": t, "decided": d,
+                                "shares": (now - share[t]) / (px * (data.fx(d) if p["currency"] == "USD" else 1.0))})
+        for t in target:
+            held, each = pf.pos.get(t), share[t]
+            now = (data.close(t, d) or 0) * held["shares"] * (data.fx(d) if held["currency"] == "USD" else 1.0) \
+                if held else 0.0
+            if each - now > max(1.0, 0.2 * each) or (not held and each > 1.0):
+                pending.append({"side": "buy", "ticker": t, "cad": each - now, "decided": d})
+    out = pf.result(asof, cash)
+    out["picks"] = picks_log[-40:]
+    return out
+
+
+MOMENTUM_DEFAULT = {"n": 20, "months": 12, "skip": 1, "trend": True, "every": 28, "buffer": 2, "market": False}
+
+
+def run_momentum(data, uni, start, asof, cash, **opts):
+    """Cross-sectional momentum, the textbook way: the n S&P 500 members (that day) with the
+    best return over `months` leaving out the last `skip` month, above their 200-day average,
+    equal weight, rebalanced every `every` days. A holding stays while it ranks in the top
+    n x buffer (less turnover). market: hold IEF (bonds) while SPY is under its 200-day average."""
+    o = dict(MOMENTUM_DEFAULT, **opts)
+    held = []
+
+    def choose(d):
+        if o["market"]:
+            q = data.quick("SPY", d, 21)
+            if q and not q["above200"]:
+                held[:] = []
+                return ["IEF"] if "IEF" in data.charts else []
+        rows = []
+        for sym in uni.members_on(d):
+            q = data.quick(sym, d, 21 * o["months"], 21 * o["skip"])
+            if q and (q["above200"] or not o["trend"]):
+                rows.append((q["ret"], sym))
+        rank = [sym for _, sym in sorted(rows, reverse=True)]
+        keep = [t for t in held if t in rank[:o["n"] * o["buffer"]]]
+        out = keep + [t for t in rank if t not in keep][:max(0, o["n"] - len(keep))]
+        held[:] = out
+        return out
+    return run_targets(data, start, asof, cash, choose, o["every"])
+
+
+DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY"}  # best 1 fund: won the walk-forward
+DUAL_POOL = ("us_broad", "us_sector", "us_factor", "world", "commodities")
+
+
+def run_dual(data, start, asof, cash, **opts):
+    """Dual momentum on index funds: each month hold the k funds with the best 12-month return
+    (relative momentum), but only those beating short bonds (SHY, absolute momentum); the
+    rest goes to IEF. A fund counts only once it has traded long enough to have the history."""
+    o = dict(DUAL_DEFAULT, **opts)
+    pool = sorted({x for g in DUAL_POOL for x in univ.ETFS[g] if not x.endswith(".TO")})
+
+    def choose(d):
+        hurdle = (data.quick(o["cash_like"], d, 21 * o["months"]) or {}).get("ret", 0.0)
+        rows = [(q["ret"], f) for f in pool for q in [data.quick(f, d, 21 * o["months"])] if q]
+        top = [f for r, f in sorted(rows, reverse=True)[:o["k"]] if r > hurdle]
+        return top + [o["safe"]] * (o["k"] - len(top)) if o["safe"] in data.charts else top
+    return run_targets(data, start, asof, cash, choose, 28)
+
+
+SIGNAL_DEFAULT = {"source": "insiders", "n": 20, "days": 60, "min_count": 2, "officers": False,
+                  "trend": False, "fill": "SPY", "every": 28}
+
+
+def run_signals(data, uni, sig, start, asof, cash, **opts):
+    """Follow the people who know: S&P 500 members (that day) that insiders (Form 4 open-market
+    purchases) or members of Congress were buying, as known from filings up to that day.
+    Ranked by how many different insiders / members bought, then by dollars. Equal weight,
+    at most n names; empty slots sit in `fill` (SPY). Rebalanced every `every` days.
+    source "both": a name needs either signal; trend: also above its 200-day average."""
+    o = dict(SIGNAL_DEFAULT, **opts)
+
+    def choose(d):
+        members = uni.members_on(d)
+        rows = []
+        if o["source"] in ("insiders", "both"):
+            for t, x in sig.insider_buys(d, o["days"]).items():
+                if x["insiders"] >= o["min_count"] and (not o["officers"] or x["officers"] >= 1):
+                    rows.append(((x["insiders"], x["value"]), t))
+        if o["source"] in ("congress", "both"):
+            for t, x in sig.congress_buys(d, max(o["days"], 90)).items():
+                if x["members"] >= o["min_count"]:
+                    rows.append(((x["members"], x["low"]), t))
+        picks = []
+        for _, t in sorted(rows, reverse=True):
+            q = data.quick(t, d, 21) if t in members else None
+            if q and (q["above200"] or not o["trend"]) and t not in picks:
+                picks.append(t)
+        picks = picks[:o["n"]]
+        return picks + [o["fill"]] * (o["n"] - len(picks)) if o["fill"] in data.charts else picks
+    return run_targets(data, start, asof, cash, choose, o["every"])
+
+
+def run_momentum_signals(data, uni, sig, start, asof, cash, n=20, days=180, **opts):
+    """Momentum, but only among S&P 500 members that insiders or Congress bought in the last
+    `days` (filing dates): price strength confirmed by people with an information edge."""
+    o = dict(MOMENTUM_DEFAULT, n=n, **opts)
+    held = []
+
+    def choose(d):
+        backed = set(sig.insider_buys(d, days)) | set(sig.congress_buys(d, days))
+        rows = []
+        for sym in uni.members_on(d):
+            if sym not in backed:
+                continue
+            q = data.quick(sym, d, 21 * o["months"], 21 * o["skip"])
+            if q and (q["above200"] or not o["trend"]):
+                rows.append((q["ret"], sym))
+        rank = [sym for _, sym in sorted(rows, reverse=True)]
+        keep = [t for t in held if t in rank[:o["n"] * o["buffer"]]]
+        out = keep + [t for t in rank if t not in keep][:max(0, o["n"] - len(keep))]
+        held[:] = out
+        return out + ["SPY"] * (o["n"] - len(out)) if "SPY" in data.charts else out
+    return run_targets(data, start, asof, cash, choose, o["every"])
+
+
+def blend(parts, cash):
+    """Split the money equally between strategies at the start and let each run on its own
+    (no rebalancing between them): the blend's value is the sum of the parts' values."""
+    parts = [p for p in parts if p and p.get("curve")]
+    if not parts:
+        return None
+    n = len(parts)
+    days = [d for d, _ in parts[0]["curve"]]
+    by = [dict(p["curve"]) for p in parts]
+    curve, last = [], [p["curve"][0][1] for p in parts]
+    for d in days:
+        last = [b.get(d, last[i]) for i, b in enumerate(by)]
+        curve.append([d, round(sum(last) / n, 2)])
+    v = curve[-1][1]
+    held = sorted({h for p in parts for h in p.get("holdings", [])})
+    return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2), "curve": curve,
+            "trades": sum(p.get("trades", 0) for p in parts), "fees": round(sum(p.get("fees") or 0 for p in parts) / n, 2),
+            "holdings": held, "contrib": [], "fills": []}
+
+
 def run_hold(data, weights, start, asof, cash):
-    pf = Portfolio(data, cash)
+    pf = Portfolio(data, cash, split=currency_split(data, weights, start), start=start)
     orders = [{"side": "buy", "ticker": s, "cad": cash * w * 0.999, "decided": start} for s, w in weights.items()
               if s in data.charts]
     for d in [d for d in data.days if start <= d <= asof]:
@@ -302,25 +615,32 @@ def run_hold(data, weights, start, asof, cash):
     return pf.result(asof, cash)
 
 
-VIX_SYM = "^VIX"
-VIX_FUND = "VFV.TO"  # the S&P 500 in Canadian dollars: switching in and out pays no FX fee
+VIX_SYM, VIX3M_SYM = "^VIX", "^VIX3M"
 VIX_RULES = [
+    ("VIX agent: Nasdaq 100 unless VIX > 30 (default)", {"mode": "level", "threshold": 30, "asset": "QQQ"}),
     ("VIX agent: S&P 500 unless VIX > 25", {"mode": "level", "threshold": 25}),
     ("VIX agent: S&P 500 unless VIX > 20", {"mode": "level", "threshold": 20}),
     ("VIX agent: S&P 500 unless VIX > 30", {"mode": "level", "threshold": 30}),
     ("VIX agent: S&P 500 while VIX is under its 50-day average", {"mode": "trend", "days": 50}),
+    ("VIX agent: S&P 500 unless VIX > 3-month VIX (stress)", {"mode": "term"}),
+    ("VIX agent: Nasdaq 100 unless VIX > 3-month VIX", {"mode": "term", "asset": "QQQ"}),
 ]
 
 
 def run_vix_agent(data, start, asof, cash, rule=None):
     """Hold the S&P 500 while the VIX agent says risk-on, cash while it says risk-off.
     Decided at each close from VIX closes up to that day; acted on at the next open.
-    Trades VFV.TO (CAD) when its prices are there, else SPY (every switch then pays FX)."""
-    fund = VIX_FUND if VIX_FUND in data.charts else "SPY"
-    pf, pending, invested = Portfolio(data, cash), [], None
+    The money stays in US dollars: out of the fund means US-dollar cash, no conversion.
+    rule["asset"] picks the fund (SPY by default, QQQ for the Nasdaq 100)."""
+    fund = (rule or {}).get("asset") or "SPY"
+    if fund not in data.charts:
+        fund = "SPY"
+    rule = {k: v for k, v in (rule or {}).items() if k != "asset"}
+    pf, pending, invested = Portfolio(data, cash, split={"USD": 1.0}, start=start), [], None
     days = [d for d in data.days if start <= d <= asof]
     on_days = switches = 0
     vix_dates = data.dates[VIX_SYM]
+    v3_dates = data.dates.get(VIX3M_SYM) or []
     for d in days:
         pf.pay_dividends(d)
         pending = pf.fill(pending, d)
@@ -328,7 +648,8 @@ def run_vix_agent(data, start, asof, cash, rule=None):
         if d == asof:
             break
         closes = [b["c"] for b in data.charts[VIX_SYM]["bars"][:bisect.bisect_right(vix_dates, d)]]
-        on, _ = vix.decide(closes, rule)
+        c3 = [b["c"] for b in data.charts[VIX3M_SYM]["bars"][:bisect.bisect_right(v3_dates, d)]] if v3_dates else None
+        on, _ = vix.decide(closes, rule, c3)
         on_days += 1 if on else 0
         if on and invested is not True:
             pending = [{"side": "buy", "ticker": fund, "cad": pf.value(d) * 0.995, "decided": d}]
@@ -374,23 +695,36 @@ def vix_regimes(curve, data):
     return out
 
 
-def run_stockbot(data, universe, start, asof, cash):
+def run_stockbot(data, universe, start, asof, cash, overrides=None, uni=None):
+    """The ATR bot with US-dollar cash: $cash CAD worth of USD at the start, valued in CAD.
+    overrides: paper.PARAMS changes, e.g. {"idle": None} for the bot without its index sleeve.
+    uni: trade any S&P 500 member, but only on days it was a member (instead of `universe`)."""
     fx0 = data.fx(start)
-    usd0 = cash / (fx0 * (1 + COSTS["fx_fee_pct"] / 100.0))
+    usd0 = cash / fx0
     p = dict(paper.PARAMS, fractional=True, min_order=1)
-    charts = {s: data.charts[s] for s in universe if s in data.charts}
+    p.update(overrides or {})
+    idle_bars = {b["d"]: b for b in data.charts[p["idle"]]["bars"]} if p.get("idle") in data.charts else None
+    eligible = None
+    if uni is not None:
+        universe = [s for s in uni.ever(start, asof) if s in data.charts]
+        eligible = uni.members_on
+    first = (_date(start) - datetime.timedelta(days=150)).isoformat()  # enough for the ATR and the regime
+    charts = {}
+    for s in universe:
+        if s in data.charts:
+            ds = data.dates[s]
+            bars = data.charts[s]["bars"][bisect.bisect_left(ds, first):bisect.bisect_right(ds, asof)]
+            if bars:
+                charts[s] = {"bars": bars}
     days, bars_by, regime = paper.prepare(charts, p)
-    led = paper.new_ledger(usd0, p)
+    led, idle = paper.new_ledger(usd0, p), []
     for d in days:
         if start <= d <= asof:
-            paper.step(led, d, bars_by, regime, p)
-    if not led["trades"] and not led["positions"]:  # never traded: the money never left CAD
-        return {"value": round(cash, 2), "return_pct": 0.0, "trades": 0, "fees": 0.0, "fx_fees": 0.0,
-                "dividends": 0.0, "holdings": [], "cash_left": round(cash, 2), "contrib": [], "fills": [],
-                "curve": [[d, round(cash, 2)] for d, _ in led["equity"]], "cash_drag_pct": 100.0,
-                "win_rate_pct": None}
+            paper.step(led, d, bars_by, regime, p, idle_bars, eligible)
+            e = led["equity"][-1][1]
+            idle.append(led["cash"] / e if e else 1.0)
     eq = led["equity"][-1][1] if led["equity"] else usd0
-    v = eq * data.fx(asof) * (1 - COSTS["fx_fee_pct"] / 100.0)
+    v = eq * data.fx(asof)
     by = {}
     for t in led["trades"]:
         by[t["ticker"]] = by.get(t["ticker"], 0.0) + t["pnl"] * data.fx(t["exit_day"])
@@ -399,16 +733,17 @@ def run_stockbot(data, universe, start, asof, cash):
     fees_usd = sum(abs(t["shares"]) * (t["entry"] + t["exit"]) * paper.PARAMS["cost_bps"] / 1e4 for t in led["trades"])
     return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2),
             "trades": len(led["trades"]) + len(led["positions"]),
-            "fees": round(fees_usd * data.fx(asof) + cash * 2 * COSTS["fx_fee_pct"] / 100.0, 2),
-            "fx_fees": round(cash * 2 * COSTS["fx_fee_pct"] / 100.0, 2), "dividends": 0.0,
-            "holdings": sorted(led["positions"]), "cash_left": None,
+            "fees": round(fees_usd * data.fx(asof), 2), "fx_fees": 0.0, "dividends": 0.0,
+            "holdings": sorted(led["positions"]) + ([p["idle"]] if led.get("idle_shares") else []),
+            "cash_left": None, "idle": p.get("idle"),
+            "cash_drag_pct": round(100.0 * sum(idle) / len(idle), 1) if idle else None,
             "contrib": sorted(({"ticker": k, "pnl": round(x, 2), "held": k in led["positions"]} for k, x in by.items()),
                               key=lambda c: -c["pnl"]),
             "curve": [[d, round(e * data.fx(d), 2)] for d, e in led["equity"]],
             "fills": [{"day": t["exit_day"], "side": "round trip", "ticker": t["ticker"], "shares": t["shares"],
                        "price": t["exit"], "currency": "USD", "cad": round(t["pnl"] * data.fx(t["exit_day"]), 2)}
                       for t in led["trades"][-40:]],
-            "win_rate_pct": paper.stats(led["equity"], led["trades"]).get("win_rate_pct")}
+            "win_rate_pct": paper.stats(led["equity"], led["trades"]).get("win_rate_pct") if led["trades"] else None}
 
 
 def market_close_utc(day):
@@ -421,10 +756,10 @@ def market_close_utc(day):
         return int(datetime.datetime.combine(_date(day), datetime.time(20, 0), datetime.timezone.utc).timestamp())
 
 
-def run_crypto(candles, data, start, asof, cash, workdir):
+def run_crypto(candles, data, start, asof, cash, workdir, overrides=None):
     cfg = dict(team.DEFAULTS)
-    fx0 = data.fx(start)
-    usd0 = cash / (fx0 * (1 + COSTS["fx_fee_pct"] / 100.0))
+    cfg.update(overrides or {})
+    usd0 = cash / data.fx(start)  # US-dollar cash: crypto trades in USD, nothing is converted
     cfg.update(start_cash=usd0, broker="sim")
     t0, t1, iv = market_close_utc(start), market_close_utc(asof), cfg["interval_min"] * 60
     paths = team.Paths(workdir)
@@ -447,30 +782,28 @@ def run_crypto(candles, data, start, asof, cash, workdir):
             killed = rep["killed"]
             break
     s = team.trade_log.summary(workdir)
-    if not s["trades"] and not state.get("positions"):  # never traded: the money never left CAD
-        btc_only = _btc_hold(candles, keys, t0, t1, iv, usd0, data, asof, cash)
-        return {"value": round(cash, 2), "return_pct": 0.0, "trades": 0, "fees": 0.0, "fx_fees": 0.0,
-                "dividends": 0.0, "holdings": [], "cash_left": round(cash, 2), "contrib": [], "curve": [],
-                "cash_drag_pct": 100.0, "win_rate_pct": None, "killed": killed, "btc_hold": btc_only}
     prices = {}
     for c, bs in candles.items():
         i = bisect.bisect_right(keys[c], t1 - iv)
         if i:
             prices[c] = bs[i - 1]["c"]
     eq = broker.account(prices)["equity"]
-    v = eq * data.fx(asof) * (1 - COSTS["fx_fee_pct"] / 100.0)
+    v = eq * data.fx(asof)
     btc_hold = _btc_hold(candles, keys, t0, t1, iv, usd0, data, asof, cash)
     rate = data.fx(asof)
     daily = {}
     for row in team.trade_log.read(paths.equity):
         daily[row["time"][:10]] = float(row["equity"]) * rate
+    if killed:  # the kill switch sold everything: US-dollar cash, flat, to the as-of close
+        for d in data.days:
+            if start <= d <= asof and d not in daily and (not daily or d > max(daily)):
+                daily[d] = eq * data.fx(d)
     by = {}
     for t in team.trade_log.read(paths.trades):
         c = t["asset"].split("/")[0]
         by[c] = by.get(c, 0.0) + float(t["pnl"]) * rate
     return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2), "trades": s["trades"],
-            "fees": round(s["fees_slippage"] * rate + cash * 2 * COSTS["fx_fee_pct"] / 100.0, 2),
-            "fx_fees": round(cash * 2 * COSTS["fx_fee_pct"] / 100.0, 2), "dividends": 0.0,
+            "fees": round(s["fees_slippage"] * rate, 2), "fx_fees": 0.0, "dividends": 0.0,
             "holdings": sorted(state.get("positions", {})), "cash_left": None,
             "contrib": sorted(({"ticker": k, "pnl": round(x, 2), "held": k in state.get("positions", {})}
                                for k, x in by.items()), key=lambda c: -c["pnl"]),
@@ -486,9 +819,25 @@ def _btc_hold(candles, keys, t0, t1, iv, usd0, data, asof, cash):
     a, b = bisect.bisect_right(keys["BTC"], t0 - iv), bisect.bisect_right(keys["BTC"], t1 - iv)
     if not a or not b or candles["BTC"][a - 1]["t"] < t0 - 2 * iv:  # no bar near the start: no answer
         return None
-    v = usd0 * candles["BTC"][b - 1]["c"] / candles["BTC"][a - 1]["c"] * data.fx(asof) * (1 - COSTS["fx_fee_pct"] / 100.0)
+    v = usd0 * candles["BTC"][b - 1]["c"] / candles["BTC"][a - 1]["c"] * data.fx(asof)
     return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2),
             "curve": [], "trades": 1}
+
+
+def load_candles(cfg, first, asof, offline=None):
+    """({coin: bars}, errors) at cfg["interval_min"], from `first` minus the lookback to the as-of close.
+    Offline: candles-<COIN>.json (15-minute) or candles-<COIN>-<minutes>.json."""
+    iv = cfg["interval_min"]
+    t0 = market_close_utc(first) - (cfg["lookback_bars"] + 4) * iv * 60
+    if offline:
+        out = {}
+        for c in cfg["coins"]:
+            p = os.path.join(offline, "candles-%s.json" % c if iv == 15 else "candles-%s-%d.json" % (c, iv))
+            if os.path.exists(p):
+                with open(p) as fh:
+                    out[c] = json.load(fh)
+        return out, []
+    return team.candles.fetch(cfg["coins"], cfg["data"], t0, market_close_utc(asof) + iv * 60, iv)
 
 
 # ---------------------------------------------------------------- Pelosi
@@ -539,9 +888,11 @@ def pelosi_signals(rows):
     return buys, sells
 
 
-def run_pelosi(data, filings, start, asof, cash):
-    """Equal weight in what she disclosed buying; act only after each filing was posted."""
-    basket, pf, pending = [], Portfolio(data, cash), []
+def run_pelosi(data, filings, start, asof, cash, mode="mirror"):
+    """Equal weight in what she disclosed buying; act only after each filing was posted.
+    mode "mirror" also sells what she disclosed selling; "hold" keeps every buy (her sales
+    are often old winners trimmed for taxes, and the copy learns of them weeks late)."""
+    basket, pf, pending = [], Portfolio(data, cash, split={"USD": 1.0}, start=start), []
     lookback = (_date(start) - datetime.timedelta(days=PELOSI_LOOKBACK_DAYS)).isoformat()
     used = []
 
@@ -551,7 +902,7 @@ def run_pelosi(data, filings, start, asof, cash):
             if t not in basket and t in data.charts:
                 basket.append(t)
         for t in s:
-            if t in basket:
+            if t in basket and mode == "mirror":
                 basket.remove(t)
 
     for filed, rows in filings:  # what was already public at the start
@@ -592,7 +943,7 @@ def run_pelosi(data, filings, start, asof, cash):
 
 # ---------------------------------------------------------------- what went well, what did not
 
-BENCH = ("S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash")
+BENCH = ("S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash")
 
 
 def factors(data, start, asof, filings, candles_btc=None):
@@ -626,7 +977,11 @@ def insights(row, fac, cash):
             continue
         good, bad = [], []
         ref, ref_name = (tsx, "the TSX 60") if k == "dividend" else (spy, "the S&P 500")
-        if ref is not None:
+        qqq = (row.get("Nasdaq 100 (QQQ)") or {}).get("return_pct")
+        refs = [(ref, ref_name)] + ([(qqq, "the Nasdaq 100")] if k == "growth" and qqq is not None else [])
+        for ref, ref_name in refs:
+            if ref is None:
+                continue
             d = r["return_pct"] - ref
             (good if d >= 0 else bad).append("%s %s by %.1f points (%+.1f%% vs %+.1f%%)" % (
                 "beat" if d >= 0 else "trailed", ref_name, abs(d), r["return_pct"], ref))
@@ -694,20 +1049,26 @@ def overall(results):
 # ---------------------------------------------------------------- scenarios: same strategy, different settings
 
 SCENARIOS = [
-    ("growth", "Default (12-month momentum, 20% cap)", {}),
-    ("growth", "Short momentum: 3 months", {"momentum_months": 3}),
-    ("growth", "Medium momentum: 6 months", {"momentum_months": 6}),
-    ("growth", "Concentrated: 35% cap, 3+ names", {"max_position_pct": 35, "min_positions": 3}),
+    ("growth", "Default: aggressive (3-month momentum, 30% cap, no cash)", {}),
+    ("growth", "Previous default (12-month momentum, 20% cap, 3% cash)", {"momentum_months": 12, "max_position_pct": 20,
+                                                                         "min_positions": 6, "cash_target_pct": 3}),
+    ("growth", "12-month momentum", {"momentum_months": 12}),
+    ("growth", "6-month momentum", {"momentum_months": 6}),
+    ("growth", "Concentrated: 40% cap, 3+ names", {"max_position_pct": 40, "min_positions": 3}),
     ("growth", "Diversified: 10% cap, 10+ names", {"max_position_pct": 10, "min_positions": 10}),
     ("growth", "Tight stop: 15%", {"stop_loss_pct": 15}),
     ("growth", "Rebalance monthly", {"review_every_days": 28}),
-    ("growth", "Aggressive: 3-month momentum, 30% cap, no cash", {"momentum_months": 3, "max_position_pct": 30,
-                                                                  "min_positions": 4, "cash_target_pct": 0}),
+    ("growth", "Monthly, 10% cap, 10+ names", {"review_every_days": 28, "max_position_pct": 10, "min_positions": 10}),
+    ("growth", "6-month momentum, monthly", {"momentum_months": 6, "review_every_days": 28}),
+    ("growth", "Rebalance quarterly", {"review_every_days": 91}),
     ("medium", "Default (6-month trend, 15% cap)", {}),
     ("medium", "Long trend: 12 months", {"momentum_months": 12}),
     ("medium", "Rebalance monthly", {"review_every_days": 28}),
+    ("medium", "Rebalance quarterly", {"review_every_days": 91}),
+    ("medium", "Monthly, 10% cap, 10+ names", {"review_every_days": 28, "max_position_pct": 10, "min_positions": 10}),
     ("dividend", "Default (2% yield floor, 12% cap)", {}),
     ("dividend", "Higher yield floor: 3.5%", {"min_yield_pct": 3.5}),
+    ("dividend", "Rebalance monthly", {"review_every_days": 28}),
     ("dividend", "Rebalance quarterly", {"review_every_days": 91}),
 ]
 
@@ -728,19 +1089,124 @@ def scenario_list(base):
     return out
 
 
-def run_scenarios(data, watch, starts, asof, cash, account_type, scenarios):
+def run_scenarios(data, watch, starts, asof, cash, account_type, scenarios, uni=None):
     rows = []
+    if uni is not None:  # the old way, for comparison: today's hand-picked watchlists, replayed into the past
+        scenarios = list(scenarios) + [(st, "Today's hand-picked watchlist (hindsight)", {"_fixed": True})
+                                       for st in ("growth", "medium", "dividend")]
     for strategy, name, over in scenarios:
-        row = {"strategy": strategy, "name": name, "inputs": dict(over),
+        fixed = over.get("_fixed")
+        over = {k: v for k, v in over.items() if k != "_fixed"}
+        row = {"strategy": strategy, "name": name, "inputs": dict(over) if not fixed else {"watchlist": "today's picks"},
                "settings": {k: dict(acc.RULES[strategy], **over).get(k) for k in acc.TUNABLE
                             if strategy in acc.TUNABLE[k][3]}, "results": {}}
         for label, start in starts:
-            r = run_account(data, strategy, watch[strategy], start, asof, cash, account_type, over)
+            r = run_account(data, strategy, watch[strategy] if (fixed or uni is None) else [], start, asof, cash,
+                            account_type, over, uni=None if fixed else uni)
             row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
                                      "fees": r["fees"], "holdings": r["holdings"]}
             if label == starts[0][0]:
                 row["risk"] = risk_stats(r["curve"]) if len(r["curve"]) > 20 else None
         rows.append(row)
+    return rows
+
+
+STOCKBOT_VARIANTS = [
+    ("Stock bot: trades + idle cash in QQQ (default)", {}),
+    ("Stock bot: trades only, idle cash stays cash", {"idle": None}),
+    ("Stock bot: trades + idle cash in SPY", {"idle": "SPY"}),
+    ("Stock bot: idle in QQQ, hold 5 days", {"hold_days": 5}),
+]
+MOMENTUM_VARIANTS = [
+    ("Momentum: top 20, 12-1 months, above trend (default)", {}),
+    ("Momentum: top 10", {"n": 10}),
+    ("Momentum: top 40", {"n": 40}),
+    ("Momentum: 6-1 months", {"months": 6}),
+    ("Momentum: bonds while the S&P 500 is under its 200-day", {"market": True}),
+    ("Momentum: no trend filter", {"trend": False}),
+]
+SIGNAL_VARIANTS = [
+    ("insider buys", "Insiders: 2+ buying in 60 days (default)", {}),
+    ("insider buys", "Insiders: 3+ buying in 60 days", {"min_count": 3}),
+    ("insider buys", "Insiders: 1+ officer buying, 90 days", {"min_count": 1, "officers": True, "days": 90}),
+    ("insider buys", "Insiders: 2+, above the 200-day average", {"trend": True}),
+    ("insider buys", "Insiders: 2+, top 10", {"n": 10}),
+    ("congress buys", "Congress: 2+ members buying in 90 days (default)", {"source": "congress", "days": 90}),
+    ("congress buys", "Congress: any member buying in 90 days", {"source": "congress", "days": 90, "min_count": 1}),
+    ("congress buys", "Congress: 2+ members, 180 days", {"source": "congress", "days": 180}),
+    ("congress buys", "Insiders or Congress, 2+ buyers", {"source": "both", "days": 90}),
+]
+DUAL_VARIANTS = [
+    ("Dual momentum: best 1 fund (default)", {}),
+    ("Dual momentum: best 3 funds", {"k": 3}),
+    ("Dual momentum: best 5 funds", {"k": 5}),
+    ("Dual momentum: 6-month lookback", {"months": 6}),
+]
+PELOSI_VARIANTS = [("Pelosi: mirror buys and sells", "mirror"), ("Pelosi: keep every buy", "hold")]
+CRYPTO_VARIANTS = [
+    ("Crypto team: 1-day bars (default)", {"interval_min": 1440}),
+    ("Crypto team: 15-minute bars (the guide)", {"interval_min": 15}),
+    ("Crypto team: 6-hour bars", {"interval_min": 360}),
+    ("Crypto team: 1-day bars, Bitcoin and Ether only", {"interval_min": 1440, "coins": ["BTC", "ETH"]}),
+]
+
+
+def agent_scenarios(data, ctx, starts, asof, cash, longest):
+    """The bots under different settings: stock bot, VIX agent, Pelosi copycat, crypto team."""
+    rows = []
+
+    def add(strategy, name, inputs, run, max_days=None):
+        row = {"strategy": strategy, "name": name, "inputs": dict(inputs), "settings": dict(inputs), "results": {}}
+        for label, start in starts:
+            if max_days and (_date(asof) - _date(start)).days > max_days + 4:
+                row["results"][label] = None
+                continue
+            r = run(start)
+            row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
+                                     "fees": r["fees"], "holdings": r["holdings"]}
+            if label == longest:
+                row["risk"] = risk_stats(r["curve"]) if len(r.get("curve") or []) > 20 else None
+        rows.append(row)
+    for name, over in STOCKBOT_VARIANTS:
+        add("stock bot", name, over, lambda st, o=over: run_stockbot(data, ctx["universe"], st, asof, cash, o,
+                                                                     uni=ctx.get("uni")))
+    if ctx.get("uni") is not None:
+        add("stock bot", "Stock bot: today's 30 hand-picked large caps (hindsight)", {"universe": "today's picks"},
+            lambda st: run_stockbot(data, ctx["universe"], st, asof, cash))
+        for name, over in MOMENTUM_VARIANTS:
+            add("momentum", name, over, lambda st, o=over: run_momentum(data, ctx["uni"], st, asof, cash, **o))
+        for name, over in DUAL_VARIANTS:
+            add("dual momentum", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
+    sig = ctx.get("signals")
+    if ctx.get("uni") is not None and sig:
+        for fam, name, over in SIGNAL_VARIANTS:
+            if over.get("source", "insiders") in ("insiders", "both") and not sig.insiders:
+                continue
+            if over.get("source") in ("congress", "both") and not sig.congress:
+                continue
+            add(fam, name, over, lambda st, o=over: run_signals(data, ctx["uni"], sig, st, asof, cash, **o))
+        add("momentum", "Momentum: only names insiders or Congress bought (180 days)", {"backed": "180 days"},
+            lambda st: run_momentum_signals(data, ctx["uni"], sig, st, asof, cash))
+    if VIX_SYM in data.charts:
+        for name, rule in VIX_RULES:
+            add("vix", name, rule, lambda st, r=rule: run_vix_agent(data, st, asof, cash, r))
+    if "pelosi" not in ctx["skip"]:
+        for name, mode in PELOSI_VARIANTS:
+            add("pelosi", name, {"mode": mode}, lambda st, m=mode: run_pelosi(data, ctx["filings"], st, asof, cash, m))
+    if "crypto" not in ctx["skip"]:
+        for name, over in CRYPTO_VARIANTS:
+            cfg = dict(team.DEFAULTS, **over)
+            limit = CRYPTO_MAX_DAYS if cfg["interval_min"] < 60 else CRYPTO_LONG_DAYS
+            first = min(st for _, st in starts if (_date(asof) - _date(st)).days <= limit + 4)
+            if cfg["interval_min"] == team.DEFAULTS["interval_min"] and ctx.get("candles"):
+                candles, errs = ctx["candles"], []  # already loaded for the main table
+            else:
+                candles, errs = load_candles(cfg, first, asof, ctx["offline"])
+            ctx["errors"].extend(errs)
+            if not candles:
+                continue
+            work = os.path.join(ctx["base"], "replay", "crypto-scenario")
+            add("crypto", name, over, lambda st, c=candles, o=over: run_crypto(c, data, st, asof, cash, work, o), limit)
     return rows
 
 
@@ -868,7 +1334,7 @@ def my_holdings(base, extra=None):
     return out
 
 
-def mine_rows(data, mine, watch, start, end, cash):
+def mine_rows(data, mine, watch, start, end, cash, uni=None):
     rows, labels = {}, {}
     for aid, m in mine.items():
         held = {t: q for t, q in m["shares"].items() if t in data.charts}
@@ -877,8 +1343,8 @@ def mine_rows(data, mine, watch, start, end, cash):
         k1, k2 = "mine:%s:held" % aid, "mine:%s:rules" % aid
         rows[k1] = run_mix(data, held, start, end, cash, m["type"])
         over = {k: v for k, v in m["rules"].items() if k in acc.TUNABLE}
-        rows[k2] = run_account(data, m["strategy"], sorted(set(watch[m["strategy"]]) | set(held)), start, end, cash,
-                               m["type"], over, seed=held)
+        rows[k2] = run_account(data, m["strategy"], sorted(set(held) if uni else set(watch[m["strategy"]]) | set(held)),
+                               start, end, cash, m["type"], over, seed=held, uni=uni)
         labels[k1] = "Your %s, held as is" % m["name"]
         labels[k2] = "Your %s, run by its %s rules" % (m["name"], m["strategy"])
     return rows, labels
@@ -886,7 +1352,8 @@ def mine_rows(data, mine, watch, start, end, cash):
 
 # ---------------------------------------------------------------- rolling windows: does it KEEP working?
 
-def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec=ROLLING, include_pelosi=True):
+def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec=ROLLING, include_pelosi=True, uni=None,
+            sig=None):
     """Many equal-length windows (default 3 months, a new one each month for a year). The
     question is not 'did it win once' but 'how often did it beat the S&P 500'."""
     starts = []
@@ -898,15 +1365,28 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
             starts.append((start, end))
     runs = {}
     for start, end in reversed(starts):
-        row = {s: run_account(data, s, watch[s], start, end, cash, account_type) for s in ("growth", "medium", "dividend")}
-        row["stock bot"] = run_stockbot(data, universe, start, end, cash)
+        row = {s: run_account(data, s, [] if uni else watch[s], start, end, cash, account_type, uni=uni)
+               for s in ("growth", "medium", "dividend")}
+        row["stock bot"] = run_stockbot(data, universe, start, end, cash, uni=uni)
+        if uni is not None:
+            row["momentum"] = run_momentum(data, uni, start, end, cash)
+            row["dual momentum"] = run_dual(data, start, end, cash)
+            if sig and sig.insiders:
+                row["insider buys"] = run_signals(data, uni, sig, start, end, cash)
+            if sig and sig.congress:
+                row["congress buys"] = run_signals(data, uni, sig, start, end, cash, source="congress", days=90)
+            row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
+            if "QQQ" in data.charts:
+                row["core + dual"] = blend([run_hold(data, {"QQQ": 1.0}, start, end, cash), row["dual momentum"]], cash)
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
             row["Pelosi copycat"] = run_pelosi(data, filings, start, end, cash)
         row["S&P 500 (SPY)"] = run_hold(data, {"SPY": 1.0}, start, end, cash)
+        if "QQQ" in data.charts:
+            row["Nasdaq 100 (QQQ)"] = run_hold(data, {"QQQ": 1.0}, start, end, cash)
         row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, end, cash)
-        row.update(mine_rows(data, mine, watch, start, end, cash)[0])
+        row.update(mine_rows(data, mine, watch, start, end, cash, uni)[0])
         for k, r in row.items():
             runs.setdefault(k, []).append((start, end, r["return_pct"], row["S&P 500 (SPY)"]["return_pct"]))
     import statistics
@@ -954,11 +1434,17 @@ def checks(out, data, rolling_spec):
         spy = row.get("S&P 500 (SPY)")
         p0, p1 = data.close("SPY", row["start"]), data.close("SPY", asof)
         f0, f1 = data.fx(row["start"]), data.fx(asof)
-        if spy and p0 and p1:
-            expect = 100 * ((p1 / p0) * (f1 / f0) * (1 - COSTS["fx_fee_pct"] / 100) - 1)
+        if spy and p0 and p1:  # US-dollar cash, no conversion fee; dividends net of 15% withholding
+            divs = sum(a for d, a in data.charts["SPY"]["dividends"] if row["start"] < d <= asof)
+            expect = 100 * (((p1 + divs * (1 - COSTS["us_withholding_pct"] / 100)) / p0) * (f1 / f0) - 1)
             worst = max(worst, abs(spy["return_pct"] - expect))
-    add("S&P 500 row matches the raw price change (after FX, costs; overnight gap and dividends allowed)",
+    add("S&P 500 row matches the raw price change in CAD (dividends counted; overnight gap and slippage allowed)",
         worst <= 2.5, "largest gap %.2f points" % worst)
+    cov = [(w, row["coverage"]) for w, row in out["results"].items() if row.get("coverage")]
+    if cov:
+        low = [(w, c) for w, c in cov if (c["pct"] or 0) < 80]
+        add("point-in-time universe has prices for most index members (80%+)", not low,
+            ", ".join("%s: %d of %d (%.0f%%)" % (w, c["priced"], c["members"], c["pct"] or 0) for w, c in (low or cov)[:6]))
     if rolling_spec and out.get("rolling"):
         n = max((x["windows"] for x in out["rolling"]["table"].values()), default=0)
         add("rolling windows all ran", n == rolling_spec["count"], "%d of %d" % (n, rolling_spec["count"]))
@@ -984,9 +1470,19 @@ def latest_friday(days):
     return days[-1]
 
 
+HISTORY_YEARS = {"2y": 2, "5y": 5, "10y": 10}
+
+
 def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print, mc_runs=5000,
-           windows=None, holdings=None, rolling_spec=ROLLING):
+           windows=None, holdings=None, rolling_spec=ROLLING, uni=None, history="5y", save_dir=None, signals=None):
+    """uni: "auto" (the point-in-time S&P 500 + index funds + the Canadian list), a Universe, or
+    None (today's hand-picked watchlists). history: how much price data to load ("5y", "10y").
+    save_dir: also write every chart there, for later runs with offline=save_dir."""
     windows = windows or WINDOWS
+    if uni == "auto":
+        uni = univ.load()
+    sig = sigs.Signals.load(signals) if isinstance(signals, str) else signals
+    sig = sig if sig else None
     watch = watchlists(base)
     mine = my_holdings(base, holdings)
     labels = {}
@@ -999,43 +1495,54 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                                        pdf_dir=os.path.join(base, "state", "ptr-pdfs"))
         errors += errs
     pelosi_syms = sorted({t for _, rows in filings for t in pelosi_signals(rows)[0]})
-    syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X", VIX_SYM, VIX_FUND]) | {s for v in watch.values() for s in v} | set(universe)
-                  | set(pelosi_syms) | {t for m in mine.values() for t in m["shares"]})
+    syms = set(["SPY", "QQQ", "RSP", "XIU.TO", "USDCAD=X", VIX_SYM, VIX3M_SYM]) | {s for v in watch.values() for s in v} \
+        | set(universe) | set(pelosi_syms) | {t for m in mine.values() for t in m["shares"]}
+    if uni is not None:
+        end = asof or datetime.date.today().isoformat()
+        since = (_date(end) - datetime.timedelta(days=365 * HISTORY_YEARS.get(history, 5))).isoformat()
+        syms |= set(uni.ever(since, end)) | set(univ.CANADA) | {x for v in univ.ETFS.values() for x in v}
+    syms = sorted(syms)
     charts = {}
-    for s in syms:
+    if not offline and len(syms) > 100:
+        log("loading %d price histories (%s)..." % (len(syms), history))
+    for i, s in enumerate(syms):
         try:
-            charts[s] = mk.get_chart(s, offline=offline, range_="5y")
+            charts[s] = mk.get_chart(s, offline=offline, range_=history, save=save_dir)
         except mk.MarketError as e:
             errors.append(str(e))
+        if not offline and len(syms) > 100 and i % 100 == 99:
+            log("  %d of %d" % (i + 1, len(syms)))
     if "SPY" not in charts:
         raise ReplayError("no SPY prices, so no trading calendar. Data problems: %s"
                           % "; ".join(errors[:3] or ["none reported"]))
     data = Data(charts, {})
     asof = data.trading_day_on_or_before(asof) if asof else latest_friday(data.days)
     candles = {}
+    crypto_max = CRYPTO_MAX_DAYS if team.DEFAULTS["interval_min"] < 60 else CRYPTO_LONG_DAYS
     if "crypto" not in skip:
-        cfg = dict(team.DEFAULTS)
-        first = (_date(asof) - datetime.timedelta(days=min(CRYPTO_MAX_DAYS, max(n for _, n in windows)) + 4)).isoformat()
-        t0 = market_close_utc(first) - (cfg["lookback_bars"] + 4) * cfg["interval_min"] * 60
-        if offline:
-            for c in cfg["coins"]:
-                p = os.path.join(offline, "candles-%s.json" % c)
-                if os.path.exists(p):
-                    with open(p) as fh:
-                        candles[c] = json.load(fh)
-        else:
-            candles, errs = team.candles.fetch(cfg["coins"], cfg["data"], t0, market_close_utc(asof) + 900,
-                                               cfg["interval_min"])
-            errors += errs
+        first = (_date(asof) - datetime.timedelta(days=min(crypto_max, max(n for _, n in windows)) + 4)).isoformat()
+        candles, errs = load_candles(dict(team.DEFAULTS), first, asof, offline)
+        errors += errs
     results = {}
     for label, n in windows:
         start = data.trading_day_on_or_before((_date(asof) - datetime.timedelta(days=n)).isoformat())
         log("replaying %s (from the close of %s)..." % (label, start))
         row = {"start": start}
         for strat in ("growth", "medium", "dividend"):
-            row[strat] = run_account(data, strat, watch[strat], start, asof, cash, account_type)
-        row["stock bot"] = run_stockbot(data, universe, start, asof, cash)
-        if candles and n <= CRYPTO_MAX_DAYS:
+            row[strat] = run_account(data, strat, [] if uni else watch[strat], start, asof, cash, account_type, uni=uni)
+        row["stock bot"] = run_stockbot(data, universe, start, asof, cash, uni=uni)
+        if uni is not None:
+            row["coverage"] = coverage(data, uni, start)
+            row["momentum"] = run_momentum(data, uni, start, asof, cash)
+            row["dual momentum"] = run_dual(data, start, asof, cash)
+            if sig and sig.insiders:
+                row["insider buys"] = run_signals(data, uni, sig, start, asof, cash)
+            if sig and sig.congress:
+                row["congress buys"] = run_signals(data, uni, sig, start, asof, cash, source="congress", days=90)
+            row["blend"] = blend([row["dual momentum"], row["momentum"], row.get("congress buys")], cash)
+            if "QQQ" in data.charts:
+                row["core + dual"] = blend([run_hold(data, {"QQQ": 1.0}, start, asof, cash), row["dual momentum"]], cash)
+        if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
             if c.get("btc_hold"):
@@ -1045,8 +1552,12 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, asof, cash, VIX_RULES[0][1])
         row["S&P 500 (SPY)"] = run_hold(data, {"SPY": 1.0}, start, asof, cash)
+        if "QQQ" in data.charts:
+            row["Nasdaq 100 (QQQ)"] = run_hold(data, {"QQQ": 1.0}, start, asof, cash)
+        if uni is not None and "RSP" in data.charts:
+            row["S&P 500 equal weight (RSP)"] = run_hold(data, {"RSP": 1.0}, start, asof, cash)
         row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, asof, cash)
-        rows, lab = mine_rows(data, mine, watch, start, asof, cash)
+        rows, lab = mine_rows(data, mine, watch, start, asof, cash, uni)
         row.update(rows)
         labels.update(lab)
         row["cash"] = {"value": round(cash, 2), "return_pct": 0.0}
@@ -1065,29 +1576,31 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     if mc:
         mc["left_out"] = short
     starts = [(label, results[label]["start"]) for label, _ in windows]
-    scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base))
-    if VIX_SYM in data.charts:
-        for name, rule in VIX_RULES:
-            row = {"strategy": "vix", "name": name, "inputs": dict(rule), "settings": dict(rule), "results": {}}
-            for label, start in starts:
-                r = run_vix_agent(data, start, asof, cash, rule)
-                row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
-                                         "fees": r["fees"], "holdings": r["holdings"]}
-                if label == windows[0][0]:
-                    row["risk"] = risk_stats(r["curve"]) if len(r["curve"]) > 20 else None
-            scen.append(row)
+    scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base), uni)
+    ctx = {"universe": universe, "filings": filings, "skip": skip, "offline": offline, "base": base, "uni": uni,
+           "signals": sig,
+           "errors": errors, "candles": candles}
+    scen += agent_scenarios(data, ctx, starts, asof, cash, windows[0][0])
     roll = None
     if rolling_spec:
         log("rolling %d-day windows..." % rolling_spec["horizon_days"])
         roll = rolling(data, watch, universe, filings, mine, asof, cash, account_type, rolling_spec,
-                       include_pelosi="pelosi" not in skip)
+                       include_pelosi="pelosi" not in skip, uni=uni, sig=sig)
     out = {"asof": asof, "cash": cash, "account_type": account_type, "costs": COSTS, "results": results,
            "monte_carlo": mc, "scenarios": scen, "rolling": roll, "labels": labels,
            "windows": [w for w, _ in windows], "has_holdings": bool(mine),
            "overall": overall(results), "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
            "errors": errors, "pelosi_filings": [f for f, _ in filings], "watchlists": watch,
+           "universe": None if uni is None else {
+               "kind": "point-in-time S&P 500 members + %d index funds + %d Canadian companies" % (
+                   sum(len(v) for v in univ.ETFS.values()), len(univ.CANADA)),
+               "source": uni.doc.get("licence"), "last_snapshot": uni.doc.get("last_snapshot"),
+               "shortlist": SHORTLIST, "history": history},
            "note": "Point-in-time replay: decisions use data up to each day's close, fills at the next open. "
-                   "Watchlists are today's, which is a hindsight bias. Not financial advice."}
+                   + ("Stocks are chosen only from what was in the S&P 500 that day (plus index funds and a "
+                      "Canadian list made today); companies Yahoo has no prices for (mostly delisted) cannot be "
+                      "chosen, a survivorship bias that remains. " if uni is not None else
+                      "Watchlists are today's, which is a hindsight bias. ") + "Not financial advice."}
     out["checks"] = checks(out, data, rolling_spec)
     folder = os.path.join(base, "replay")
     os.makedirs(folder, exist_ok=True)
@@ -1099,11 +1612,19 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     return out, text
 
 
-ORDER = ["growth", "medium", "dividend", "stock bot", "crypto team", "VIX agent", "Pelosi copycat",
-         "S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
+ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
+         "blend", "core + dual",
+         "crypto team", "VIX agent",
+         "Pelosi copycat",
+         "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
 LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer",
           "dividend": "Dividend reviewer (Wealthsimple)", "stock bot": "Stock bot (ATR, paper)",
-          "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (S&P 500 or cash)"}
+          "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (Nasdaq 100 or cash)",
+          "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)",
+          "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)",
+          "blend": "Blend: dual momentum + momentum + Congress (thirds)",
+          "core + dual": "Core + satellite: half Nasdaq 100, half dual momentum"}
+STRATS = [k for k in ORDER if k not in BENCH]
 
 
 def _p(x):
@@ -1118,11 +1639,18 @@ def render(out):
         return labels.get(k) or LABELS.get(k, k)
     mine = sorted(k for w in wins for k in out["results"][w] if k.startswith("mine:"))
     mine = list(dict.fromkeys(mine))
-    keys = ORDER[:7] + mine + ORDER[7:]
+    keys = STRATS + mine + [k for k in ORDER if k in BENCH]
     L = ["# $%g replay, as of the close on %s" % (out["cash"], out["asof"]), "",
          "Each cell: value at the close on %s (return). Starts: %s." % (
              out["asof"], ", ".join("%s = %s" % (w, out["results"][w]["start"]) for w in wins)), "",
          "| strategy | " + " | ".join(wins) + " |", "| --- |" + " ---: |" * len(wins)]
+    if out.get("universe"):
+        u = out["universe"]
+        cov = ["%s: %d of %d priced" % (w, out["results"][w]["coverage"]["priced"], out["results"][w]["coverage"]["members"])
+               for w in wins if out["results"][w].get("coverage")]
+        L[2:2] = ["**Universe:** %s (%s history). Each review the scanner ranks them all and the reviewer scores the "
+                  "best %s. Index members at each start: %s." % (
+                      u["kind"], u["history"], "/".join(str(v) for v in u["shortlist"].values()), "; ".join(cov)), ""]
     for k in keys:
         cells = []
         for w in wins:
@@ -1137,7 +1665,7 @@ def render(out):
     for w in wins:
         r = out["results"][w]
         L.append("**%s** (from %s)" % (w, r["start"]))
-        for k in ORDER[:7] + mine:
+        for k in STRATS + mine:
             x = r.get(k)
             if not x:
                 continue
@@ -1184,7 +1712,7 @@ def render(out):
             rk = sc.get("risk") or {}
             L.append("| %s | %s | %s | %s | %s | %s |" % (
                 sc["strategy"], sc["name"], ", ".join("%s=%s" % kv for kv in sc["inputs"].items()) or "defaults",
-                " | ".join("%+.1f%%" % sc["results"][w]["return_pct"] for w in wins),
+                " | ".join("%+.1f%%" % sc["results"][w]["return_pct"] if sc["results"].get(w) else "n/a" for w in wins),
                 rk.get("sharpe", "–"), _p(rk.get("max_dd_pct"))))
         L.append("")
     roll = out.get("rolling")
@@ -1273,6 +1801,12 @@ def main(argv=None):
                     help="replay your own holdings from a broker CSV (also read from trader/accounts/*.json)")
     ap.add_argument("--windows", help="e.g. 12m,6m,3m,1m,2w,1w (default)")
     ap.add_argument("--no-rolling", action="store_true", help="skip the rolling-window test")
+    ap.add_argument("--universe", choices=["auto", "watchlists"], default="auto",
+                    help="auto: choose from the S&P 500 as it was each day + index funds (default); "
+                         "watchlists: today's hand-picked lists (hindsight)")
+    ap.add_argument("--history", choices=sorted(HISTORY_YEARS), default="5y", help="price history to load")
+    ap.add_argument("--save-data", metavar="DIR", help="also save every chart to DIR (reuse with --offline DIR)")
+    ap.add_argument("--signals", metavar="DIR", help="congress.json.gz / insiders.json.gz from signals.py")
     ap.add_argument("--strict", action="store_true", help="exit 3 if any self-check fails")
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--json", action="store_true")
@@ -1280,7 +1814,9 @@ def main(argv=None):
     try:
         out, text = replay(a.dir, a.asof, a.cash, a.skip, a.offline, a.account_type,
                            log=lambda m: print(m, file=sys.stderr), windows=parse_windows(a.windows),
-                           holdings=a.holdings, rolling_spec=None if a.no_rolling else ROLLING)
+                           holdings=a.holdings, rolling_spec=None if a.no_rolling else ROLLING,
+                           uni="auto" if a.universe == "auto" else None, history=a.history, save_dir=a.save_data,
+                           signals=a.signals)
     except (ReplayError, mk.MarketError) as e:
         print("replay: %s" % e, file=sys.stderr)
         return 2

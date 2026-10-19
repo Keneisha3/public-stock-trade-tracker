@@ -21,7 +21,7 @@ trusts it.
 | **Runs a daily briefing** | One command: sync Questrade, refresh prices and dividends, review, record the day's value, run the paper bot, check news on your holdings, new Congress stock-trade filings and your price alerts. |
 | **Shows it all on a dashboard** | A local web page: total and today's change, value history, mix vs target, to-dos, proposed trades, holdings with flags and sparklines, the paper bot vs buy-and-hold, news, Congress filings, CSV import. Light and dark mode, works on a phone. |
 | **Paper-trades automatically** | An ATR breakout bot from my [ATR research project](https://github.com/Keneisha3/ATR-Based-News-Triggered-Stock-System) trades a paper ledger every day, with a 5-year backtest and a "ready for real money?" checklist it has to pass. |
-| **Runs a crypto bot team on fake money** | A Scanner, Analyst, Risk Manager and Executor trade 10 coins every 15 minutes (EMA crossover + RSI, 2 % max risk, stop-loss and take-profit on every trade). Simulated by default, or Alpaca's paper account. CSV log, daily summary against buy-and-hold, kill switch. [Beginner guide](docs/crypto-bot-team.md). |
+| **Runs a crypto bot team on fake money** | A Scanner, Analyst, Risk Manager and Executor trade 10 coins on daily bars, checked every 15 minutes (EMA crossover + RSI, 2 % max risk, stop-loss and take-profit on every trade). Simulated by default, or Alpaca's paper account. CSV log, daily summary against buy-and-hold, kill switch. [Beginner guide](docs/crypto-bot-team.md). |
 | **Never trades for you** | Proposals are a to-do list. You place every real trade yourself in your broker's app. |
 
 ## Quick start
@@ -108,8 +108,9 @@ Defaults, all overridable per account in `trader/accounts.json`:
 
 | rule | growth (Questrade) | medium term | dividend (Wealthsimple) |
 | --- | --- | --- | --- |
-| max per stock | 20 % | 15 % | 12 % |
-| cash target / max | 3 / 10 % | 3 / 10 % | 2 / 8 % |
+| max per stock | 30 % | 15 % | 12 % |
+| cash target / max | 0 / 10 % | 3 / 10 % | 2 / 8 % |
+| momentum lookback | 3 months | 6 months | n/a |
 | stop from your cost | -25 % | -20 % | -30 % |
 | also flags | laggards (down 12 months and below cost) | price under its 200-day average and falling | no dividend, yield under 2 % or over 8 %, cuts, shrinking payouts, volatility over 30 % |
 
@@ -136,12 +137,26 @@ find out with evidence instead of with savings.
 
 `python3 trade.py replay` gives every strategy $100 CAD 12, 6, 3 and 1 months,
 2 weeks and 1 week before the latest Friday close (`--windows` to change them), and compares them with
-holding the S&P 500, the TSX 60, Bitcoin or cash. It is strictly point in time:
+holding the S&P 500, the Nasdaq 100, the TSX 60, Bitcoin or cash. It is strictly point in time:
 each decision sees only what was known at that day's close and fills at the
-next open. It counts FX fees, slippage, dividends and US withholding. A
+next open. US stocks trade in US dollars and Canadian stocks in Canadian
+dollars, as in the real accounts, so nothing is converted per trade; results
+are shown in CAD at each day's rate. It counts slippage, dividends and US
+withholding. A
 separate **Pelosi copycat** row copies Nancy Pelosi's disclosed trades from
 the day each filing was posted, not the day she traded. A test wrecks every
 price after the as-of date and checks that no result moves.
+
+**No hindsight in the stock picks.** By default the agents choose only from
+what was in the S&P 500 on each day (a membership history back to 1996, MIT
+licence, [fja05680/sp500](https://github.com/fja05680/sp500)), plus 93 index
+funds (sectors, factors, countries, bonds, gold, Canadian funds) and about 70
+large Canadian companies. At each review a scanner ranks all of them and the
+reviewer scores the best 20 to 25; the stock bot trades any member, only on
+days it was a member. Yahoo has no prices for many companies that later left
+the market, so the report shows how many index members it could price.
+Today's hand-picked watchlists stay as comparison rows marked "hindsight".
+`--history 10y` loads ten years; `--universe watchlists` goes back to the old way.
 
 On top of the replay:
 
@@ -163,12 +178,39 @@ On top of the replay:
   matches the raw price change. `--strict` (used by the workflow) fails the
   run if any check fails.
 - **Risk stats.** Volatility, Sharpe ratio, max drawdown and share of up days.
-- **VIX agent and VIX analysis.** A rule-based agent holds the S&P 500 while
-  the VIX (the market's fear gauge) is calm and steps aside to cash when it
-  spikes (tested at 20, 25, 30 and "above its 50-day average"). Every strategy
+- **VIX agent and VIX analysis.** A rule-based agent holds the Nasdaq 100
+  while the VIX (the market's fear gauge) is at or under 30 and steps aside to
+  US-dollar cash above it (also tested: the S&P 500, thresholds 20 and 25,
+  "above its 50-day average", and the 3-month VIX term structure). Every strategy
   is also broken down by VIX regime (calm, normal, nervous, fear) and by how
   it moves with the VIX. The daily briefing and the dashboard show today's
   VIX and what the agent would do.
+
+**Walk-forward test.** The workflow's `walk-forward` mode downloads ten years
+of prices once, replays five periods ending 2019-10, 2020-10, 2022-10, 2024-10
+and 2026-10 in parallel (the 2018 sell-off, the 2020 crash and the 2022 bear
+market included), and combines them into one table (`scripts/walkforward.py`).
+
+**What the walk-forward found** (`research/pit-v5-holdout/` on the
+`replay-results` branch). Settings were chosen on the training periods only:
+24-month windows ending 2019, 2020, 2022 and 2024. The last 12 months were
+held out and used only to check.
+
+| agent | training: beat the S&P 500 | training: average gap | test, last 12 months | worst drop |
+| --- | ---: | ---: | ---: | ---: |
+| Half Nasdaq 100, half dual momentum | 3 of 4 | +12.9 pts | +28.1 % (S&P 500 +17.9 %) | -18 % to -33 % |
+| Dual momentum (single strongest index fund) | 3 of 4 | +11.8 pts | +35.8 % | -24 % to -46 % |
+| Just holding the Nasdaq 100 (QQQ) | 3 of 4 | +14.0 pts | +20.3 % | -12 % to -32 % |
+| Congress buying (2+ members, 90 days) | 1 of 4 | -1.7 pts | +32.6 % | |
+| Momentum (top 20 S&P 500, 12-1) | 2 of 4 | -10.6 pts | +46.3 % | |
+| Insider buying (2+ insiders, 60 days) | 1 of 4 | -8.0 pts | +2.8 % | |
+| Growth, medium, dividend reviewers, stock bot, VIX agent | 0 to 2 of 4 | -3.6 to -18.6 pts | | |
+
+Only dual momentum and the half-and-half blend beat the S&P 500 in both
+training and the held-out year, and only by taking bigger drops. One strong
+year (the test) flatters momentum-style agents; the training years are the
+better guide. Without hindsight, the reviewers and the insider signal trail
+the index.
 
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the
@@ -183,7 +225,7 @@ and are range-checked. The live review and the replay use the same rules.
 
 ## The crypto bot team
 
-Four roles trade 10 big coins every 15 minutes, on fake money only:
+Four roles trade 10 big coins on daily bars (checked every 15 minutes), on fake money only:
 
 | role | job |
 | --- | --- |
@@ -201,9 +243,12 @@ python3 trade.py crypto summary
 
 Every trade goes to `trader/team/trades.csv`, with entry, exit, size,
 stop-loss, take-profit, fees and slippage, P&L and which roles approved it.
-On 15-minute bars, fees and slippage are a large share of each trade's risk.
-The log says so on every trade, and it is the first thing to look at when
-you review the results.
+The guide's 15-minute bars lost 43 to 44 % of the money in six months in
+both test periods, mostly to fees: stops that close are smaller than the
+trading costs. Daily bars were the only timeframe that made money in both
+periods (+22 % in the year to 2025-10-17, +10 % in the year to 2026-10-16),
+so they are the default. Holding Bitcoin did better in the first year
+(+61 %) and worse in the second (-24 %). Keep it on paper.
 
 ## How it is built
 

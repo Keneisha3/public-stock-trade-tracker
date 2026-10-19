@@ -35,8 +35,9 @@ import accounts as acc  # noqa: E402
 import paper  # noqa: E402
 import team  # noqa: E402
 
-STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts"]
-NETWORK_ONLY = {"sync", "news", "congress", "alerts"}
+STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover"]
+NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover"}
+IDEA_SOURCES = "trending,screens,news,fool,reddit"
 
 
 def _tool(folder, script, args, timeout=180):
@@ -137,6 +138,14 @@ def run(base="trader", skip=(), offline=None, today=None):
         brief["congress"] = [{k: r.get(k) for k in ("name", "district", "filed", "url", "type_name")}
                              for r in fresh][:15]
         did("congress", doc is not None, err or "%d new filings" % len(fresh))
+    if "discover" not in skip:  # today's idea lists, archived, then ranked (leads, not advice)
+        snap, err = _tool("trader-discover", "discover.py", ["--dir", base, "snapshot", "--only", IDEA_SOURCES, "--json"],
+                          timeout=300)
+        doc, err2 = _tool("trader-discover", "discover.py", ["--dir", base, "funnel", "--json", "--top", "15"],
+                          timeout=600) if snap else (None, err)
+        brief["ideas"] = (doc or {}).get("ideas", [])
+        did("discover", doc is not None, err2 or "%d ideas from %d candidates" % (len(brief["ideas"]),
+                                                                              (doc or {}).get("candidates", 0)))
     rules = os.path.join(base, "alerts.json")
     if "alerts" not in skip and os.path.exists(rules):
         doc, err = _tool("trader-alerts", "alerts.py", ["check", "--json", "--rules", rules,
@@ -207,6 +216,12 @@ def render(b):
         L.append("## New Congress stock-trade filings")
         for c in b["congress"]:
             L.append("- %s (%s) filed %s: %s" % (c["name"], c["district"], c["filed"], c["url"]))
+        L.append("")
+    if b.get("ideas"):
+        L.append("## Ideas from the market (leads to research, not advice)")
+        for i in b["ideas"]:
+            L.append("- %s %s: %+.0f%% over 12 months (last month left out), from %s" % (
+                i["symbol"], (i.get("name") or "")[:30], i["momentum_12_1"], ", ".join(i["sources"])))
         L.append("")
     bad = {k: v for k, v in b["steps"].items() if not v["ok"]}
     if bad:

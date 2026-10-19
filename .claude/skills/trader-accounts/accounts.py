@@ -50,11 +50,11 @@ sys.path.insert(0, HERE)
 import market as mk  # noqa: E402  (sits next to this file)
 
 RULES = {
-    "growth": {
-        "max_position_pct": 20, "trim_band_pct": 5, "cash_target_pct": 3, "cash_max_pct": 10,
+    "growth": {  # "aggressive": 3-month momentum, 30% cap, fully invested (won both test periods)
+        "max_position_pct": 30, "trim_band_pct": 5, "cash_target_pct": 0, "cash_max_pct": 10,
         "stop_loss_pct": 25, "drawdown_review_pct": 30, "laggard_12m_pct": -10,
-        "keep_score": 45, "min_trade": 100, "min_positions": 6,
-        "momentum_months": 12, "review_every_days": 7,
+        "keep_score": 45, "min_trade": 100, "min_positions": 4,
+        "momentum_months": 3, "review_every_days": 7,
     },
     "medium": {
         "max_position_pct": 15, "trim_band_pct": 4, "cash_target_pct": 3, "cash_max_pct": 10,

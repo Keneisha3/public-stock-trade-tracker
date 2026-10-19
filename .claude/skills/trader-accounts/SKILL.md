@@ -66,9 +66,10 @@ Currency). TSX symbols become Yahoo symbols (`CTC.A` on TSX -> `CTC-A.TO`).
 
 | rule | growth | medium | dividend |
 | --- | --- | --- | --- |
-| max position % | 20 | 15 | 12 |
+| max position % | 30 | 15 | 12 |
 | trim when over cap by | 5 pts | 4 pts | 3 pts |
-| cash target / max % | 3 / 10 | 3 / 10 | 2 / 8 |
+| cash target / max % | 0 / 10 | 3 / 10 | 2 / 8 |
+| momentum lookback | 3 months | 6 months | n/a |
 | stop from your cost | -25 % | -20 % | -30 % |
 | review when off 52w high | -30 % | -25 % | -25 % |
 | other | laggard: 12m < -10 % and below cost | trend broken: under 200-day avg and 6m < 0 | yield 2 to 8 %, no cut over 10 %, 3y dividend growth, vol under 30 % |
