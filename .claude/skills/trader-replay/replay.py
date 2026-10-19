@@ -303,6 +303,7 @@ def run_hold(data, weights, start, asof, cash):
 
 
 VIX_SYM = "^VIX"
+VIX_FUND = "VFV.TO"  # the S&P 500 in Canadian dollars: switching in and out pays no FX fee
 VIX_RULES = [
     ("VIX agent: S&P 500 unless VIX > 25", {"mode": "level", "threshold": 25}),
     ("VIX agent: S&P 500 unless VIX > 20", {"mode": "level", "threshold": 20}),
@@ -312,8 +313,10 @@ VIX_RULES = [
 
 
 def run_vix_agent(data, start, asof, cash, rule=None):
-    """Hold SPY while the VIX agent says risk-on, cash while it says risk-off.
-    Decided at each close from VIX closes up to that day; acted on at the next open."""
+    """Hold the S&P 500 while the VIX agent says risk-on, cash while it says risk-off.
+    Decided at each close from VIX closes up to that day; acted on at the next open.
+    Trades VFV.TO (CAD) when its prices are there, else SPY (every switch then pays FX)."""
+    fund = VIX_FUND if VIX_FUND in data.charts else "SPY"
     pf, pending, invested = Portfolio(data, cash), [], None
     days = [d for d in data.days if start <= d <= asof]
     on_days = switches = 0
@@ -328,15 +331,16 @@ def run_vix_agent(data, start, asof, cash, rule=None):
         on, _ = vix.decide(closes, rule)
         on_days += 1 if on else 0
         if on and invested is not True:
-            pending = [{"side": "buy", "ticker": "SPY", "cad": pf.value(d) * 0.995, "decided": d}]
+            pending = [{"side": "buy", "ticker": fund, "cad": pf.value(d) * 0.995, "decided": d}]
         elif not on and invested is not False:  # risk-off also cancels a buy still waiting for the open
-            pending = [{"side": "sell", "ticker": "SPY", "shares": pf.pos["SPY"]["shares"], "decided": d}] \
-                if pf.pos.get("SPY") else []
+            pending = [{"side": "sell", "ticker": fund, "shares": pf.pos[fund]["shares"], "decided": d}] \
+                if pf.pos.get(fund) else []
         if invested is not None and on != invested:
             switches += 1
         invested = on
     out = pf.result(asof, cash)
     out["switches"] = switches
+    out["fund"] = fund
     out["risk_on_days_pct"] = round(100.0 * on_days / max(1, len(days) - 1), 1)
     return out
 
@@ -995,7 +999,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                                        pdf_dir=os.path.join(base, "state", "ptr-pdfs"))
         errors += errs
     pelosi_syms = sorted({t for _, rows in filings for t in pelosi_signals(rows)[0]})
-    syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X", VIX_SYM]) | {s for v in watch.values() for s in v} | set(universe)
+    syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X", VIX_SYM, VIX_FUND]) | {s for v in watch.values() for s in v} | set(universe)
                   | set(pelosi_syms) | {t for m in mine.values() for t in m["shares"]})
     charts = {}
     for s in syms:
@@ -1151,7 +1155,8 @@ def render(out):
             if k == "Pelosi copycat":
                 bits.append("filings used: %s" % (", ".join(x["filings_used"]) or "none yet"))
             if x.get("switches") is not None:
-                bits.append("in the market %s%% of days, %d switches" % (x["risk_on_days_pct"], x["switches"]))
+                bits.append("trades %s; in the market %s%% of days, %d switches"
+                            % (x.get("fund", "SPY"), x["risk_on_days_pct"], x["switches"]))
             L.append("- %s: %s" % (lab(k), "; ".join(bits)))
         L.append("")
     L += ["## What is going well, what is not", ""]
