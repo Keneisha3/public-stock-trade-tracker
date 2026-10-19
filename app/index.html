@@ -273,6 +273,7 @@ function render() {
   h += `</section>`;
   h += `<section class="grid two"><div class="card"><h2>Paper trading bot</h2>${paperView(P)}</div>
     <div class="card"><h2>Backtest: 5 years</h2>${backtestView(S.backtest)}</div></section>`;
+  h += `<section class="card"><h2>Crypto bot team (paper money)</h2>${cryptoView(S.crypto)}</section>`;
   const news = (B && B.news) || [], cong = (B && B.congress) || [];
   h += `<section class="grid two">
     <div class="card"><h2>News on your holdings</h2>${news.length ? `<ul class="list">${news.map(n => `<li><b>${esc(n.ticker)}</b> <a href="${safeUrl(n.link)}" target="_blank" rel="noopener noreferrer">${esc(n.title)}</a><div class="small">${esc(n.source || "")} ${esc((n.time || "").slice(0, 16).replace("T", " "))}</div></li>`).join("")}</ul>` : `<div class="empty">No new headlines since the last refresh.</div>`}</div>
@@ -311,6 +312,15 @@ function render() {
     try { await api("/api/cash", {account: $("#cashAcct").value, amount: +$("#cashAmt").value, currency: $("#cashCcy").value}); await load(); }
     catch (e) { $("#msg").innerHTML = `<p class="banner err">${esc(e.message)}</p>`; }
   };
+  if (S.crypto && $("#teamChart")) lineChart($("#teamChart"), [
+    {name: "Bot team", color: SERIES[0], points: S.crypto.curve.map(c => [c[0], c[1]])},
+    {name: "Holding the same coins", color: SERIES[1], points: S.crypto.curve.filter(c => c[2] != null).map(c => [c[0], c[2]])}],
+    {h: 180, label: "Crypto bot team vs buy and hold", empty: "The chart starts after a few cycles."});
+  const kb = $("#teamKill"); if (kb) kb.onclick = async () => {
+    if (!confirm("Kill switch: sell every paper position on the next cycle and stop the bot?")) return;
+    await api("/api/team/kill", {}); await load();
+  };
+  const rb = $("#teamResume"); if (rb) rb.onclick = async () => { await api("/api/team/resume", {}); await load(); };
   const bt = $("#btGo"); if (bt) bt.onclick = async () => {
     bt.disabled = true; bt.textContent = "Running… (about a minute)";
     try { await api("/api/backtest", {}); await load(); } catch (e) { bt.textContent = "Failed: " + e.message; }
@@ -327,6 +337,29 @@ function paperView(P) {
     <p style="margin-bottom:4px"><b>Ready for real money?</b></p>
     <ul class="list" style="gap:2px">${P.readiness.map(c => `<li class="check ${c.ok ? "ok" : ""}" style="background:none;border:0;padding:2px 0">${esc(c.check)}</li>`).join("")}</ul>
     <p class="small">${esc(P.note)}</p>`;
+}
+
+function cryptoView(C) {
+  if (!C) return `<div class="empty">Not started. Four roles (Scanner, Analyst, Risk Manager, Executor) trade 10 coins every 15 minutes with fake money. Start it in a terminal: <code>python3 .claude/skills/trader-team/team.py run</code>. The guide is <code>docs/crypto-bot-team.md</code>.</div>`;
+  const s = C.summary || {}, t = C.today || {}, pos = Object.entries(C.positions || {});
+  const n = (x, f) => x == null ? "–" : f(x);
+  return `<div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <div class="small"><b>${esc(C.mode)}</b> · last cycle ${C.last_cycle ? esc(new Date(C.last_cycle * 1000).toLocaleString()) : "–"}
+        · kill switch ${C.kill ? `<b class="down">ON</b> (${esc(C.kill.reason)})` : "off"}</div>
+      ${C.kill ? `<button id="teamResume">Turn the bot back on</button>` : `<button id="teamKill" style="border-color:var(--critical);color:var(--bad-text)">Kill switch</button>`}</div>
+    <div class="grid two"><div><div id="teamChart"></div></div><div>
+      <table><tbody>
+        <tr><td>Trades in total (today)</td><td class="num">${s.trades} (${t.trades})</td></tr>
+        <tr><td>Win rate</td><td class="num">${n(s.win_rate_pct, x => x + "%")}</td></tr>
+        <tr><td>Average win / loss</td><td class="num">${n(s.avg_win, x => money(x))} / ${n(s.avg_loss, x => money(x))}</td></tr>
+        <tr><td>P&amp;L (fees and slippage)</td><td class="num ${cls(s.pnl)}">${money(s.pnl)} (${money(s.fees_slippage)})</td></tr>
+        <tr><td>Max drawdown</td><td class="num">${pct(s.max_drawdown_pct, 2)}</td></tr>
+        <tr><td>Bot vs holding the same coins</td><td class="num"><span class="${cls(s.bot_return_pct)}">${pct(s.bot_return_pct, 2)}</span> vs <span class="${cls(s.hold_return_pct)}">${pct(s.hold_return_pct, 2)}</span></td></tr>
+        <tr><td>Errors / downtime gaps</td><td class="num">${s.errors} / ${s.downtime}</td></tr>
+      </tbody></table></div></div>
+    ${pos.length ? `<p style="margin:12px 0 4px"><b>Open</b></p><div class="scroll"><table><thead><tr><th>Coin</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th></tr></thead><tbody>${pos.map(([c, p]) => `<tr><td class="tick">${esc(c)}</td><td class="num">${esc(p.qty)}</td><td class="num">${money(p.entry)}</td><td class="num">${money(p.stop)}</td><td class="num">${money(p.tp)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${(C.trades || []).length ? `<p style="margin:12px 0 4px"><b>Last trades</b></p><div class="scroll"><table><thead><tr><th>Closed</th><th>Coin</th><th class="num">P&amp;L</th><th>Why</th></tr></thead><tbody>${C.trades.map(r => `<tr><td class="small">${esc(r.closed_at)}</td><td class="tick">${esc(r.asset)}</td><td class="num ${cls(+r.pnl)}">${money(+r.pnl)}</td><td class="small">${esc(r.exit_reason)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    <p class="small">Fake money only. Paper fills look better than real ones. Give it 2 to 4 weeks before judging, and keep every losing trade in the log.</p>`;
 }
 
 function backtestView(bt) {

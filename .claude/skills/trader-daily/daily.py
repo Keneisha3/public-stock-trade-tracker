@@ -30,8 +30,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(SKILLS, "trader-accounts"))
 sys.path.insert(0, os.path.join(SKILLS, "trader-paper"))
+sys.path.insert(0, os.path.join(SKILLS, "trader-team"))
 import accounts as acc  # noqa: E402
 import paper  # noqa: E402
+import team  # noqa: E402
 
 STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts"]
 NETWORK_ONLY = {"sync", "news", "congress", "alerts"}
@@ -136,6 +138,10 @@ def run(base="trader", skip=(), offline=None, today=None):
                                                        "--prices-out", os.path.join(base, "prices.json")])
         brief["alerts"] = (doc or {}).get("rings", []) if isinstance(doc, dict) else []
         did("alerts", doc is not None, err or "%d rang" % len(brief["alerts"]))
+    tdir = os.path.join(base, "team")
+    if os.path.exists(os.path.join(tdir, "state.json")):
+        s = team.trade_log.summary(tdir)
+        brief["crypto_team"] = {"summary": s, "kill": team.read_kill(team.Paths(tdir))}
     acc.write_json(os.path.join(base, "briefing.json"), brief)
     with open(os.path.join(base, "briefing.md"), "w", encoding="utf-8") as fh:
         fh.write(render(brief))
@@ -173,6 +179,12 @@ def render(b):
             pp["regime"], ("%+.2f%%" % pp["buy_hold"]["total_pct"]) if pp.get("buy_hold") else "n/a"))
         for o in pp.get("pending", []):
             L.append("- buys %s at the next open (%.1f ATR up-move)" % (o["ticker"], o["move_atr"]))
+        L.append("")
+    if b.get("crypto_team"):
+        L.append("## Crypto bot team (paper)")
+        if b["crypto_team"].get("kill"):
+            L.append("Kill switch ON: %s" % b["crypto_team"]["kill"]["reason"])
+        L.append(team.trade_log.render(b["crypto_team"]["summary"]).split("\n", 1)[1])
         L.append("")
     if b.get("news"):
         L.append("## News on your holdings")

@@ -1,3 +1,7 @@
 # Personal trading data written by the trader skills (portfolio, orders, state)
 trader/
 __pycache__/
+# API keys: never commit them
+.env
+.env.*
+!.env.example

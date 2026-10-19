@@ -25,12 +25,13 @@ from urllib.parse import parse_qs, urlparse
 APP = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(APP)
 SKILLS = os.path.join(REPO, ".claude", "skills")
-for folder in ("trader-accounts", "trader-paper", "trader-daily", "trader-init"):
+for folder in ("trader-accounts", "trader-paper", "trader-daily", "trader-init", "trader-team"):
     sys.path.insert(0, os.path.join(SKILLS, folder))
 import accounts as acc  # noqa: E402
 import daily  # noqa: E402
 import init  # noqa: E402
 import paper  # noqa: E402
+import team  # noqa: E402
 
 LOCK = threading.Lock()  # one refresh / write at a time
 MAX_BODY = 5 * 1024 * 1024
@@ -49,12 +50,26 @@ def state(base, contribute=0.0):
             p["m"] = {k: m.get(k) for k in ("day_pct", "ret_1m", "ret_3m", "ret_12m", "yield_pct", "vol_pct",
                                             "off_high_pct", "div_growth_3y_pct", "above_sma200", "spark")}
     led = acc.read_json(os.path.join(base, "paper", "ledger.json"))
+    tp = team.Paths(os.path.join(base, "team"))
+    tstate = acc.read_json(tp.state)
+    crypto = None
+    if tstate:
+        curve = team.trade_log.read(tp.equity)
+        step = max(1, len(curve) // 300)
+        crypto = {"mode": "SIMULATED" if tstate.get("mode") == "sim" else "PAPER",
+                  "last_cycle": tstate.get("last_cycle"), "kill": team.read_kill(tp),
+                  "positions": tstate.get("positions", {}), "summary": team.trade_log.summary(tp.dir),
+                  "today": team.trade_log.summary(tp.dir, team._day(tstate.get("last_cycle") or 0)),
+                  "trades": team.trade_log.read(tp.trades)[-8:][::-1],
+                  "curve": [[c["time"][:16], float(c["equity"]), float(c["buy_and_hold"]) if c["buy_and_hold"] else None]
+                            for c in curve[::step]]}
     bt = acc.read_json(os.path.join(base, "paper", "backtest.json"))
     return {
         "setup": True, "review": review,
         "history": (acc.read_json(paths.history, {"points": []}) or {}).get("points", []),
         "briefing": acc.read_json(os.path.join(base, "briefing.json")),
         "paper": paper.summary(led) if led else None,
+        "crypto": crypto,
         "backtest": {k: bt[k] for k in ("from", "to", "bot", "buy_hold", "per_year", "equity", "benchmark")}
         if bt else None,
         "accounts": [{"id": a["id"], "name": a["name"], "broker": a.get("broker"), "strategy": a["strategy"]}
@@ -149,6 +164,16 @@ class Handler(BaseHTTPRequestHandler):
             doc = acc.read_json(paths.holdings(a["id"]), acc.empty_holdings(a["id"]))
             doc.setdefault("cash", {})[str(body.get("currency", "CAD")).upper()[:3]] = float(body["amount"])
             acc.write_json(paths.holdings(a["id"]), doc)
+            return {"ok": True}
+        if path == "/api/team/kill":
+            team.set_kill(team.Paths(os.path.join(b, "team")), "kill switch pressed on the dashboard",
+                          flatten=not body.get("keep_positions"))
+            return {"ok": True}
+        if path == "/api/team/resume":
+            tp = team.Paths(os.path.join(b, "team"))
+            if os.path.exists(tp.kill):
+                os.remove(tp.kill)
+                team.trade_log.event(tp.events, __import__("time").time(), "resume", "cleared on the dashboard")
             return {"ok": True}
         if path == "/api/backtest":
             charts, errors = paper.load_charts(paper.universe(os.path.join(b, "paper", "config.json")))

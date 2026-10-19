@@ -8,6 +8,7 @@ anything that already exists (unless --force):
   trader/accounts.json       your accounts, their strategies, the target mix, watchlists
   trader/accounts/<id>.json  an empty holdings file per account
   trader/paper/config.json   the paper bot's stock universe
+  trader/team/config.json    the crypto bot team's rules (simulated money by default)
 
     python3 init.py
     python3 init.py --sec-user-agent "Your Name you@example.com" --mix growth=50,medium=20,dividend=30 --with-medium
@@ -125,6 +126,8 @@ def main(argv=None):
             h.update(DEMO[acct["id"]], source="demo")
         write(os.path.join(a.dir, "accounts", acct["id"] + ".json"), h, a.force or a.demo, made)
     write(os.path.join(a.dir, "paper", "config.json"), {"universe": paper.UNIVERSE}, a.force, made)
+    with open(os.path.join(SKILLS, "trader-team", "config.example.json"), encoding="utf-8") as fh:
+        write(os.path.join(a.dir, "team", "config.json"), json.load(fh), a.force, made)
     for p in made:
         print("wrote " + p)
     if not made:

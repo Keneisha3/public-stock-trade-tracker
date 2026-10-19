@@ -8,7 +8,7 @@ from _load import REPO, ROOT
 UPSTREAM = ["trader-copycat", "trader-news", "trader-budget", "trader-pelosi", "trader-analyst",
             "trader-screener", "trader-risk", "trader-broker", "trader-tax", "trader-alerts",
             "trader-rebalance"]
-OURS = ["trader-accounts", "trader-paper", "trader-daily", "trader-init"]
+OURS = ["trader-accounts", "trader-paper", "trader-daily", "trader-init", "trader-team"]
 
 
 def frontmatter(path):
@@ -43,6 +43,24 @@ class Repo(unittest.TestCase):
         for word in ("alpaca", "questrade", "place_stock_order", "ibkr"):
             self.assertNotIn(word, src.lower(), word)
 
+    def test_team_example_config_matches_the_defaults(self):
+        import json
+        from _load import load
+        team = load("trader-team", "team")
+        with open(os.path.join(ROOT, "trader-team", "config.example.json"), encoding="utf-8") as fh:
+            ex = {k: v for k, v in json.load(fh).items() if not k.startswith("_")}
+        self.assertEqual(ex, {k: v for k, v in team.DEFAULTS.items() if k != "lookback_bars"})
+        self.assertEqual(ex["broker"], "sim")
+
+    def test_keys_file_is_git_ignored(self):
+        try:
+            out = subprocess.run(["git", "-C", REPO, "check-ignore", ".env"], capture_output=True, text=True)
+        except OSError:
+            self.skipTest("git not available")
+        self.assertEqual(out.returncode, 0, ".env must stay out of git")
+        with open(os.path.join(REPO, ".env.example"), encoding="utf-8") as fh:
+            self.assertIn("TRADING_MODE=paper", fh.read())
+
     def test_personal_data_is_git_ignored(self):
         with open(os.path.join(REPO, ".gitignore"), encoding="utf-8") as fh:
             self.assertIn("trader/", fh.read().split())
@@ -56,7 +74,8 @@ class Repo(unittest.TestCase):
     def test_tools_are_standard_library_only(self):
         allowed = {"argparse", "copy", "csv", "datetime", "io", "json", "math", "os", "re", "statistics", "sys",
                    "time", "urllib", "subprocess", "threading", "traceback", "webbrowser", "http", "contextlib",
-                   "market", "accounts", "paper", "daily", "init"}
+                   "bisect", "market", "accounts", "paper", "daily", "init", "team", "analyst", "candles",
+                   "executor", "risk_manager", "scanner", "trade_log"}
         for path in [os.path.join(ROOT, s, f) for s in OURS for f in os.listdir(os.path.join(ROOT, s))
                      if f.endswith(".py")] + [os.path.join(REPO, "app", "server.py")]:
             with open(path, encoding="utf-8") as fh:

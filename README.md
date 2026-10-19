@@ -21,6 +21,7 @@ trusts it.
 | **Runs a daily briefing** | One command: sync Questrade, refresh prices and dividends, review, record the day's value, run the paper bot, check news on your holdings, new Congress stock-trade filings and your price alerts. |
 | **Shows it all on a dashboard** | A local web page: total and today's change, value history, mix vs target, to-dos, proposed trades, holdings with flags and sparklines, the paper bot vs buy-and-hold, news, Congress filings, CSV import. Light and dark mode, works on a phone. |
 | **Paper-trades automatically** | An ATR breakout bot from my [ATR research project](https://github.com/Keneisha3/ATR-Based-News-Triggered-Stock-System) trades a paper ledger every day, with a 5-year backtest and a "ready for real money?" checklist it has to pass. |
+| **Runs a crypto bot team on fake money** | A Scanner, Analyst, Risk Manager and Executor trade 10 coins every 15 minutes (EMA crossover + RSI, 2 % max risk, stop-loss and take-profit on every trade). Simulated by default, or Alpaca's paper account. CSV log, daily summary against buy-and-hold, kill switch. [Beginner guide](docs/crypto-bot-team.md). |
 | **Never trades for you** | Proposals are a to-do list. You place every real trade yourself in your broker's app. |
 
 ## Quick start
@@ -69,6 +70,7 @@ session-start hook sets things up. Ask in plain words:
 | "screen for growing companies under 30x earnings" | `/trader-screener` |
 | "size this to $5,000" / "check these orders" | `/trader-budget` / `/trader-risk` |
 | "tax-loss harvest", "alert me if NVDA drops to 150", "rebalance" | `/trader-tax`, `/trader-alerts`, `/trader-rebalance` |
+| "run the crypto bot", "how did the bot team do?", "kill the bot" | `/trader-team` |
 | "place the order" (paper by default, a yes per order) | `/trader-broker` |
 
 ## The command line
@@ -120,10 +122,34 @@ checklist (60+ days, 30+ trades, profit after costs, beating buy-and-hold,
 drawdown under 15 %). Most people who day trade lose money; this exists to
 find out with evidence instead of with savings.
 
+## The crypto bot team
+
+Four roles trade 10 big coins every 15 minutes, on fake money only:
+
+| role | job |
+| --- | --- |
+| Scanner | checks the data and spots a fresh EMA 9/21 crossover |
+| Analyst | BUY only if price is above the 50-bar EMA and RSI is 50 to 70; EXIT when the crossover reverses |
+| Risk Manager | stop 1.5 ATR, target 3 ATR, size so a stop-out costs at most 2 % of the account, max 3 trades, -5 % a day trips the kill switch |
+| Executor | simulated broker (default, no keys), or Alpaca PAPER behind four checks; there is no live-trading address in the code |
+
+```bash
+python3 .claude/skills/trader-team/team.py check
+python3 .claude/skills/trader-team/team.py backtest --days 30
+python3 .claude/skills/trader-team/team.py run          # Ctrl+C to stop, `kill` to sell all and stop
+python3 .claude/skills/trader-team/team.py summary
+```
+
+Every trade goes to `trader/team/trades.csv`, with entry, exit, size,
+stop-loss, take-profit, fees and slippage, P&L and which roles approved it.
+On 15-minute bars, fees and slippage are a large share of each trade's risk.
+The log says so on every trade, and it is the first thing to look at when
+you review the results.
+
 ## How it is built
 
 ```
-.claude/skills/        15 skills: 11 from the Trader skill pack + accounts, paper, daily, init
+.claude/skills/        16 skills: 11 from the Trader skill pack + accounts, paper, daily, init, team
 app/                   server.py (standard-library HTTP, 127.0.0.1 only) + index.html (no frameworks)
 tests/                 unittest suite, fully offline; synthetic Yahoo charts in _synth.py
 trader/                your data: holdings, prices, history, ledger (git-ignored)
@@ -137,11 +163,12 @@ scripts/update-skills.sh   pull upstream skill updates
   keys.
 - **Privacy:** the dashboard listens on 127.0.0.1 only. It rejects foreign
   Host headers and cross-site writes, and loads nothing from the internet.
-  Your holdings stay in `trader/`, which git ignores.
-- **Tests:** `python3 -m unittest discover -s tests` runs 200+ tests offline
+  Your holdings stay in `trader/`, and API keys stay in `.env`. Git ignores both.
+- **Tests:** `python3 -m unittest discover -s tests` runs 230+ tests offline
   in a few seconds. They cover CSV import, the Questrade token rotation,
   dividend-cut detection, the cap rules, the bot's entries, stops and exits,
-  and the dashboard's security checks.
+  the crypto team's paper guard and kill switch, and the dashboard's
+  security checks.
 
 ## Credits
 

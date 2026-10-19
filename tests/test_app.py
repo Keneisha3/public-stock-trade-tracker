@@ -34,6 +34,10 @@ class Dashboard(unittest.TestCase):
         cls.srv.server_close()
         shutil.rmtree(cls.dir)
 
+    def setUp(self):  # every test starts from an empty trader/ folder
+        self.dir = tempfile.mkdtemp(dir=self.__class__.dir)
+        server.Handler.base = os.path.join(self.dir, "trader")
+
     def req(self, method, path, body=None, headers=None):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         h = {"Host": "127.0.0.1:%d" % self.port}
@@ -67,6 +71,19 @@ class Dashboard(unittest.TestCase):
         code, err = self.req("POST", "/api/import", {"account": "nope", "csv": csv})
         self.assertEqual(code, 400)
         self.assertIn("no account", err["error"])
+
+    def test_crypto_team_kill_switch_buttons(self):
+        self.req("POST", "/api/init", {})
+        tdir = os.path.join(self.dir, "trader", "team")
+        with open(os.path.join(tdir, "state.json"), "w") as fh:
+            json.dump({"mode": "sim", "last_cycle": 1790000000, "positions": {}}, fh)
+        self.assertEqual(self.req("GET", "/api/state")[1]["crypto"]["mode"], "SIMULATED")
+        self.assertEqual(self.req("POST", "/api/team/kill", {})[0], 200)
+        st = self.req("GET", "/api/state")[1]
+        self.assertIn("dashboard", st["crypto"]["kill"]["reason"])
+        self.assertTrue(st["crypto"]["kill"]["flatten"])
+        self.req("POST", "/api/team/resume", {})
+        self.assertIsNone(self.req("GET", "/api/state")[1]["crypto"]["kill"])
 
     def test_other_hosts_and_cross_site_writes_are_refused(self):
         self.assertEqual(self.req("GET", "/api/state", headers={"Host": "evil.example:%d" % self.port})[0], 403)
