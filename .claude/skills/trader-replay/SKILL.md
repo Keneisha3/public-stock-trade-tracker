@@ -38,9 +38,13 @@ Clerk, plus `pdftotext` for the Pelosi filings.
   before the start form the starting basket. Bought stock or calls: buy the
   stock. Sold stock or bought puts: sell. Equal weight. It is shown as its own
   row.
-- Costs: 1.5 % FX each way on USD assets, 5 bps slippage, the bots' fees,
-  15 % US dividend withholding (TFSA; none in an RRSP), dividends on ex-date
-  only for shares owned before that day.
+- Currency: US stocks trade in US dollars, Canadian stocks in Canadian
+  dollars, like the real accounts. Each strategy's money starts in the
+  currency it trades, so nothing is converted per trade (a 1.5 % fee applies
+  only if a buy needs a currency the account ran out of). Results are shown in
+  CAD at each day's rate, so USD/CAD moves still count.
+- Costs: 5 bps slippage, the bots' fees, 15 % US dividend withholding (TFSA;
+  none in an RRSP), dividends on ex-date only for shares owned before that day.
 
 ## Scenarios, Monte Carlo, risk
 
@@ -53,7 +57,7 @@ Clerk, plus `pdftotext` for the Pelosi filings.
   every strategy) of the 6-month daily returns: percentiles, P(profit),
   P(beat S&P 500), drawdowns. Curves much shorter than the rest sit out.
 - `results["6 months"][strategy]["risk"]`: volatility, Sharpe, max drawdown.
-- VIX: `results[w]["VIX agent"]` (the S&P 500 as VFV.TO, in CAD so switches pay no FX, while the VIX is at or under 25, cash
+- VIX: `results[w]["VIX agent"]` (SPY while the VIX is at or under 25, US-dollar cash
   above it, decided at the close; `switches`, `risk_on_days_pct`), VIX
   variants under `scenarios` with strategy "vix", every strategy's
   `vix_regimes` (average daily return by calm/normal/nervous/fear, correlation

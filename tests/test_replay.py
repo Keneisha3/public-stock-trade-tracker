@@ -88,8 +88,10 @@ class Replay(unittest.TestCase):
         self.assertGreater(r["dividend"]["dividends"], 0)  # quarterly payer held across ex-dates
         self.assertGreater(r["S&P 500 (SPY)"]["value"], 100)  # synthetic SPY rose
         bot = r["stock bot"]
-        if bot["trades"] == 0:  # never traded: no FX round trip charged on money that never moved
-            self.assertEqual((bot["value"], bot["fees"]), (100, 0.0))
+        self.assertEqual(bot["fx_fees"], 0.0)  # US-dollar cash for a US-stock bot: nothing converted
+        if bot["trades"] == 0:  # never traded: its US dollars only moved with USD/CAD
+            d = self.data()
+            self.assertAlmostEqual(bot["value"], 100 * d.fx(ASOF) / d.fx(r["start"]), delta=0.02)
 
     def test_pelosi_acts_only_after_the_filing_was_posted(self):
         six = self.out["results"]["6 months"]["Pelosi copycat"]
@@ -135,13 +137,26 @@ class Replay(unittest.TestCase):
         self.assertGreater(early.dividends_cad, 0)
         self.assertEqual(late.dividends_cad, 0)
 
-    def test_usd_costs_include_fx(self):
+    def test_each_currency_trades_in_its_own_cash(self):
         d = self.data()
-        pf = replay.Portfolio(d, 100)
-        day = d.days[-10]
-        pf.fill([{"side": "buy", "ticker": "AAA", "cad": 99, "decided": d.days[-11]}], day)
-        self.assertGreater(pf.fees, 99 * 0.014)  # 1.5% conversion on the way in
-        self.assertLess(pf.value(day), 100 * 0.99)
+        day, before = d.days[-10], d.days[-11]
+        usd = replay.Portfolio(d, 100, split={"USD": 1.0}, start=before)
+        usd.fill([{"side": "buy", "ticker": "AAA", "cad": 99, "decided": before}], day)
+        self.assertEqual(usd.fx_fees, 0.0)  # US stock, US dollars: no conversion
+        self.assertEqual(usd.pos["AAA"]["currency"], "USD")
+        usd.fill([{"side": "sell", "ticker": "AAA", "shares": usd.pos["AAA"]["shares"], "decided": day}], d.days[-9])
+        self.assertEqual(usd.fx_fees, 0.0)  # sold back into US dollars, not converted to CAD
+        self.assertGreater(usd.cash_by["USD"], 0)
+        self.assertLess(usd.cash_by["CAD"], 1e-9)
+        cad = replay.Portfolio(d, 100)  # only Canadian dollars: buying a US stock forces a conversion
+        cad.fill([{"side": "buy", "ticker": "AAA", "cad": 99, "decided": before}], day)
+        self.assertGreater(cad.fx_fees, 99 * 0.014)
+        self.assertLess(cad.value(day), 100 * 0.99)
+        mixed = replay.Portfolio(d, 100, split={"USD": 1, "CAD": 1}, start=before)
+        mixed.fill([{"side": "buy", "ticker": "AAA", "cad": 49, "decided": before},
+                    {"side": "buy", "ticker": "DIV.TO", "cad": 49, "decided": before}], day)
+        self.assertEqual(mixed.fx_fees, 0.0)
+        self.assertEqual(sorted(mixed.pos), ["AAA", "DIV.TO"])
 
 
 class Insights(unittest.TestCase):
@@ -323,21 +338,19 @@ class Vix(unittest.TestCase):
         finally:
             shutil.rmtree(d)
         self.assertEqual(r["trades"], 0)
-        self.assertEqual(r["value"], 100)
+        self.assertAlmostEqual(r["value"], 100 * data.fx(days[465]) / data.fx(spike), delta=0.02)  # US-dollar cash
 
-    def test_trades_the_cad_fund_when_it_can_so_switches_pay_no_fx(self):
+    def test_switches_stay_in_us_dollars(self):
         d = tempfile.mkdtemp()
         try:
             base, off = write_world(d)
-            _synth.write(off, "VFV.TO", _synth.chart("VFV.TO", p0=130, growth=0.25, wiggle=0.01, currency="CAD",
-                                                     n=520, gaps={461: -7, 481: 5}))
             data = load_data(off)
             r = replay.run_vix_agent(data, data.days[400], data.days[519], 100)
         finally:
             shutil.rmtree(d)
-        self.assertEqual(r["fund"], "VFV.TO")
         self.assertGreaterEqual(r["switches"], 2)
         self.assertEqual(r["fx_fees"], 0)
+        self.assertEqual(r["cash_by"]["CAD"], 0)
 
 
 class YourHoldingsAndRolling(unittest.TestCase):

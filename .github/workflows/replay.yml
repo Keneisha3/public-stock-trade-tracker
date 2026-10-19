@@ -17,6 +17,14 @@ on:
         description: "Parts to skip: crypto, pelosi, or 'crypto pelosi' (blank = run everything)"
         required: false
         default: ""
+      windows:
+        description: "Windows, e.g. 24m,12m,6m (blank = 12m,6m,3m,1m,2w,1w)"
+        required: false
+        default: ""
+      label:
+        description: "Research label, e.g. older-period (saves to research/<label>.md instead of the weekly report)"
+        required: false
+        default: ""
   schedule:
     - cron: "17 13 * * 6"  # Saturdays, 13:17 UTC
 
@@ -24,7 +32,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: replay
+  group: replay-${{ inputs.label || 'weekly' }}
   cancel-in-progress: false
 
 jobs:
@@ -44,6 +52,8 @@ jobs:
         env:
           ASOF: ${{ inputs.asof }}
           SKIP: ${{ inputs.skip }}
+          WINDOWS: ${{ inputs.windows }}
+          LABEL: ${{ inputs.label }}
         run: |
           args=()
           if [ -n "$ASOF" ]; then
@@ -55,6 +65,13 @@ jobs:
             for part in $SKIP; do
               case "$part" in crypto|pelosi) args+=("$part") ;; *) echo "skip: crypto or pelosi only"; exit 1 ;; esac
             done
+          fi
+          if [ -n "$WINDOWS" ]; then
+            [[ "$WINDOWS" =~ ^[0-9]+[dwmy](,[0-9]+[dwmy])*$ ]] || { echo "windows like 24m,12m,6m"; exit 1; }
+            args+=(--windows "$WINDOWS")
+          fi
+          if [ -n "$LABEL" ]; then
+            [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
           fi
           python trade.py replay --strict "${args[@]}"
       - name: Summary page
@@ -72,6 +89,8 @@ jobs:
           path: trader/replay/report.*
           if-no-files-found: ignore
       - name: Save to the replay-results branch
+        env:
+          LABEL: ${{ inputs.label }}
         run: |
           asof=$(python -c "import json; print(json.load(open('trader/replay/report.json'))['asof'])")
           mkdir -p "$RUNNER_TEMP/out"
@@ -84,9 +103,17 @@ jobs:
             git checkout -q --orphan replay-results
             git rm -rqf .
           fi
-          mkdir -p history
-          cp "$RUNNER_TEMP/out/report.md" "$RUNNER_TEMP/out/report.json" .
-          cp "$RUNNER_TEMP/out/report.md" "history/$asof.md"
-          git add report.md report.json "history/$asof.md"
-          git commit -qm "Replay as of the close on $asof" || echo "no change"
-          git push -q origin replay-results
+          if [ -n "$LABEL" ]; then  # a research run: never replaces the weekly report
+            mkdir -p research
+            cp "$RUNNER_TEMP/out/report.md" "research/$LABEL.md"
+            cp "$RUNNER_TEMP/out/report.json" "research/$LABEL.json"
+            git add "research/$LABEL.md" "research/$LABEL.json"
+            git commit -qm "Research run $LABEL as of $asof" || echo "no change"
+          else
+            mkdir -p history
+            cp "$RUNNER_TEMP/out/report.md" "$RUNNER_TEMP/out/report.json" .
+            cp "$RUNNER_TEMP/out/report.md" "history/$asof.md"
+            git add report.md report.json "history/$asof.md"
+            git commit -qm "Replay as of the close on $asof" || echo "no change"
+          fi
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done

@@ -14,9 +14,13 @@ day's close; its trades fill at the next open. Nothing from the future is used.
                                disclosed selling, from the day each filing was POSTED
   benchmarks                   buy and hold S&P 500 (SPY), TSX 60 (XIU.TO), Bitcoin, cash
 
-Costs: 1.5% currency conversion each way for USD assets, 5 bps slippage, the
-bots' own fees, 15% US dividend withholding (TFSA). Dividends are paid on the
-ex-date.
+Currency: US stocks trade in US dollars and Canadian ones in Canadian dollars,
+as in a real Questrade or Wealthsimple account; each strategy's $100 CAD worth
+starts in the currency it trades, so nothing is converted per trade. A 1.5%
+fee applies only if a buy needs a currency the account has run out of. Values
+are reported in CAD at each day's rate, so USD/CAD moves still count.
+Costs: 5 bps slippage, the bots' own fees, 15% US dividend withholding (TFSA).
+Dividends are paid on the ex-date, in the stock's own currency.
 
     python3 replay.py                       # as of the latest Friday close
     python3 replay.py --asof 2026-10-16 --cash 100
@@ -107,27 +111,48 @@ class Data:
 
 
 class Portfolio:
-    """$ in CAD; positions in their own currency. Every fill pays slippage, and USD pays FX."""
+    """Cash and positions in their own currency, the way a Questrade or Wealthsimple account
+    holds them: a US stock is bought with US dollars and sold back into US dollars, a Canadian
+    one in Canadian dollars, with no conversion. A conversion (and its fee) happens only when
+    a buy needs a currency the account has run out of. Values are reported in CAD."""
 
-    def __init__(self, data, cash=100.0, account_type="TFSA"):
-        self.data, self.cash, self.pos = data, float(cash), {}
+    def __init__(self, data, cash=100.0, account_type="TFSA", split=None, start=None):
+        self.data, self.pos = data, {}
+        self.cash_by = {"CAD": 0.0, "USD": 0.0}
+        split = split or {"CAD": 1.0}
+        tot = sum(split.values()) or 1.0
+        for ccy, w in split.items():  # $cash CAD worth, already sitting in each currency
+            self.cash_by[ccy] = float(cash) * w / tot / (data.fx(start) if ccy == "USD" else 1.0)
         self.fees, self.trades, self.dividends_cad = 0.0, 0, 0.0
         self.fx_fees, self.slippage = 0.0, 0.0
         self.us_tax = COSTS["us_withholding_pct"] / 100.0 if account_type.upper() not in acc.NO_US_WITHHOLDING else 0
         self.log = []      # every fill, for the dashboard
-        self.flow = {}     # ticker -> CAD paid in, CAD taken out (sales + dividends)
+        self.flow = {}     # ticker -> CAD paid in, CAD taken out (sales + dividends), at each day's rate
         self.curve = []    # [day, value at the close]
         self.cash_share = []
 
     def _ccy(self, sym):
         return (self.data.charts[sym]["currency"] or mk.native_currency(sym)).upper()
 
-    def _to_cad(self, amount, ccy, day, buying):
-        if ccy == "CAD":
-            return amount, 0.0
-        rate, fee = self.data.fx(day), COSTS["fx_fee_pct"] / 100.0
-        gross = amount * rate
-        return (gross * (1 + fee), gross * fee) if buying else (gross * (1 - fee), gross * fee)
+    def _rate(self, ccy, day):
+        return self.data.fx(day) if ccy == "USD" else 1.0
+
+    def cash_cad(self, day):
+        return self.cash_by["CAD"] + self.cash_by["USD"] * self.data.fx(day)
+
+    def _ensure(self, ccy, amount, day):
+        """Make `amount` of `ccy` available, converting a shortfall from the other currency
+        (paying the FX fee). Returns how much of `ccy` is there afterwards."""
+        short = amount - self.cash_by[ccy]
+        other = "CAD" if ccy == "USD" else "USD"
+        if short > 1e-9 and self.cash_by[other] > 1e-9:
+            fee, rate = COSTS["fx_fee_pct"] / 100.0, self.data.fx(day)
+            per = (rate if ccy == "USD" else 1.0 / rate) * (1 + fee)  # other-currency cost of 1 unit of ccy
+            got = min(short, self.cash_by[other] / per)
+            self.cash_by[other] -= got * per
+            self.cash_by[ccy] += got
+            self._cost(got * per * self._rate(other, day) * fee / (1 + fee), 0.0)
+        return self.cash_by[ccy]
 
     def fill(self, orders, day):
         """Fill orders decided before `day` at today's open; sells first. Returns the ones still waiting."""
@@ -139,33 +164,31 @@ class Portfolio:
                 continue
             slip = COSTS["slippage_pct"] / 100.0
             ccy = self._ccy(o["ticker"])
+            rate = self._rate(ccy, day)
             if o["side"] == "sell":
                 p = self.pos.get(o["ticker"])
                 if not p:
                     continue
                 q = min(o["shares"], p["shares"])
                 px = b["o"] * (1 - slip)
-                cad, fxfee = self._to_cad(q * px, ccy, day, False)
-                self.cash += cad
-                self._cost(fxfee, q * b["o"] * slip * (self.data.fx(day) if ccy == "USD" else 1))
+                self.cash_by[ccy] += q * px
+                cad = q * px * rate
+                self._cost(0.0, q * b["o"] * slip * rate)
                 self.flow.setdefault(o["ticker"], [0.0, 0.0])[1] += cad
                 p["shares"] -= q
                 if p["shares"] <= 1e-9:
                     del self.pos[o["ticker"]]
             else:
                 px = b["o"] * (1 + slip)
-                q = o["shares"] if o.get("shares") else None
-                if q is None:  # sized in CAD
-                    rate = self.data.fx(day) * (1 + COSTS["fx_fee_pct"] / 100.0) if ccy == "USD" else 1.0
-                    q = o["cad"] / (px * rate)
-                cad, fxfee = self._to_cad(q * px, ccy, day, True)
-                if cad > self.cash:
-                    q *= self.cash / cad if cad else 0
-                    cad, fxfee = self._to_cad(q * px, ccy, day, True)
-                if q <= 0 or cad < 0.5:
+                q = o["shares"] if o.get("shares") else o["cad"] / rate / px  # sized in CAD at today's rate
+                have = self._ensure(ccy, q * px, day)
+                if q * px > have:
+                    q = have / px
+                if q <= 0 or q * px * rate < 0.5:
                     continue
-                self.cash -= cad
-                self._cost(fxfee, q * b["o"] * slip * (self.data.fx(day) if ccy == "USD" else 1))
+                self.cash_by[ccy] -= q * px
+                cad = q * px * rate
+                self._cost(0.0, q * b["o"] * slip * rate)
                 self.flow.setdefault(o["ticker"], [0.0, 0.0])[0] += cad
                 p = self.pos.setdefault(o["ticker"], {"shares": 0.0, "cost": 0.0, "currency": ccy})
                 p["cost"] += q * px
@@ -183,28 +206,27 @@ class Portfolio:
     def mark(self, day):
         v = self.value(day)
         self.curve.append([day, round(v, 2)])
-        self.cash_share.append(self.cash / v if v > 0 else 1.0)
+        self.cash_share.append(self.cash_cad(day) / v if v > 0 else 1.0)
 
     def pay_dividends(self, day):
         for sym, p in self.pos.items():
             for d, amt in self.data.charts[sym]["dividends"]:
                 if d == day:
-                    gross = amt * p["shares"] * (1 - (self.us_tax if p["currency"] == "USD" else 0))
-                    cad, fxfee = self._to_cad(gross, p["currency"], day, False)
-                    self.cash += cad
+                    net = amt * p["shares"] * (1 - (self.us_tax if p["currency"] == "USD" else 0))
+                    self.cash_by[p["currency"]] += net  # paid in the stock's own currency
+                    cad = net * self._rate(p["currency"], day)
                     self.dividends_cad += cad
-                    self._cost(fxfee, 0.0)
                     self.flow.setdefault(sym, [0.0, 0.0])[1] += cad
 
     def value(self, day):
-        v = self.cash
+        v = self.cash_cad(day)
         for sym, p in self.pos.items():
             px = self.data.close(sym, day) or 0.0
-            v += px * p["shares"] * (self.data.fx(day) if p["currency"] == "USD" else 1.0)
+            v += px * p["shares"] * self._rate(p["currency"], day)
         return v
 
     def doc(self, day):
-        return {"cash": {"CAD": self.cash}, "as_of": day, "positions": [
+        return {"cash": dict(self.cash_by), "as_of": day, "positions": [
             {"ticker": s, "shares": p["shares"], "currency": p["currency"],
              "avg_cost": p["cost"] / p["shares"] if p["shares"] else None,
              "last_price": self.data.close(s, day)} for s, p in self.pos.items()]}
@@ -214,16 +236,35 @@ class Portfolio:
         contrib = []
         for sym, (paid, back) in self.flow.items():
             p = self.pos.get(sym)
-            now = (self.data.close(sym, day) or 0) * p["shares"] * (
-                self.data.fx(day) if p["currency"] == "USD" else 1.0) if p else 0.0
+            now = (self.data.close(sym, day) or 0) * p["shares"] * self._rate(p["currency"], day) if p else 0.0
             contrib.append({"ticker": sym, "pnl": round(back + now - paid, 2), "held": bool(p)})
         contrib.sort(key=lambda c: -c["pnl"])
         return {"value": round(v, 2), "return_pct": round(100.0 * (v / start_cash - 1), 2), "trades": self.trades,
                 "fees": round(self.fees, 2), "fx_fees": round(self.fx_fees, 2), "slippage": round(self.slippage, 2),
                 "dividends": round(self.dividends_cad, 2), "holdings": sorted(self.pos),
-                "cash_left": round(self.cash, 2), "contrib": contrib, "curve": self.curve,
+                "cash_left": round(self.cash_cad(day), 2), "cash_by": {k: round(x, 2) for k, x in self.cash_by.items()},
+                "contrib": contrib, "curve": self.curve,
                 "cash_drag_pct": round(100.0 * sum(self.cash_share) / len(self.cash_share), 1)
                 if self.cash_share else None, "fills": self.log[-40:]}
+
+
+def currency_split(data, weights, day):
+    """{'USD': w, 'CAD': w} for symbols {sym: weight}: the money starts where it will be spent."""
+    out = {}
+    for s, w in weights.items():
+        if s in data.charts and w > 0:
+            ccy = (data.charts[s]["currency"] or mk.native_currency(s)).upper()
+            out[ccy] = out.get(ccy, 0.0) + w
+    return out or {"CAD": 1.0}
+
+
+def _held_values(data, shares, day):
+    out = {}
+    for t, q in shares.items():
+        px = data.close(t, day)
+        if px and q > 0:
+            out[t] = q * px * (data.fx(day) if (data.charts[t]["currency"] or "USD").upper() == "USD" else 1.0)
+    return out
 
 
 def _review_days(days, start, asof, every=7):
@@ -240,12 +281,7 @@ def _review_days(days, start, asof, every=7):
 
 def _seed_orders(data, shares, start, cash):
     """Buy today's mix (share counts) in the same proportions at the first open after `start`."""
-    vals = {}
-    for t, q in shares.items():
-        px = data.close(t, start)
-        if px and q > 0:
-            ccy = (data.charts[t]["currency"] or "USD").upper()
-            vals[t] = q * px * (data.fx(start) if ccy == "USD" else 1.0)
+    vals = _held_values(data, shares, start)
     tot = sum(vals.values())
     return [{"side": "buy", "ticker": t, "cad": cash * 0.995 * v / tot, "decided": start} for t, v in vals.items()] \
         if tot else []
@@ -253,7 +289,7 @@ def _seed_orders(data, shares, start, cash):
 
 def run_mix(data, shares, start, asof, cash, account_type="TFSA"):
     """Your current holdings, in today's proportions, bought at the start and simply held."""
-    pf = Portfolio(data, cash, account_type)
+    pf = Portfolio(data, cash, account_type, currency_split(data, _held_values(data, shares, start), start), start)
     orders = _seed_orders(data, shares, start, cash)
     for d in [d for d in data.days if start <= d <= asof]:
         pf.pay_dividends(d)
@@ -267,7 +303,8 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
     rules.update(overrides or {})
     acct = {"id": strategy, "name": strategy, "strategy": strategy, "type": account_type, "fractional": True,
             "watchlist": watch, "rules": rules, "broker": ""}
-    pf, pending, notes = Portfolio(data, cash, account_type), [], []
+    split = currency_split(data, _held_values(data, seed, start) if seed else {t: 1.0 for t in watch}, start)
+    pf, pending, notes = Portfolio(data, cash, account_type, split, start), [], []
     days = [d for d in data.days if start <= d <= asof]
     reviews = _review_days(days, start, asof, int(rules.get("review_every_days") or 7))
     if seed:  # start from your current mix; the rules take over at the first review after that
@@ -292,7 +329,7 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
 
 
 def run_hold(data, weights, start, asof, cash):
-    pf = Portfolio(data, cash)
+    pf = Portfolio(data, cash, split=currency_split(data, weights, start), start=start)
     orders = [{"side": "buy", "ticker": s, "cad": cash * w * 0.999, "decided": start} for s, w in weights.items()
               if s in data.charts]
     for d in [d for d in data.days if start <= d <= asof]:
@@ -303,7 +340,6 @@ def run_hold(data, weights, start, asof, cash):
 
 
 VIX_SYM = "^VIX"
-VIX_FUND = "VFV.TO"  # the S&P 500 in Canadian dollars: switching in and out pays no FX fee
 VIX_RULES = [
     ("VIX agent: S&P 500 unless VIX > 25", {"mode": "level", "threshold": 25}),
     ("VIX agent: S&P 500 unless VIX > 20", {"mode": "level", "threshold": 20}),
@@ -315,9 +351,9 @@ VIX_RULES = [
 def run_vix_agent(data, start, asof, cash, rule=None):
     """Hold the S&P 500 while the VIX agent says risk-on, cash while it says risk-off.
     Decided at each close from VIX closes up to that day; acted on at the next open.
-    Trades VFV.TO (CAD) when its prices are there, else SPY (every switch then pays FX)."""
-    fund = VIX_FUND if VIX_FUND in data.charts else "SPY"
-    pf, pending, invested = Portfolio(data, cash), [], None
+    The money stays in US dollars: out of SPY means US-dollar cash, no conversion."""
+    fund = "SPY"
+    pf, pending, invested = Portfolio(data, cash, split={"USD": 1.0}, start=start), [], None
     days = [d for d in data.days if start <= d <= asof]
     on_days = switches = 0
     vix_dates = data.dates[VIX_SYM]
@@ -375,22 +411,20 @@ def vix_regimes(curve, data):
 
 
 def run_stockbot(data, universe, start, asof, cash):
+    """The ATR bot with US-dollar cash: $cash CAD worth of USD at the start, valued in CAD."""
     fx0 = data.fx(start)
-    usd0 = cash / (fx0 * (1 + COSTS["fx_fee_pct"] / 100.0))
+    usd0 = cash / fx0
     p = dict(paper.PARAMS, fractional=True, min_order=1)
     charts = {s: data.charts[s] for s in universe if s in data.charts}
     days, bars_by, regime = paper.prepare(charts, p)
-    led = paper.new_ledger(usd0, p)
+    led, idle = paper.new_ledger(usd0, p), []
     for d in days:
         if start <= d <= asof:
             paper.step(led, d, bars_by, regime, p)
-    if not led["trades"] and not led["positions"]:  # never traded: the money never left CAD
-        return {"value": round(cash, 2), "return_pct": 0.0, "trades": 0, "fees": 0.0, "fx_fees": 0.0,
-                "dividends": 0.0, "holdings": [], "cash_left": round(cash, 2), "contrib": [], "fills": [],
-                "curve": [[d, round(cash, 2)] for d, _ in led["equity"]], "cash_drag_pct": 100.0,
-                "win_rate_pct": None}
+            e = led["equity"][-1][1]
+            idle.append(led["cash"] / e if e else 1.0)
     eq = led["equity"][-1][1] if led["equity"] else usd0
-    v = eq * data.fx(asof) * (1 - COSTS["fx_fee_pct"] / 100.0)
+    v = eq * data.fx(asof)
     by = {}
     for t in led["trades"]:
         by[t["ticker"]] = by.get(t["ticker"], 0.0) + t["pnl"] * data.fx(t["exit_day"])
@@ -399,16 +433,16 @@ def run_stockbot(data, universe, start, asof, cash):
     fees_usd = sum(abs(t["shares"]) * (t["entry"] + t["exit"]) * paper.PARAMS["cost_bps"] / 1e4 for t in led["trades"])
     return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2),
             "trades": len(led["trades"]) + len(led["positions"]),
-            "fees": round(fees_usd * data.fx(asof) + cash * 2 * COSTS["fx_fee_pct"] / 100.0, 2),
-            "fx_fees": round(cash * 2 * COSTS["fx_fee_pct"] / 100.0, 2), "dividends": 0.0,
+            "fees": round(fees_usd * data.fx(asof), 2), "fx_fees": 0.0, "dividends": 0.0,
             "holdings": sorted(led["positions"]), "cash_left": None,
+            "cash_drag_pct": round(100.0 * sum(idle) / len(idle), 1) if idle else None,
             "contrib": sorted(({"ticker": k, "pnl": round(x, 2), "held": k in led["positions"]} for k, x in by.items()),
                               key=lambda c: -c["pnl"]),
             "curve": [[d, round(e * data.fx(d), 2)] for d, e in led["equity"]],
             "fills": [{"day": t["exit_day"], "side": "round trip", "ticker": t["ticker"], "shares": t["shares"],
                        "price": t["exit"], "currency": "USD", "cad": round(t["pnl"] * data.fx(t["exit_day"]), 2)}
                       for t in led["trades"][-40:]],
-            "win_rate_pct": paper.stats(led["equity"], led["trades"]).get("win_rate_pct")}
+            "win_rate_pct": paper.stats(led["equity"], led["trades"]).get("win_rate_pct") if led["trades"] else None}
 
 
 def market_close_utc(day):
@@ -423,8 +457,7 @@ def market_close_utc(day):
 
 def run_crypto(candles, data, start, asof, cash, workdir):
     cfg = dict(team.DEFAULTS)
-    fx0 = data.fx(start)
-    usd0 = cash / (fx0 * (1 + COSTS["fx_fee_pct"] / 100.0))
+    usd0 = cash / data.fx(start)  # US-dollar cash: crypto trades in USD, nothing is converted
     cfg.update(start_cash=usd0, broker="sim")
     t0, t1, iv = market_close_utc(start), market_close_utc(asof), cfg["interval_min"] * 60
     paths = team.Paths(workdir)
@@ -447,18 +480,13 @@ def run_crypto(candles, data, start, asof, cash, workdir):
             killed = rep["killed"]
             break
     s = team.trade_log.summary(workdir)
-    if not s["trades"] and not state.get("positions"):  # never traded: the money never left CAD
-        btc_only = _btc_hold(candles, keys, t0, t1, iv, usd0, data, asof, cash)
-        return {"value": round(cash, 2), "return_pct": 0.0, "trades": 0, "fees": 0.0, "fx_fees": 0.0,
-                "dividends": 0.0, "holdings": [], "cash_left": round(cash, 2), "contrib": [], "curve": [],
-                "cash_drag_pct": 100.0, "win_rate_pct": None, "killed": killed, "btc_hold": btc_only}
     prices = {}
     for c, bs in candles.items():
         i = bisect.bisect_right(keys[c], t1 - iv)
         if i:
             prices[c] = bs[i - 1]["c"]
     eq = broker.account(prices)["equity"]
-    v = eq * data.fx(asof) * (1 - COSTS["fx_fee_pct"] / 100.0)
+    v = eq * data.fx(asof)
     btc_hold = _btc_hold(candles, keys, t0, t1, iv, usd0, data, asof, cash)
     rate = data.fx(asof)
     daily = {}
@@ -469,8 +497,7 @@ def run_crypto(candles, data, start, asof, cash, workdir):
         c = t["asset"].split("/")[0]
         by[c] = by.get(c, 0.0) + float(t["pnl"]) * rate
     return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2), "trades": s["trades"],
-            "fees": round(s["fees_slippage"] * rate + cash * 2 * COSTS["fx_fee_pct"] / 100.0, 2),
-            "fx_fees": round(cash * 2 * COSTS["fx_fee_pct"] / 100.0, 2), "dividends": 0.0,
+            "fees": round(s["fees_slippage"] * rate, 2), "fx_fees": 0.0, "dividends": 0.0,
             "holdings": sorted(state.get("positions", {})), "cash_left": None,
             "contrib": sorted(({"ticker": k, "pnl": round(x, 2), "held": k in state.get("positions", {})}
                                for k, x in by.items()), key=lambda c: -c["pnl"]),
@@ -486,7 +513,7 @@ def _btc_hold(candles, keys, t0, t1, iv, usd0, data, asof, cash):
     a, b = bisect.bisect_right(keys["BTC"], t0 - iv), bisect.bisect_right(keys["BTC"], t1 - iv)
     if not a or not b or candles["BTC"][a - 1]["t"] < t0 - 2 * iv:  # no bar near the start: no answer
         return None
-    v = usd0 * candles["BTC"][b - 1]["c"] / candles["BTC"][a - 1]["c"] * data.fx(asof) * (1 - COSTS["fx_fee_pct"] / 100.0)
+    v = usd0 * candles["BTC"][b - 1]["c"] / candles["BTC"][a - 1]["c"] * data.fx(asof)
     return {"value": round(v, 2), "return_pct": round(100.0 * (v / cash - 1), 2),
             "curve": [], "trades": 1}
 
@@ -541,7 +568,7 @@ def pelosi_signals(rows):
 
 def run_pelosi(data, filings, start, asof, cash):
     """Equal weight in what she disclosed buying; act only after each filing was posted."""
-    basket, pf, pending = [], Portfolio(data, cash), []
+    basket, pf, pending = [], Portfolio(data, cash, split={"USD": 1.0}, start=start), []
     lookback = (_date(start) - datetime.timedelta(days=PELOSI_LOOKBACK_DAYS)).isoformat()
     used = []
 
@@ -955,9 +982,9 @@ def checks(out, data, rolling_spec):
         p0, p1 = data.close("SPY", row["start"]), data.close("SPY", asof)
         f0, f1 = data.fx(row["start"]), data.fx(asof)
         if spy and p0 and p1:
-            expect = 100 * ((p1 / p0) * (f1 / f0) * (1 - COSTS["fx_fee_pct"] / 100) - 1)
+            expect = 100 * ((p1 / p0) * (f1 / f0) - 1)  # US-dollar cash: no conversion fee
             worst = max(worst, abs(spy["return_pct"] - expect))
-    add("S&P 500 row matches the raw price change (after FX, costs; overnight gap and dividends allowed)",
+    add("S&P 500 row matches the raw price change in CAD (overnight gap, slippage and dividends allowed)",
         worst <= 2.5, "largest gap %.2f points" % worst)
     if rolling_spec and out.get("rolling"):
         n = max((x["windows"] for x in out["rolling"]["table"].values()), default=0)
@@ -999,7 +1026,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                                        pdf_dir=os.path.join(base, "state", "ptr-pdfs"))
         errors += errs
     pelosi_syms = sorted({t for _, rows in filings for t in pelosi_signals(rows)[0]})
-    syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X", VIX_SYM, VIX_FUND]) | {s for v in watch.values() for s in v} | set(universe)
+    syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X", VIX_SYM]) | {s for v in watch.values() for s in v} | set(universe)
                   | set(pelosi_syms) | {t for m in mine.values() for t in m["shares"]})
     charts = {}
     for s in syms:
