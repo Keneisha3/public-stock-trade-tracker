@@ -39,9 +39,9 @@ a report.
 
 - **On the user's computer (best):** the dashboard has a Refresh button
   that runs this. Or schedule it: macOS/Linux
-  `crontab -e` -> `15 16 * * 1-5 cd /path/to/repo && python3 .claude/skills/trader-daily/daily.py >/dev/null`
-  (4:15 p.m. on weekdays, after the close; use the time zone the computer is in).
-- **In Claude:** `/loop 24h /trader-daily`, or a scheduled task that opens
+  `python3 trade.py schedule --install` (5:30 p.m. on weekdays, plus the crypto
+  bot every 15 minutes; Windows steps are in docs/daily-use.md).
+- **From the assistant:** `/loop 24h /trader-daily`, or a scheduled task that opens
   the repo and runs the skill each weekday morning.
 
 Data lives in `trader/` on the machine that runs it (git-ignored). A cloud

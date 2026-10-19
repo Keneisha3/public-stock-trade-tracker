@@ -1,7 +1,7 @@
 # Portfolio Tracker
 
-A personal investing workbench for a Canadian investor, built on Claude Code
-skills and plain Python. It looks after two real accounts with different
+A personal investing workbench for a Canadian investor, in plain Python with
+nothing to install. It looks after two real accounts with different
 jobs, an aggressive growth account at **Questrade** (US stocks) and a steady
 dividend account at **Wealthsimple**, and adds a daily briefing, a local
 dashboard and a paper-trading bot that has to prove itself before anyone
@@ -31,17 +31,17 @@ You need Python 3.9 or newer. There is nothing to pip install.
 ```bash
 git clone https://github.com/Keneisha3/public-stock-trade-tracker.git
 cd public-stock-trade-tracker
-python3 app/server.py --open          # opens http://127.0.0.1:8765
+python3 trade.py dashboard --open     # opens http://127.0.0.1:8765
 ```
 
 The first screen sets things up. Pick **Try it with demo holdings** to see it
 working, or **Set up my accounts** to start real. Then get your holdings in:
 
 - **Wealthsimple:** export the holdings report as CSV from the web app and
-  upload it on the dashboard (or `accounts.py import wealthsimple file.csv`).
+  upload it on the dashboard (or `python3 trade.py accounts import wealthsimple file.csv`).
 - **Questrade:** in Questrade's App Hub, register a personal app with read
   access and generate a token, then run this once:
-  `python3 .claude/skills/trader-accounts/accounts.py sync questrade --token YOUR_TOKEN`.
+  `python3 trade.py accounts sync questrade --token YOUR_TOKEN`.
   The token rotates on every login and is kept in `trader/state/` (mode 600).
   After that, **Refresh everything** syncs it for you.
 - Set cash balances on the dashboard.
@@ -52,10 +52,10 @@ Optional: set `SEC_USER_AGENT="Your Name you@example.com"` to include SEC
 filings in the news. Install `pdftotext` (poppler) so the Congress tracker
 can read disclosure PDFs.
 
-## Using it with Claude
+## Ask in plain words
 
-Open the folder in Claude Code. The skills load on their own, and the
-session-start hook sets things up. Ask in plain words:
+The `.claude/skills/` folder holds a skill for every tool, so an AI coding
+assistant opened in this folder can run them from plain requests:
 
 | Say | Skill |
 | --- | --- |
@@ -73,46 +73,30 @@ session-start hook sets things up. Ask in plain words:
 | "run the crypto bot", "how did the bot team do?", "kill the bot" | `/trader-team` |
 | "place the order" (paper by default, a yes per order) | `/trader-broker` |
 
-### Recommended Claude Code plugins
-
-Two plugins fit this project. Install them yourself in Claude Code:
-
-```
-/plugin marketplace add addyosmani/agent-skills
-/plugin install agent-skills@addy-agent-skills
-/plugin marketplace add DietrichGebert/ponytail
-/plugin install ponytail@ponytail
-```
-
-- **[Agent Skills](https://github.com/addyosmani/agent-skills)** (MIT) adds spec,
-  test-first, security-hardening and code-review workflows, plus security-auditor
-  and test-engineer reviewers. They fit a project that handles money and API keys:
-  run `/agent-skills:review` before merging changes to the bots.
-- **[Ponytail](https://github.com/DietrichGebert/ponytail)** (MIT) pushes Claude
-  toward the smallest, standard-library-first change. That matches this repo's
-  "no dependencies" rule. It needs Node.js. Its task log stays on your machine
-  unless you set a webhook.
-
-Left out on purpose: **Graphify** (a code knowledge graph, which is overkill for a
-repo this size and needs about 20 Python packages) and **OmniRoute** (it routes your
-Claude traffic, including portfolio details, through hundreds of third-party
-AI providers, with traffic-interception features; not something to put near
-financial data).
+Two plugins are switched on in the project settings:
+[Agent Skills](https://github.com/addyosmani/agent-skills) (spec, test-first,
+security and code-review workflows) and
+[Ponytail](https://github.com/DietrichGebert/ponytail) (smallest,
+standard-library-first changes; needs Node.js).
 
 ## The command line
 
+Everything goes through `trade.py`. Add `--help` to any command:
+
 ```bash
-S=.claude/skills
-python3 $S/trader-init/init.py --with-medium --mix growth=50,medium=20,dividend=30
-python3 $S/trader-accounts/accounts.py market                 # prices, dividends, USD/CAD
-python3 $S/trader-accounts/accounts.py review                 # flags + proposals per account
-python3 $S/trader-accounts/accounts.py review --contribute 1000
-python3 $S/trader-daily/daily.py                              # the whole daily run
-python3 $S/trader-paper/paper.py backtest                     # 5 years vs buy-and-hold
-python3 $S/trader-paper/paper.py status                       # equity, trades, readiness
+python3 trade.py init --with-medium --mix growth=50,medium=20,dividend=30
+python3 trade.py accounts market                  # prices, dividends, USD/CAD
+python3 trade.py accounts review                  # flags + proposals per account
+python3 trade.py accounts review --contribute 1000
+python3 trade.py daily                            # the whole daily run
+python3 trade.py paper backtest                   # stock bot: 5 years vs buy-and-hold
+python3 trade.py paper status                     # equity, trades, readiness
+python3 trade.py crypto status                    # crypto bot team
+python3 trade.py news                             # also: copycat, pelosi, analyst, screener,
+                                                  # budget, risk, broker, tax, alerts, rebalance
 ```
 
-**Run everything by itself:** `scripts/schedule.sh --install` (Mac/Linux)
+**Run everything by itself:** `python3 trade.py schedule --install` (Mac/Linux)
 schedules the daily run for weekdays at 5:30 p.m. and a crypto bot team cycle every 15
 minutes. [docs/daily-use.md](docs/daily-use.md) covers Windows and the 5-minute
 daily routine.
@@ -159,10 +143,10 @@ Four roles trade 10 big coins every 15 minutes, on fake money only:
 | Executor | simulated broker (default, no keys), or Alpaca PAPER behind four checks; there is no live-trading address in the code |
 
 ```bash
-python3 .claude/skills/trader-team/team.py check
-python3 .claude/skills/trader-team/team.py backtest --days 30
-python3 .claude/skills/trader-team/team.py run          # Ctrl+C to stop, `kill` to sell all and stop
-python3 .claude/skills/trader-team/team.py summary
+python3 trade.py crypto check
+python3 trade.py crypto backtest --days 30
+python3 trade.py crypto run          # Ctrl+C to stop, `crypto kill` to sell all and stop
+python3 trade.py crypto summary
 ```
 
 Every trade goes to `trader/team/trades.csv`, with entry, exit, size,
@@ -174,11 +158,13 @@ you review the results.
 ## How it is built
 
 ```
-.claude/skills/        16 skills: 11 from the Trader skill pack + accounts, paper, daily, init, team
+trade.py               one command for everything
+.claude/skills/        16 skills and their Python tools: 11 from the Trader skill pack + accounts, paper, daily, init, team
 app/                   server.py (standard-library HTTP, 127.0.0.1 only) + index.html (no frameworks)
 tests/                 unittest suite, fully offline; synthetic Yahoo charts in _synth.py
 trader/                your data: holdings, prices, history, ledger (git-ignored)
-.claude/hooks/         session-start hook: installs pdftotext in the cloud, creates trader/
+.claude/hooks/         session-start hook: installs pdftotext in cloud sessions, creates trader/
+scripts/schedule.sh    the daily schedule (cron)
 .github/workflows/     CI on Python 3.9 and 3.13
 scripts/update-skills.sh   pull upstream skill updates
 ```

@@ -75,7 +75,7 @@ def build(a):
             mix = {"growth": 45, "medium": 20, "dividend": 35}
     return {
         "_help": "Edit freely. strategy: growth | medium | dividend. rules override the strategy defaults "
-                 "(see .claude/skills/trader-accounts/SKILL.md). targets: optional {TICKER: percent}. "
+                 "(see the README's strategy table). targets: optional {TICKER: percent}. "
                  "mix: the share of your money you want in each strategy.",
         "base_currency": "CAD", "mix": mix, "accounts": accts,
     }

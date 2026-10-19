@@ -119,7 +119,7 @@ class Paths:
 def load_config(path):
     cfg = read_json(path)
     if not cfg:
-        raise AccountsError("no %s yet: run /trader-init (python3 .claude/skills/trader-init/init.py)" % path)
+        raise AccountsError("no %s yet: run python3 trade.py init" % path)
     cfg.setdefault("base_currency", "CAD")
     cfg.setdefault("mix", {})
     for a in cfg.get("accounts", []):

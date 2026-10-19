@@ -10,5 +10,17 @@
         ]
       }
     ]
+  },
+  "extraKnownMarketplaces": {
+    "addy-agent-skills": {
+      "source": { "source": "github", "repo": "addyosmani/agent-skills" }
+    },
+    "ponytail": {
+      "source": { "source": "github", "repo": "DietrichGebert/ponytail" }
+    }
+  },
+  "enabledPlugins": {
+    "agent-skills@addy-agent-skills": true,
+    "ponytail@ponytail": true
   }
 }

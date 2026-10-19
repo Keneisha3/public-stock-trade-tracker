@@ -278,7 +278,7 @@ function render() {
   h += `<section class="grid two">
     <div class="card"><h2>News on your holdings</h2>${news.length ? `<ul class="list">${news.map(n => `<li><b>${esc(n.ticker)}</b> <a href="${safeUrl(n.link)}" target="_blank" rel="noopener noreferrer">${esc(n.title)}</a><div class="small">${esc(n.source || "")} ${esc((n.time || "").slice(0, 16).replace("T", " "))}</div></li>`).join("")}</ul>` : `<div class="empty">No new headlines since the last refresh.</div>`}</div>
     <div class="card"><h2>New Congress trade filings</h2>${cong.length ? `<ul class="list">${cong.map(c => `<li><b>${esc(c.name)}</b> <span class="small">${esc(c.district)} · filed ${esc(c.filed)}</span><br><a href="${safeUrl(c.url)}" target="_blank" rel="noopener noreferrer">Open the filing</a></li>`).join("")}</ul>` : `<div class="empty">Nothing new from the House Clerk.</div>`}
-      <p class="small">Ask Claude to run <code>/trader-pelosi</code> to read a filing into rows.</p></div>
+      <p class="small">Read a filing into rows with <code>python3 trade.py pelosi fetch DOC_ID</code>.</p></div>
   </section>`;
   h += `<section class="card"><h2>Update holdings</h2><div class="grid two">
     <div><p class="small">Upload a holdings CSV (Wealthsimple: Activity → export holdings report; Questrade or any broker: positions export).</p>
@@ -289,7 +289,7 @@ function render() {
       <div class="row"><select id="cashAcct">${accts.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select>
       <input id="cashAmt" type="number" step="0.01" placeholder="amount" style="width:120px"><select id="cashCcy"><option>CAD</option><option>USD</option></select>
       <button id="cashGo">Save</button></div>
-      <p class="small">Questrade: sync from the terminal with <code>accounts.py sync questrade --token …</code> once. After that, Refresh syncs it.</p></div>
+      <p class="small">Questrade: sync from the terminal with <code>python3 trade.py accounts sync questrade --token …</code> once. After that, Refresh syncs it.</p></div>
   </div><div id="msg"></div></section>`;
   if (B && B.steps) {
     const bad = Object.entries(B.steps).filter(([, v]) => !v.ok);
@@ -340,7 +340,7 @@ function paperView(P) {
 }
 
 function cryptoView(C) {
-  if (!C) return `<div class="empty">Not started. Four roles (Scanner, Analyst, Risk Manager, Executor) trade 10 coins every 15 minutes with fake money. Start it in a terminal: <code>python3 .claude/skills/trader-team/team.py run</code>. The guide is <code>docs/crypto-bot-team.md</code>.</div>`;
+  if (!C) return `<div class="empty">Not started. Four roles (Scanner, Analyst, Risk Manager, Executor) trade 10 coins every 15 minutes with fake money. Start it in a terminal: <code>python3 trade.py crypto run</code>. The guide is <code>docs/crypto-bot-team.md</code>.</div>`;
   const s = C.summary || {}, t = C.today || {}, pos = Object.entries(C.positions || {});
   const n = (x, f) => x == null ? "–" : f(x);
   return `<div class="row" style="justify-content:space-between;margin-bottom:8px">

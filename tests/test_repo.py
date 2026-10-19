@@ -71,6 +71,23 @@ class Repo(unittest.TestCase):
             self.skipTest("git not available")
         self.assertEqual(out.returncode, 0, "trader/ must stay out of git")
 
+    def test_trade_py_reaches_every_tool(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("trade", os.path.join(REPO, "trade.py"))
+        trade = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(trade)
+        for name in list(trade.TOOLS) + ["dashboard", "schedule"]:
+            cmd = trade.command(name, ["--help"])
+            self.assertTrue(os.path.isfile(cmd[1]), "%s -> %s" % (name, cmd[1]))
+        self.assertIsNone(trade.command("nope", []))
+        self.assertEqual(trade.main(["nope"]), 2)
+
+    def test_docs_use_trade_py_not_skill_paths(self):
+        for f in ("README.md", "docs/daily-use.md", "docs/crypto-bot-team.md"):
+            with open(os.path.join(REPO, f), encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertNotRegex(text, r"\.claude/skills/trader-\w+/\w+\.py", f)
+
     def test_tools_are_standard_library_only(self):
         allowed = {"argparse", "copy", "csv", "datetime", "io", "json", "math", "os", "re", "statistics", "sys",
                    "time", "urllib", "subprocess", "threading", "traceback", "webbrowser", "http", "contextlib",

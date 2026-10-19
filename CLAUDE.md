@@ -1,4 +1,4 @@
-# Portfolio Tracker: notes for Claude
+# Portfolio Tracker: project notes
 
 A personal investing workbench for a Canadian investor with two real accounts:
 **Questrade** (aggressive growth, US stocks) and **Wealthsimple** (steady
@@ -17,6 +17,7 @@ briefing and a local dashboard. Everything is standard-library Python.
 app/                         server.py + index.html: the dashboard (127.0.0.1:8765)
 tests/                       unittest, offline; _synth.py builds fake Yahoo charts
 trader/                      the user's data (git-ignored, never commit it)
+trade.py                     one entry point: python3 trade.py <command> (docs use this, not skill paths)
 scripts/update-skills.sh     pull upstream skill updates
 ```
 
@@ -29,11 +30,11 @@ Data flows through `trader/`: `accounts.json` (config) -> `accounts/<id>.json`
 
 ```bash
 python3 -m unittest discover -s tests            # all tests, offline, ~3 s
-python3 app/server.py --open                     # the dashboard
-python3 .claude/skills/trader-daily/daily.py     # the daily run
-python3 .claude/skills/trader-accounts/accounts.py review
-python3 .claude/skills/trader-paper/paper.py backtest
-python3 .claude/skills/trader-team/team.py check         # crypto bot team; never trades
+python3 trade.py dashboard --open                # the dashboard
+python3 trade.py daily                           # the daily run
+python3 trade.py accounts review
+python3 trade.py paper backtest
+python3 trade.py crypto check                    # crypto bot team; never trades
 ```
 
 ## Rules that always hold
@@ -58,11 +59,9 @@ python3 .claude/skills/trader-team/team.py check         # crypto bot team; neve
 
 ## Plugins
 
-Recommended for contributors (installed by each person, not enabled by
-default): `agent-skills@addy-agent-skills` (review, TDD, security-auditor) and
-`ponytail@ponytail` (smallest change, stdlib first). Do not add AI gateways or
-proxies (e.g. OmniRoute) that send prompts to third parties: prompts here
-contain portfolio data.
+Enabled in `.claude/settings.json`: `agent-skills@addy-agent-skills`
+(review, TDD, security-auditor) and `ponytail@ponytail` (smallest change,
+stdlib first).
 
 ## Code conventions
 

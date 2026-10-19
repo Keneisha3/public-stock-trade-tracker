@@ -52,7 +52,7 @@ There are no other packages to install. The bot only uses what comes with Python
 ```bash
 git clone https://github.com/Keneisha3/public-stock-trade-tracker.git
 cd public-stock-trade-tracker
-python3 .claude/skills/trader-init/init.py
+python3 trade.py init
 ```
 
 The last line creates the `trader/` folder with the bot's settings in
@@ -61,8 +61,8 @@ The last line creates the `trader/` folder with the bot's settings in
 ## Step 3: check it and test it on the past
 
 ```bash
-python3 .claude/skills/trader-team/team.py check
-python3 .claude/skills/trader-team/team.py backtest --days 30
+python3 trade.py crypto check
+python3 trade.py crypto backtest --days 30
 ```
 
 `check` confirms the setup and never trades. `backtest` runs the same rules
@@ -72,7 +72,7 @@ against simply holding the coins. A backtest is a first look, not a promise.
 ## Step 4: run it
 
 ```bash
-python3 .claude/skills/trader-team/team.py run
+python3 trade.py crypto run
 ```
 
 Leave the terminal open. Every 15 minutes it prints a line like:
@@ -92,21 +92,21 @@ Prefer not to keep a terminal open? Run one cycle every 15 minutes with cron
 (Mac/Linux, `crontab -e`):
 
 ```
-*/15 * * * * cd /path/to/public-stock-trade-tracker && python3 .claude/skills/trader-team/team.py run --once >> trader/team/cron.log 2>&1
+*/15 * * * * cd /path/to/public-stock-trade-tracker && python3 trade.py crypto run --once >> trader/team/cron.log 2>&1
 ```
 
 ## The kill switch
 
 ```bash
-python3 .claude/skills/trader-team/team.py kill      # sell every paper position, then stop
-python3 .claude/skills/trader-team/team.py resume    # turn it back on
+python3 trade.py crypto kill      # sell every paper position, then stop
+python3 trade.py crypto resume    # turn it back on
 ```
 
 It also turns itself on when:
 - the account loses 5 % in one day, or
 - 5 cycles in a row fail (internet down, API errors).
 
-The dashboard (`python3 app/server.py --open`) has a kill switch button too.
+The dashboard (`python3 trade.py dashboard --open`) has a kill switch button too.
 
 ## Optional: Alpaca paper account
 
@@ -139,8 +139,8 @@ loss can be a bit bigger than planned. Real trading has the same problem.
 ## Step 6: read the results
 
 ```bash
-python3 .claude/skills/trader-team/team.py summary
-python3 .claude/skills/trader-team/team.py summary --day 2026-10-21
+python3 trade.py crypto summary
+python3 trade.py crypto summary --day 2026-10-21
 ```
 
 You get: total trades, wins and losses, win rate, average win and loss, total
@@ -148,7 +148,7 @@ P&L, fees and slippage, max drawdown, the bot against holding the same coins,
 errors and downtime. The full history is in `trader/team/trades.csv` (opens
 in Excel or Google Sheets).
 
-Then ask Claude in this project:
+Then ask your AI coding assistant, opened in this project:
 
 > Here is my PAPER trading CSV. Explain the results in beginner-friendly
 > language. Compare the bot with buy-and-hold. Identify repeated patterns in
@@ -161,7 +161,7 @@ All in `.claude/skills/trader-team/`:
 
 | file | what it does |
 | --- | --- |
-| `team.py` | The boss. Runs a cycle every 15 minutes, in this order: check the kill switch, check stops and targets, then Scanner, Analyst, Risk Manager, Executor, then save everything. Also the commands: check, run, status, summary, kill, resume, backtest, reset. |
+| `team.py` | The boss (`python3 trade.py crypto ...` runs it). Runs a cycle every 15 minutes, in this order: check the kill switch, check stops and targets, then Scanner, Analyst, Risk Manager, Executor, then save everything. Also the commands: check, run, status, summary, kill, resume, backtest, reset. |
 | `candles.py` | Downloads 15-minute price bars ("candles") from Coinbase (no key needed) or Alpaca. Reads your `.env` file without ever printing your keys. |
 | `scanner.py` | The Scanner. Skips coins with bad or old data and passes possible setups to the Analyst. |
 | `analyst.py` | The Analyst. Works out the averages (EMA), RSI and ATR, and says BUY, EXIT or nothing, with the reasons written out. |
@@ -169,7 +169,7 @@ All in `.claude/skills/trader-team/`:
 | `executor.py` | The Executor. The simulated broker, and the Alpaca paper broker with its four safety checks. |
 | `trade_log.py` | Writes the CSV files and builds the summary numbers. |
 | `config.example.json` | Every setting with its default. Your copy lives in `trader/team/config.json`. |
-| `SKILL.md` | Instructions for Claude, so you can ask in plain words ("how did the bot do?"). |
+| `SKILL.md` | Instructions for an AI assistant, so you can ask in plain words ("how did the bot do?"). |
 
 What it writes in `trader/team/` (git-ignored, stays on your computer):
 
