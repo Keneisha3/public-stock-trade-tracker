@@ -327,10 +327,12 @@ jobs:
           y=$(date +%Y); q=$(( ($(date +%-m) - 1) / 3 ))
           if [ "$q" -eq 0 ]; then y=$((y - 1)); q=4; fi
           python .claude/skills/trader-replay/signals.py insiders --quarters "2015q1-${y}q${q}" --out out
+          since=$(python -c "import gzip,json,datetime; r=json.load(gzip.open('out/insiders.json.gz','rt'))['rows']; print((datetime.date.fromisoformat(max(x[0] for x in r))+datetime.timedelta(days=1)).isoformat())")
+          python .claude/skills/trader-replay/signals.py insiders-recent --since "$since" --sp500 --out out
       - uses: actions/upload-artifact@v4
         with:
           name: sig-insiders
-          path: out/insiders.json.gz
+          path: out/insiders*.json.gz
 
   sig-save:
     needs: [sig-congress, sig-insiders]

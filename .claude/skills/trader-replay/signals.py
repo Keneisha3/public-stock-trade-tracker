@@ -33,6 +33,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "trader-pelosi"))
 import ptr  # noqa: E402
 
 SEC_345 = "https://www.sec.gov/files/structureddata/data/insider-transactions-data-sets/%s_form345.zip"
+SEC_DAILY = "https://www.sec.gov/Archives/edgar/daily-index/%d/QTR%d/form.%s.idx"
+SEC_DOC = "https://www.sec.gov/Archives/%s"
+SEC_TICKERS = "https://www.sec.gov/files/company_tickers.json"
 MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT",
                                       "NOV", "DEC"), 1)}
 
@@ -159,6 +162,107 @@ def build_insiders(qs, ua, log=print, http=None):
             "rows": rows, "stats": stats}
 
 
+# ---------------------------------------------------------------- insiders, fresh (EDGAR daily index)
+
+def parse_daily_index(text):
+    """EDGAR form.YYYYMMDD.idx -> [(form, company, cik, filed, path)] (columns are 2+ spaces apart)."""
+    out, body = [], False
+    for ln in text.splitlines():
+        if ln.startswith("---"):
+            body = True
+            continue
+        if not body or not ln.strip():
+            continue
+        parts = [p for p in __import__("re").split(r"\s{2,}", ln.strip()) if p]
+        if len(parts) >= 5:
+            out.append((parts[0], parts[1], parts[2], iso(parts[3][:4] + "-" + parts[3][4:6] + "-" + parts[3][6:8]),
+                        parts[4]))
+    return out
+
+
+def parse_form4(text, filed):
+    """One Form 4 submission (.txt with the XML inside) -> rows like parse_form345's."""
+    import re
+    import xml.etree.ElementTree as ET
+    m = re.search(r"<ownershipDocument>.*?</ownershipDocument>", text or "", re.S)
+    if not m:
+        return []
+    try:
+        doc = ET.fromstring(m.group(0))
+    except ET.ParseError:
+        return []
+    if (doc.findtext("documentType") or "").strip() not in ("4", "4/A"):
+        return []
+    ticker = yahoo(doc.findtext("issuer/issuerTradingSymbol"))
+    cik = (doc.findtext("reportingOwner/reportingOwnerId/rptOwnerCik") or "").strip()
+    rel = doc.find("reportingOwner/reportingOwnerRelationship")
+
+    def flag(name):
+        return (rel.findtext(name) if rel is not None else "") in ("1", "true", "True")
+    role = "officer" if flag("isOfficer") else "director" if flag("isDirector") else \
+        "10% owner" if flag("isTenPercentOwner") else "other"
+    out = []
+    for t in doc.findall("nonDerivativeTable/nonDerivativeTransaction"):
+        if (t.findtext("transactionCoding/transactionCode") or "").strip() != "P" or \
+                (t.findtext("transactionAmounts/transactionAcquiredDisposedCode/value") or "").strip() != "A":
+            continue
+        try:
+            shares = float(t.findtext("transactionAmounts/transactionShares/value") or 0)
+            price = float(t.findtext("transactionAmounts/transactionPricePerShare/value") or 0)
+        except ValueError:
+            continue
+        if ticker and shares > 0 and price > 0:
+            out.append([filed, ticker, cik, role, round(shares, 2), round(price, 4), round(shares * price, 2)])
+    return out
+
+
+def build_insiders_recent(since, until, ua, tickers=None, log=print, http=None, pause=0.13):
+    """Form 4 open-market purchases filed from `since` to `until`, read one by one from the EDGAR
+    daily index (the quarterly bulk files arrive months late). tickers: only these issuers."""
+    def get(url):
+        req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "identity"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.read().decode("utf-8", "replace")
+    http = http or get
+    ciks = None
+    if tickers:
+        doc = json.loads(http(SEC_TICKERS))
+        want = {t.upper() for t in tickers}
+        ciks = {str(v["cik_str"]) for v in doc.values() if yahoo(v.get("ticker")) in want}
+    rows, stats = [], {"days": 0, "filings": 0, "errors": []}
+    d = datetime.date.fromisoformat(since)
+    end = datetime.date.fromisoformat(until)
+    while d <= end:
+        if d.weekday() < 5:
+            q = (d.month - 1) // 3 + 1
+            try:
+                idx = parse_daily_index(http(SEC_DAILY % (d.year, q, d.strftime("%Y%m%d"))))
+                stats["days"] += 1
+            except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
+                idx = []
+                if "404" not in str(e):
+                    stats["errors"].append("%s: %s" % (d, e))
+            seen = set()
+            for form, company, cik, filed, path in idx:
+                if form not in ("4", "4/A") or path in seen or (ciks is not None and cik not in ciks):
+                    continue
+                seen.add(path)
+                try:
+                    rows += parse_form4(http(SEC_DOC % path), filed)
+                    stats["filings"] += 1
+                except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
+                    stats["errors"].append("%s: %s" % (path, e))
+                if pause:
+                    time.sleep(pause)  # the SEC asks for at most 10 requests a second
+            if stats["days"] % 20 == 0:
+                log("%s: %d filings read, %d purchases" % (d, stats["filings"], len(rows)))
+        d += datetime.timedelta(days=1)
+    rows.sort()
+    stats["errors"] = stats["errors"][:50]
+    return {"source": "SEC EDGAR daily index, Form 4 (code P)", "built": _now(), "since": since, "until": until,
+            "columns": ["filed", "ticker", "owner_cik", "role", "shares", "price", "value"], "rows": rows, "stats": stats}
+
+
 # ---------------------------------------------------------------- Congress (House PTRs)
 
 def build_congress(years, pdf_dir, log=print, workers=4):
@@ -243,7 +347,14 @@ class Signals:
         def opt(name):
             p = os.path.join(folder, name)
             return read(p) if os.path.exists(p) else None
-        return cls(opt("congress.json.gz"), opt("insiders.json.gz"))
+        ins = opt("insiders.json.gz")
+        recent = opt("insiders_recent.json.gz")
+        if recent:  # the daily-index rows fill the months the quarterly files do not cover yet
+            have = {tuple(r) for r in (ins or {}).get("rows", [])}
+            last = max((r[0] for r in (ins or {}).get("rows", [])), default="")
+            rows = list((ins or {}).get("rows", [])) + [r for r in recent["rows"] if r[0] > last and tuple(r) not in have]
+            ins = {"rows": sorted(rows)}
+        return cls(opt("congress.json.gz"), ins)
 
     def __bool__(self):
         return bool(self.congress or self.insiders)
@@ -265,6 +376,11 @@ class Signals:
             else:
                 x["sells"] += 1
         return {t: dict(x, members=len(x["members"])) for t, x in out.items() if x["buys"] > x["sells"]}
+
+    def congress_rows(self, day, days=90, side="buy"):
+        """The raw rows filed in (day-days, day] on one side."""
+        a, b = bisect.bisect_right(self._cd, self._since(day, days)), bisect.bisect_right(self._cd, day)
+        return [r for r in self.congress[a:b] if r[3] == side]
 
     def insider_buys(self, day, days=60):
         """{ticker: {"insiders": n, "officers": n, "value": $}} from filings in (day-days, day]."""
@@ -302,11 +418,30 @@ def main(argv=None):
     i.add_argument("--out", required=True)
     i.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "",
                    help="the SEC asks for 'Name email' (or set SEC_USER_AGENT)")
+    r = sub.add_parser("insiders-recent")
+    r.add_argument("--since", required=True)
+    r.add_argument("--until", default=datetime.date.today().isoformat())
+    r.add_argument("--out", required=True)
+    r.add_argument("--sp500", action="store_true", help="only companies that were ever in the S&P 500")
+    r.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
     n = sub.add_parser("info")
     n.add_argument("dir")
     a = ap.parse_args(argv)
     if a.cmd == "info":
         info(a.dir)
+        return 0
+    if a.cmd == "insiders-recent":
+        if not a.user_agent:
+            print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
+            return 2
+        tickers = None
+        if a.sp500:
+            import universe
+            tickers = list(universe.Universe().spans)
+        doc = build_insiders_recent(a.since, a.until, a.user_agent, tickers)
+        write(os.path.join(a.out, "insiders_recent.json.gz"), doc)
+        print(json.dumps(doc["stats"])[:1500])
+        print("%d rows" % len(doc["rows"]))
         return 0
     if a.cmd == "congress":
         lo, _, hi = a.years.partition("-")

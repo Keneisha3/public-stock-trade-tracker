@@ -67,6 +67,84 @@ class Insiders(unittest.TestCase):
         self.assertEqual(len(s.insiders), 3)
 
 
+IDX = """Description:           Daily Index of EDGAR Dissemination Feed by Form Type
+Last Data Received:    Apr 15, 2026
+
+Form Type   Company Name                                                  CIK         Date Filed  File Name
+---------------------------------------------------------------------------------------------------------------------------------------------
+3           NEW CO                                                        111         20260415    edgar/data/111/0000111-26-000001.txt
+4           ACME CORP                                                     222         20260415    edgar/data/222/0000222-26-000009.txt
+4           SMITH JANE                                                    900         20260415    edgar/data/222/0000222-26-000009.txt
+4           OTHER INC                                                     333         20260415    edgar/data/333/0000333-26-000004.txt
+"""
+FORM4 = """<SEC-DOCUMENT>
+<XML>
+<?xml version="1.0"?>
+<ownershipDocument>
+ <documentType>4</documentType>
+ <issuer><issuerCik>222</issuerCik><issuerTradingSymbol>ACME</issuerTradingSymbol></issuer>
+ <reportingOwner>
+  <reportingOwnerId><rptOwnerCik>900</rptOwnerCik></reportingOwnerId>
+  <reportingOwnerRelationship><isDirector>0</isDirector><isOfficer>1</isOfficer></reportingOwnerRelationship>
+ </reportingOwner>
+ <nonDerivativeTable>
+  <nonDerivativeTransaction>
+   <transactionCoding><transactionCode>P</transactionCode></transactionCoding>
+   <transactionAmounts><transactionShares><value>1000</value></transactionShares>
+    <transactionPricePerShare><value>12.5</value></transactionPricePerShare>
+    <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode></transactionAmounts>
+  </nonDerivativeTransaction>
+  <nonDerivativeTransaction>
+   <transactionCoding><transactionCode>S</transactionCode></transactionCoding>
+   <transactionAmounts><transactionShares><value>10</value></transactionShares>
+    <transactionPricePerShare><value>13</value></transactionPricePerShare>
+    <transactionAcquiredDisposedCode><value>D</value></transactionAcquiredDisposedCode></transactionAmounts>
+  </nonDerivativeTransaction>
+ </nonDerivativeTable>
+</ownershipDocument>
+</XML>
+</SEC-DOCUMENT>"""
+
+
+class InsidersRecent(unittest.TestCase):
+    def test_daily_index_and_form4(self):
+        idx = signals.parse_daily_index(IDX)
+        self.assertEqual(idx[1], ("4", "ACME CORP", "222", "2026-04-15", "edgar/data/222/0000222-26-000009.txt"))
+        self.assertEqual(signals.parse_form4(FORM4, "2026-04-15"),
+                         [["2026-04-15", "ACME", "900", "officer", 1000.0, 12.5, 12500.0]])
+        self.assertEqual(signals.parse_form4("no xml here", "2026-04-15"), [])
+
+    def test_build_reads_each_filing_once_and_only_wanted_issuers(self):
+        calls = []
+
+        def http(url):
+            calls.append(url)
+            if url.endswith("company_tickers.json"):
+                return '{"0": {"cik_str": 222, "ticker": "ACME"}, "1": {"cik_str": 333, "ticker": "OTH"}}'
+            if "form.20260415" in url:
+                return IDX
+            if "0000222-26-000009" in url:
+                return FORM4
+            raise signals.urllib.error.HTTPError(url, 404, "nf", None, None)
+        doc = signals.build_insiders_recent("2026-04-15", "2026-04-15", "ua", tickers=["ACME"], log=lambda m: None,
+                                            http=http, pause=0)
+        self.assertEqual(len(doc["rows"]), 1)
+        self.assertEqual(sum(1 for c in calls if "0000222-26-000009" in c), 1)  # listed twice, read once
+        self.assertFalse(any("0000333" in c for c in calls))                      # not a wanted issuer
+
+    def test_recent_rows_fill_after_the_bulk_files(self):
+        d = tempfile.mkdtemp()
+        try:
+            signals.write(os.path.join(d, "insiders.json.gz"), {"rows": [["2026-03-30", "ACME", "1", "officer", 1, 1, 1]]})
+            signals.write(os.path.join(d, "insiders_recent.json.gz"), {"rows": [
+                ["2026-03-30", "ACME", "1", "officer", 1, 1, 1],          # already in the bulk files
+                ["2026-04-15", "ACME", "900", "officer", 1000, 12.5, 12500]]})
+            s = signals.Signals.load(d)
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual([r[0] for r in s.insiders], ["2026-03-30", "2026-04-15"])
+
+
 class Congress(unittest.TestCase):
     def test_buys_need_the_filing_to_be_public_and_net_buying(self):
         doc = {"rows": [

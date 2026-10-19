@@ -630,6 +630,30 @@ class ForwardRecord(unittest.TestCase):
         self.assertIn("S&P 500 (SPY)", real["strategies"])
 
 
+class CongressRecords(unittest.TestCase):
+    def test_members_are_judged_only_on_outcomes_known_at_the_time(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        rows = []
+        for i in range(100, 400, 20):  # Good keeps buying the strong stock, Bad the weak one
+            rows += [[days[i], "Good", "AAA", "buy", 15001, 50000, days[i], "self"],
+                     [days[i], "Bad", "INTC", "buy", 15001, 50000, days[i], "self"]]
+        sig = replay.sigs.Signals(congress={"rows": rows})
+        rec = replay.member_records(data, sig, days[420])
+        self.assertGreater(rec["Good"], rec["Bad"])
+        early = replay.member_records(data, sig, days[150])  # only one buy each has a known outcome by then
+        self.assertEqual(early, {})
+        uni = fake_universe(days)
+        r = replay.run_signals(data, uni, sig, days[300], days[420], 100, source="congress", weighted=True, n=2,
+                               every=7)
+        self.assertTrue(any("AAA" in p for _, p in r["picks"]))
+
+
 class Statistics(unittest.TestCase):
     def load(self):
         import importlib.util

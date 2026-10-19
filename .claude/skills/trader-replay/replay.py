@@ -572,7 +572,15 @@ def run_signals(data, uni, sig, start, asof, cash, **opts):
             for t, x in sig.insider_buys(d, o["days"]).items():
                 if x["insiders"] >= o["min_count"] and (not o["officers"] or x["officers"] >= 1):
                     rows.append(((x["insiders"], x["value"]), t))
-        if o["source"] in ("congress", "both"):
+        if o["source"] == "congress" and o.get("weighted"):
+            import math
+            rec = member_records(data, sig, d)
+            score = {}
+            for filed, member, t, side, low, high, traded, owner in sig.congress_rows(d, max(o["days"], 90)):
+                edge = max(-1.0, min(1.0, rec.get(member, 0.0) / 10.0))  # a member's past edge, +-10 pts caps it
+                score[t] = score.get(t, 0.0) + math.log1p((low or 1000) / 1000.0) * (1.0 + edge)
+            rows += [((sc,), t) for t, sc in score.items() if sc > 0]
+        elif o["source"] in ("congress", "both"):
             for t, x in sig.congress_buys(d, max(o["days"], 90)).items():
                 if x["members"] >= o["min_count"]:
                     rows.append(((x["members"], x["low"]), t))
@@ -584,6 +592,25 @@ def run_signals(data, uni, sig, start, asof, cash, **opts):
         picks = picks[:o["n"]]
         return picks + [o["fill"]] * (o["n"] - len(picks)) if o["fill"] in data.charts else picks
     return run_targets(data, start, asof, cash, choose, o["every"])
+
+
+def member_records(data, sig, day, horizon=63, years=3, min_trades=3):
+    """{member: average return beyond the S&P 500 over the `horizon` trading days after each of
+    their disclosed buys}, counting only buys whose outcome was known by `day`. Cached by month."""
+    key = (day[:7], horizon, years)
+    cache = data.__dict__.setdefault("_records", {})
+    if key in cache:
+        return cache[key]
+    month_start = data.trading_day_on_or_before(day[:7] + "-01") if day[8:] != "01" else day
+    per = {}
+    for filed, member, t, side, low, high, traded, owner in sig.congress_rows(month_start, 365 * years):
+        r, end = _fwd(data, t, filed, horizon)
+        s_, s_end = _fwd(data, "SPY", filed, horizon)
+        if r is None or s_ is None or end > month_start:
+            continue
+        per.setdefault(member, []).append(100.0 * (r - s_))
+    cache[key] = {m: sum(x) / len(x) for m, x in per.items() if len(x) >= min_trades}
+    return cache[key]
 
 
 def run_momentum_signals(data, uni, sig, start, asof, cash, n=20, days=180, **opts):
@@ -1302,6 +1329,8 @@ SIGNAL_VARIANTS = [
     ("congress buys", "Congress: any member buying in 90 days", {"source": "congress", "days": 90, "min_count": 1}),
     ("congress buys", "Congress: 2+ members, 180 days", {"source": "congress", "days": 180}),
     ("congress buys", "Insiders or Congress, 2+ buyers", {"source": "both", "days": 90}),
+    ("congress buys", "Congress: weighted by size and each member's past record", {"source": "congress", "days": 90,
+                                                                                  "weighted": True}),
 ]
 DUAL_VARIANTS = [
     ("Dual momentum: best 1 fund (default)", {}),
