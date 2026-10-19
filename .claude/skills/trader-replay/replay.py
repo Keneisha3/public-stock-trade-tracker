@@ -342,13 +342,13 @@ def run_hold(data, weights, start, asof, cash):
 
 VIX_SYM, VIX3M_SYM = "^VIX", "^VIX3M"
 VIX_RULES = [
+    ("VIX agent: Nasdaq 100 unless VIX > 30 (default)", {"mode": "level", "threshold": 30, "asset": "QQQ"}),
     ("VIX agent: S&P 500 unless VIX > 25", {"mode": "level", "threshold": 25}),
     ("VIX agent: S&P 500 unless VIX > 20", {"mode": "level", "threshold": 20}),
     ("VIX agent: S&P 500 unless VIX > 30", {"mode": "level", "threshold": 30}),
     ("VIX agent: S&P 500 while VIX is under its 50-day average", {"mode": "trend", "days": 50}),
     ("VIX agent: S&P 500 unless VIX > 3-month VIX (stress)", {"mode": "term"}),
     ("VIX agent: Nasdaq 100 unless VIX > 3-month VIX", {"mode": "term", "asset": "QQQ"}),
-    ("VIX agent: Nasdaq 100 unless VIX > 30", {"mode": "level", "threshold": 30, "asset": "QQQ"}),
 ]
 
 
@@ -758,15 +758,15 @@ def overall(results):
 # ---------------------------------------------------------------- scenarios: same strategy, different settings
 
 SCENARIOS = [
-    ("growth", "Default (12-month momentum, 20% cap)", {}),
-    ("growth", "Short momentum: 3 months", {"momentum_months": 3}),
-    ("growth", "Medium momentum: 6 months", {"momentum_months": 6}),
-    ("growth", "Concentrated: 35% cap, 3+ names", {"max_position_pct": 35, "min_positions": 3}),
+    ("growth", "Default: aggressive (3-month momentum, 30% cap, no cash)", {}),
+    ("growth", "Previous default (12-month momentum, 20% cap, 3% cash)", {"momentum_months": 12, "max_position_pct": 20,
+                                                                         "min_positions": 6, "cash_target_pct": 3}),
+    ("growth", "12-month momentum", {"momentum_months": 12}),
+    ("growth", "6-month momentum", {"momentum_months": 6}),
+    ("growth", "Concentrated: 40% cap, 3+ names", {"max_position_pct": 40, "min_positions": 3}),
     ("growth", "Diversified: 10% cap, 10+ names", {"max_position_pct": 10, "min_positions": 10}),
     ("growth", "Tight stop: 15%", {"stop_loss_pct": 15}),
     ("growth", "Rebalance monthly", {"review_every_days": 28}),
-    ("growth", "Aggressive: 3-month momentum, 30% cap, no cash", {"momentum_months": 3, "max_position_pct": 30,
-                                                                  "min_positions": 4, "cash_target_pct": 0}),
     ("growth", "Monthly, 10% cap, 10+ names", {"review_every_days": 28, "max_position_pct": 10, "min_positions": 10}),
     ("growth", "6-month momentum, monthly", {"momentum_months": 6, "review_every_days": 28}),
     ("growth", "Rebalance quarterly", {"review_every_days": 91}),
@@ -815,16 +815,17 @@ def run_scenarios(data, watch, starts, asof, cash, account_type, scenarios):
 
 
 STOCKBOT_VARIANTS = [
+    ("Stock bot: trades + idle cash in QQQ (default)", {}),
     ("Stock bot: trades only, idle cash stays cash", {"idle": None}),
     ("Stock bot: trades + idle cash in SPY", {"idle": "SPY"}),
-    ("Stock bot: idle in SPY, hold 5 days", {"idle": "SPY", "hold_days": 5}),
-    ("Stock bot: idle in QQQ", {"idle": "QQQ"}),
+    ("Stock bot: idle in QQQ, hold 5 days", {"hold_days": 5}),
 ]
 PELOSI_VARIANTS = [("Pelosi: mirror buys and sells", "mirror"), ("Pelosi: keep every buy", "hold")]
 CRYPTO_VARIANTS = [
+    ("Crypto team: 6-hour bars (default)", {"interval_min": 360}),
     ("Crypto team: 15-minute bars (the guide)", {"interval_min": 15}),
-    ("Crypto team: 1-hour bars", {"interval_min": 60}),
-    ("Crypto team: 6-hour bars", {"interval_min": 360}),
+    ("Crypto team: 1-day bars", {"interval_min": 1440}),
+    ("Crypto team: 1-day bars, Bitcoin and Ether only", {"interval_min": 1440, "coins": ["BTC", "ETH"]}),
 ]
 
 
@@ -1216,7 +1217,7 @@ ORDER = ["growth", "medium", "dividend", "stock bot", "crypto team", "VIX agent"
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
 LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer",
           "dividend": "Dividend reviewer (Wealthsimple)", "stock bot": "Stock bot (ATR, paper)",
-          "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (S&P 500 or cash)"}
+          "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (Nasdaq 100 or cash)"}
 
 
 def _p(x):

@@ -42,6 +42,13 @@ The universe is 30 liquid US large caps; put your own list in
 - **Trade:** buy at the next open; stop at entry - 2 ATR; sell at the close of
   the third day held. Risk 1 % of equity per trade, max 15 % in one name,
   max 8 names. 5 bps per side for commission and slippage.
+- **Idle cash:** cash no trade is using sits in QQQ (the Nasdaq 100), sold at
+  the open when a trade needs it. So the bot is "the index plus its trades"
+  instead of mostly cash. In the replay, this beat both the cash version and
+  holding QQQ alone in both test periods (as of 2025-10-17 over 24 months:
+  +81 % vs +71 % for QQQ; the year to 2026-10-16: +30 % vs +20 %). The
+  universe is today's large caps, which flatters it. Set `"idle": null` in
+  the ledger's params to turn it off.
 
 ## Tell the user the truth about day trading
 

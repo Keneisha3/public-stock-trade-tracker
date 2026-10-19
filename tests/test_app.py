@@ -76,13 +76,13 @@ class Dashboard(unittest.TestCase):
         self.req("POST", "/api/init", {})
         st = self.req("GET", "/api/state")[1]
         q = [a for a in st["accounts"] if a["id"] == "questrade"][0]
-        self.assertEqual(q["rules"]["momentum_months"], 12)
+        self.assertEqual(q["rules"]["momentum_months"], 3)
         self.assertIn("momentum_months", st["tunable"])
-        code, out = self.req("POST", "/api/rules", {"account": "questrade", "rules": {"momentum_months": 3, "max_position_pct": 30}})
+        code, out = self.req("POST", "/api/rules", {"account": "questrade", "rules": {"momentum_months": 12, "max_position_pct": 20}})
         self.assertEqual(code, 200)
         q = [a for a in self.req("GET", "/api/state")[1]["accounts"] if a["id"] == "questrade"][0]
-        self.assertEqual((q["rules"]["momentum_months"], q["rules"]["max_position_pct"]), (3, 30))
-        self.assertEqual(q["defaults"]["momentum_months"], 12)
+        self.assertEqual((q["rules"]["momentum_months"], q["rules"]["max_position_pct"]), (12, 20))
+        self.assertEqual(q["defaults"]["momentum_months"], 3)
         code, err = self.req("POST", "/api/rules", {"account": "questrade", "rules": {"max_position_pct": 95}})
         self.assertEqual(code, 400)
         self.assertIn("between", err["error"])
@@ -90,7 +90,7 @@ class Dashboard(unittest.TestCase):
         self.assertEqual(code, 400)
         self.req("POST", "/api/rules", {"account": "questrade", "reset": True})
         q = [a for a in self.req("GET", "/api/state")[1]["accounts"] if a["id"] == "questrade"][0]
-        self.assertEqual(q["rules"]["max_position_pct"], 20)
+        self.assertEqual(q["rules"]["max_position_pct"], 30)
 
     def test_crypto_team_kill_switch_buttons(self):
         self.req("POST", "/api/init", {})
@@ -133,7 +133,7 @@ class DailyOffline(unittest.TestCase):
                 _synth.write(off, s, _synth.chart(s, growth=0.3, currency=cur,
                                                   divs=_synth.quarterly("2022-01-15", "2026-07-15", 0.9) if cur == "CAD" else None))
             _synth.write(off, "USDCAD=X", _synth.chart("USDCAD=X", p0=1.4, n=22, wiggle=0, currency="CAD"))
-            _synth.write(off, "^VIX", _synth.chart("^VIX", p0=16, n=120, wiggle=0.02, gaps={119: 80}))
+            _synth.write(off, "^VIX", _synth.chart("^VIX", p0=16, n=120, wiggle=0.02, gaps={119: 120}))
             with open(os.path.join(base, "paper", "config.json"), "w") as fh:
                 json.dump({"universe": ["NVDA", "MSFT"]}, fh)
             b = daily.run(base, offline=off, today="2026-10-16")
@@ -145,7 +145,7 @@ class DailyOffline(unittest.TestCase):
             with open(os.path.join(base, "history.json")) as fh:
                 self.assertEqual(json.load(fh)["points"][-1]["date"], "2026-10-16")
             self.assertIn("Not financial advice", daily.render(b))
-            self.assertEqual((b["vix"]["regime"], b["vix"]["agent"]), ("nervous", "step aside to cash"))
+            self.assertEqual((b["vix"]["regime"], b["vix"]["agent"]), ("fear", "step aside to cash"))
             self.assertIn("The VIX agent says: step aside to cash", daily.render(b))
         finally:
             shutil.rmtree(d)

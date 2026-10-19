@@ -21,7 +21,7 @@ trusts it.
 | **Runs a daily briefing** | One command: sync Questrade, refresh prices and dividends, review, record the day's value, run the paper bot, check news on your holdings, new Congress stock-trade filings and your price alerts. |
 | **Shows it all on a dashboard** | A local web page: total and today's change, value history, mix vs target, to-dos, proposed trades, holdings with flags and sparklines, the paper bot vs buy-and-hold, news, Congress filings, CSV import. Light and dark mode, works on a phone. |
 | **Paper-trades automatically** | An ATR breakout bot from my [ATR research project](https://github.com/Keneisha3/ATR-Based-News-Triggered-Stock-System) trades a paper ledger every day, with a 5-year backtest and a "ready for real money?" checklist it has to pass. |
-| **Runs a crypto bot team on fake money** | A Scanner, Analyst, Risk Manager and Executor trade 10 coins every 15 minutes (EMA crossover + RSI, 2 % max risk, stop-loss and take-profit on every trade). Simulated by default, or Alpaca's paper account. CSV log, daily summary against buy-and-hold, kill switch. [Beginner guide](docs/crypto-bot-team.md). |
+| **Runs a crypto bot team on fake money** | A Scanner, Analyst, Risk Manager and Executor trade 10 coins on 6-hour bars, checked every 15 minutes (EMA crossover + RSI, 2 % max risk, stop-loss and take-profit on every trade). Simulated by default, or Alpaca's paper account. CSV log, daily summary against buy-and-hold, kill switch. [Beginner guide](docs/crypto-bot-team.md). |
 | **Never trades for you** | Proposals are a to-do list. You place every real trade yourself in your broker's app. |
 
 ## Quick start
@@ -108,8 +108,9 @@ Defaults, all overridable per account in `trader/accounts.json`:
 
 | rule | growth (Questrade) | medium term | dividend (Wealthsimple) |
 | --- | --- | --- | --- |
-| max per stock | 20 % | 15 % | 12 % |
-| cash target / max | 3 / 10 % | 3 / 10 % | 2 / 8 % |
+| max per stock | 30 % | 15 % | 12 % |
+| cash target / max | 0 / 10 % | 3 / 10 % | 2 / 8 % |
+| momentum lookback | 3 months | 6 months | n/a |
 | stop from your cost | -25 % | -20 % | -30 % |
 | also flags | laggards (down 12 months and below cost) | price under its 200-day average and falling | no dividend, yield under 2 % or over 8 %, cuts, shrinking payouts, volatility over 30 % |
 
@@ -183,7 +184,7 @@ and are range-checked. The live review and the replay use the same rules.
 
 ## The crypto bot team
 
-Four roles trade 10 big coins every 15 minutes, on fake money only:
+Four roles trade 10 big coins on 6-hour bars (checked every 15 minutes), on fake money only:
 
 | role | job |
 | --- | --- |
@@ -201,9 +202,10 @@ python3 trade.py crypto summary
 
 Every trade goes to `trader/team/trades.csv`, with entry, exit, size,
 stop-loss, take-profit, fees and slippage, P&L and which roles approved it.
-On 15-minute bars, fees and slippage are a large share of each trade's risk.
-The log says so on every trade, and it is the first thing to look at when
-you review the results.
+The guide's 15-minute bars lost 43 to 44 % of the money in six months in
+both test periods, mostly to fees: stops that close are smaller than the
+trading costs. 6-hour bars lost far less (-7 % and -11 %), so they are the
+default, but the team still trailed simply holding Bitcoin. Keep it on paper.
 
 ## How it is built
 

@@ -275,9 +275,9 @@ class Settings(unittest.TestCase):
         sc = {x["name"]: x for x in out["scenarios"]}
         self.assertIn("Your settings (q)", sc)
         self.assertEqual(sc["Your settings (q)"]["inputs"], {"momentum_months": 3, "max_position_pct": 40})
-        conc = sc["Concentrated: 35% cap, 3+ names"]
+        conc = sc["Concentrated: 40% cap, 3+ names"]
         div = sc["Diversified: 10% cap, 10+ names"]
-        self.assertEqual(conc["settings"]["max_position_pct"], 35)
+        self.assertEqual(conc["settings"]["max_position_pct"], 40)
         self.assertNotEqual(conc["results"]["6 months"]["value"], div["results"]["6 months"]["value"])
         self.assertEqual(set(conc["results"]), {"12 months", "6 months", "3 months", "1 month", "2 weeks", "1 week"})
         self.assertIn("## Scenarios", text)
@@ -298,16 +298,20 @@ class Vix(unittest.TestCase):
     def test_regimes_and_rules(self):
         v = replay.vix
         self.assertEqual([v.regime(x) for x in (12, 17, 25, 40)], ["calm", "normal", "nervous", "fear"])
-        self.assertEqual(v.decide([14, 26])[0], False)
-        self.assertEqual(v.decide([14, 25])[0], True)
+        self.assertEqual(v.decide([14, 31])[0], False)  # default: out above 30
+        self.assertEqual(v.decide([14, 30])[0], True)
+        self.assertEqual(v.decide([14, 26], {"threshold": 25})[0], False)
         self.assertEqual(v.decide([30] * 49 + [29], {"mode": "trend", "days": 50})[0], True)
         self.assertEqual(v.decide([20] * 49 + [22], {"mode": "trend", "days": 50})[0], False)
         self.assertEqual(v.decide([18, 22], {"mode": "term"}, [20, 23])[0], True)   # calm shape
         self.assertEqual(v.decide([18, 24], {"mode": "term"}, [20, 23])[0], False)  # stress: backwardation
         self.assertEqual(v.decide([18, 24], {"mode": "term"})[0], True)  # no 3-month data: stay in
         st = v.status([{"d": "2026-10-15", "c": 18.0}, {"d": "2026-10-16", "c": 27.0}])
-        self.assertEqual((st["regime"], st["risk_on"], st["agent"]), ("nervous", False, "step aside to cash"))
+        self.assertEqual((st["regime"], st["risk_on"], st["agent"]), ("nervous", True, "hold the Nasdaq 100"))
         self.assertEqual(st["day_change_pct"], 50.0)
+        st = v.status([{"d": "2026-10-15", "c": 18.0}, {"d": "2026-10-16", "c": 27.0}], {"threshold": 25, "asset": "SPY"})
+        self.assertEqual((st["risk_on"], st["agent"]), (False, "step aside to cash"))
+        self.assertEqual(v.status([{"d": "2026-10-16", "c": 12.0}], {"asset": "SPY"})["agent"], "hold the S&P 500")
 
     def test_agent_steps_aside_during_the_spike(self):
         d = tempfile.mkdtemp()
@@ -381,11 +385,11 @@ class AgentVariants(unittest.TestCase):
             t1 = replay.market_close_utc(ASOF)
             for c in ("BTC", "ETH"):
                 bars, px = [], 100.0
-                for i in range(24 * 200):  # 200 days of hourly bars
-                    o, px = px, px * (1.0004 if (i // 48) % 3 else 0.9995)
-                    bars.append({"t": t1 - (24 * 200 - i) * 3600, "o": o, "h": max(o, px) * 1.002,
-                                 "l": min(o, px) * 0.998, "c": px, "v": 5})
-                with open(os.path.join(off, "candles-%s-60.json" % c), "w") as fh:
+                for i in range(420):  # 420 days of daily bars
+                    o, px = px, px * (1.01 if (i // 20) % 3 else 0.985)
+                    bars.append({"t": t1 - (420 - i) * 86400, "o": o, "h": max(o, px) * 1.01,
+                                 "l": min(o, px) * 0.99, "c": px, "v": 5})
+                with open(os.path.join(off, "candles-%s-1440.json" % c), "w") as fh:
                     json.dump(bars, fh)
             out, text = replay.replay(base, ASOF, 100, offline=off, log=lambda m: None, mc_runs=100,
                                       rolling_spec=None, windows=replay.parse_windows("6m,1m"))
@@ -393,12 +397,13 @@ class AgentVariants(unittest.TestCase):
             shutil.rmtree(d)
         kinds = {x["strategy"] for x in out["scenarios"]}
         self.assertTrue({"growth", "medium", "dividend", "stock bot", "vix", "pelosi", "crypto"} <= kinds, kinds)
-        hourly = [x for x in out["scenarios"] if x["name"] == "Crypto team: 1-hour bars"][0]
-        self.assertIsNotNone(hourly["results"]["6 months"])
+        daily = [x for x in out["scenarios"] if x["name"] == "Crypto team: 1-day bars"][0]
+        self.assertIsNotNone(daily["results"]["6 months"])
         bot = {x["name"]: x for x in out["scenarios"] if x["strategy"] == "stock bot"}
         self.assertIn("SPY", bot["Stock bot: trades + idle cash in SPY"]["results"]["6 months"]["holdings"])
+        self.assertIn("QQQ", bot["Stock bot: trades + idle cash in QQQ (default)"]["results"]["6 months"]["holdings"])
         self.assertIn("Nasdaq 100 (QQQ)", out["results"]["6 months"])
-        self.assertIn("| crypto | Crypto team: 1-hour bars |", text)
+        self.assertIn("| crypto | Crypto team: 1-day bars |", text)
 
 
 class YourHoldingsAndRolling(unittest.TestCase):
@@ -506,16 +511,18 @@ class Crypto(unittest.TestCase):
         try:
             base, off = write_world(d)
             t1 = replay.market_close_utc(ASOF)
-            n = 4 * 24 * 24  # 24 days of 15-minute bars
-            steps = ([0.0015] * 120 + [-0.002] * 12 + [0.002] * 60) * 20
+            iv = replay.team.DEFAULTS["interval_min"]
+            n = 300 * 24 * 60 // iv // 4  # 75 days of bars at the team's interval
+            steps = ([0.006] * 30 + [-0.008] * 4 + [0.008] * 15) * 40
             for c in ("BTC", "ETH"):
                 bars, px = [], 100.0
                 for i in range(n):
                     o = px
                     px *= 1 + steps[i % len(steps)]
-                    t = t1 - (n - i) * 900
+                    t = t1 - (n - i) * iv * 60
                     bars.append({"t": t, "o": o, "h": max(o, px) * 1.001, "l": min(o, px) * 0.999, "c": px, "v": 5})
-                with open(os.path.join(off, "candles-%s.json" % c), "w") as fh:
+                name = "candles-%s.json" % c if iv == 15 else "candles-%s-%d.json" % (c, iv)
+                with open(os.path.join(off, name), "w") as fh:
                     json.dump(bars, fh)
             out, text = replay.replay(base, ASOF, 100, skip=("pelosi",), offline=off, log=lambda m: None, mc_runs=200, rolling_spec=None)
         finally:

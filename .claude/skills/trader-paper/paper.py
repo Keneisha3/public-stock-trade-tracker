@@ -13,9 +13,9 @@ days, in a bear regime they fade. So:
   stop    entry - 2 ATR (a gap below the stop fills at the open)
   exit    after 3 trading days at the close, or at the stop
   costs   5 bps a side (commission + slippage), charged on every fill
-  idle    with "idle": "SPY", cash no trade is using sits in SPY (bought and
-          sold at the open as trades need it), so the bot is the index plus
-          its trades instead of mostly cash
+  idle    cash no trade is using sits in QQQ (the Nasdaq 100; bought and sold
+          at the open as trades need it), so the bot is the index plus its
+          trades instead of mostly cash. "idle": null turns it off
 
     python3 paper.py backtest                   # the rule over the last 5 years vs buy-and-hold
     python3 paper.py run                        # live paper: catch up to the latest close, trade, save
@@ -45,7 +45,7 @@ UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFL
             "XOM", "CAT", "GE", "UBER"]
 PARAMS = {"atr_period": 14, "breach_atr": 1.5, "regime_ma": 50, "hold_days": 3, "stop_atr": 2.0,
           "risk_pct": 1.0, "max_position_pct": 15.0, "max_positions": 8, "cost_bps": 5.0,
-          "start_cash": 10000.0}
+          "start_cash": 10000.0, "idle": "QQQ"}
 WARMUP = 60
 
 

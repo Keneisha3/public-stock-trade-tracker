@@ -11,12 +11,16 @@ like the crypto team's roles, and only ever looks at closes up to today:
           normal "contango" shape. When short-term fear tops longer-term fear
           ("backwardation") the market is in real stress.
 
-Risk-on means hold the S&P 500; risk-off means step aside to cash. The
-decision is made at the close and acted on at the next open.
+Risk-on means hold the fund (default the Nasdaq 100, QQQ; "asset": "SPY" for the
+S&P 500); risk-off means step aside to US-dollar cash. The default (QQQ unless
+the VIX closes over 30) won both test periods among the rules tried, but it
+still trailed simply holding QQQ: stepping out on fear mostly protects, it
+rarely adds. The decision is made at the close and acted on at the next open.
 """
 
 REGIMES = ((15.0, "calm"), (20.0, "normal"), (30.0, "nervous"), (float("inf"), "fear"))
-DEFAULT_RULE = {"mode": "level", "threshold": 25.0}
+DEFAULT_RULE = {"mode": "level", "threshold": 30.0, "asset": "QQQ"}
+NAMES = {"QQQ": "the Nasdaq 100", "SPY": "the S&P 500"}
 
 
 def regime(level):
@@ -64,5 +68,6 @@ def status(bars, rule=None):
     prev = closes[-2] if len(closes) > 1 else None
     return {"level": round(closes[-1], 2), "day_change_pct": round(100 * (closes[-1] / prev - 1), 1) if prev else None,
             "regime": regime(closes[-1]), "avg_50d": round(avg, 2), "risk_on": on,
-            "agent": "hold the S&P 500" if on else "step aside to cash", "reason": why,
+            "agent": ("hold " + NAMES.get(dict(DEFAULT_RULE, **(rule or {}))["asset"], "the fund")) if on
+            else "step aside to cash", "reason": why,
             "date": bars[-1].get("d")}
