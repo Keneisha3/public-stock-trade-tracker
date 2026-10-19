@@ -93,6 +93,49 @@ class Metrics(unittest.TestCase):
         self.assertIn("No data found", str(e.exception))
 
 
+class Retries(unittest.TestCase):
+    def test_throttled_then_ok_and_query2_fallback(self):
+        import urllib.error
+        seen = []
+
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake(req, timeout=None):
+            seen.append(req.full_url)
+            if len(seen) == 1:
+                raise urllib.error.HTTPError(req.full_url, 429, "Too Many", {}, None)
+            return Resp(b'{"ok": 1}')
+        old_open, old_waits = mk.urllib.request.urlopen, mk.RETRY_WAITS
+        mk.urllib.request.urlopen, mk.RETRY_WAITS = fake, (0, 0)
+        try:
+            self.assertEqual(mk.fetch("https://query1.finance.yahoo.com/v8/finance/chart/SPY"), '{"ok": 1}')
+        finally:
+            mk.urllib.request.urlopen, mk.RETRY_WAITS = old_open, old_waits
+        self.assertIn("//query1.", seen[0])
+        self.assertIn("//query2.", seen[1])
+
+    def test_unknown_symbol_is_not_retried(self):
+        import urllib.error
+        calls = []
+
+        def fake(req, timeout=None):
+            calls.append(1)
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+        old_open = mk.urllib.request.urlopen
+        mk.urllib.request.urlopen = fake
+        try:
+            with self.assertRaises(mk.MarketError):
+                mk.fetch("https://query1.finance.yahoo.com/v8/finance/chart/NOPE")
+        finally:
+            mk.urllib.request.urlopen = old_open
+        self.assertEqual(len(calls), 1)
+
+
 class CsvImport(unittest.TestCase):
     def test_wealthsimple_holdings_report(self):
         doc = acc.parse_holdings_csv(WS_CSV, "wealthsimple", filter_text="HQ123")

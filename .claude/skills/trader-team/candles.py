@@ -99,7 +99,14 @@ def fetch_coinbase(coin, start, end, interval_min=15, http=http_json, pause=0.15
     bars, t = {}, int(start)
     while t < end:
         stop = min(end, t + step)
-        rows = http(COINBASE % (coin, interval_min * 60, _iso(t), _iso(stop)))
+        for attempt in range(3):
+            try:
+                rows = http(COINBASE % (coin, interval_min * 60, _iso(t), _iso(stop)))
+                break
+            except DataError as e:
+                if attempt == 2 or not any(code in str(e) for code in ("429", "HTTP 5")):
+                    raise
+                time.sleep(2 + 3 * attempt)  # Coinbase throttles bursts: back off and retry
         if isinstance(rows, dict):
             raise DataError("Coinbase: %s" % rows.get("message", "unexpected answer for %s" % coin))
         for r in rows:  # [time, low, high, open, close, volume]
