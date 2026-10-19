@@ -56,7 +56,7 @@ jobs:
               case "$part" in crypto|pelosi) args+=("$part") ;; *) echo "skip: crypto or pelosi only"; exit 1 ;; esac
             done
           fi
-          python trade.py replay "${args[@]}"
+          python trade.py replay --strict "${args[@]}"
       - name: Summary page
         if: always()
         run: |
