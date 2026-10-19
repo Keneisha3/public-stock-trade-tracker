@@ -11,12 +11,13 @@ strategy worth keeping beats the index in most periods, including the bad ones.
 import json
 import sys
 
-KEYS = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "VIX agent"]
+KEYS = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
+        "VIX agent"]
 SELECT = 3  # the first three periods choose the settings; the rest confirm them
 BENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)"]
 NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "Dividend (Wealthsimple)",
          "stock bot": "Stock bot", "VIX agent": "VIX agent", "momentum": "Momentum (top 20 S&P 500)",
-         "dual momentum": "Dual momentum (funds)"}
+         "dual momentum": "Dual momentum (funds)", "insider buys": "Insider buying", "congress buys": "Congress buying"}
 
 
 def pct(x):
@@ -54,7 +55,8 @@ def table(reports):
         for r in reports:
             t = ((r.get("rolling") or {}).get("table") or {}).get(k)
             cells.append("%s of %s" % (t["beat_spy"], t["windows"]) if t else "n/a")
-        L.append("| %s | %s |" % (NAMES[k], " | ".join(cells)))
+        if any(c != "n/a" for c in cells):
+            L.append("| %s | %s |" % (NAMES[k], " | ".join(cells)))
     L += scenarios(reports, win)
     L += ["", "## Coverage and self-checks", ""]
     for r in reports:

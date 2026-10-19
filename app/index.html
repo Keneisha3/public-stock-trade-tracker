@@ -372,7 +372,8 @@ function paperView(P) {
 
 const RL = {"VIX agent": "VIX agent (Nasdaq 100 or cash)", "growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer", "dividend": "Dividend reviewer (Wealthsimple)",
   "stock bot": "Stock bot (ATR)", "crypto team": "Crypto bot team", "Pelosi copycat": "Pelosi copycat",
-  "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)"};
+  "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)",
+  "insider buys": "Insider buying (2+ insiders)", "congress buys": "Congress buying (2+ members)"};
 const RBENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"];
 
 const lbl = k => (S.replay && S.replay.labels && S.replay.labels[k]) || RL[k] || k;

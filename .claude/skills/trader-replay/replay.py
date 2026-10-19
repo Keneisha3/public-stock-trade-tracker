@@ -47,6 +47,7 @@ import accounts as acc  # noqa: E402
 import market as mk  # noqa: E402
 import paper  # noqa: E402
 import universe as univ  # noqa: E402
+import signals as sigs  # noqa: E402
 import ptr  # noqa: E402
 import team  # noqa: E402
 import vix  # noqa: E402
@@ -474,7 +475,7 @@ def run_targets(data, start, asof, cash, choose, every=28, split=None):
             if each - now > max(1.0, 0.2 * each) or (not held and each > 1.0):
                 pending.append({"side": "buy", "ticker": t, "cad": each - now, "decided": d})
     out = pf.result(asof, cash)
-    out["picks"] = picks_log[-6:]
+    out["picks"] = picks_log[-40:]
     return out
 
 
@@ -525,6 +526,62 @@ def run_dual(data, start, asof, cash, **opts):
         top = [f for r, f in sorted(rows, reverse=True)[:o["k"]] if r > hurdle]
         return top + [o["safe"]] * (o["k"] - len(top)) if o["safe"] in data.charts else top
     return run_targets(data, start, asof, cash, choose, 28)
+
+
+SIGNAL_DEFAULT = {"source": "insiders", "n": 20, "days": 60, "min_count": 2, "officers": False,
+                  "trend": False, "fill": "SPY", "every": 28}
+
+
+def run_signals(data, uni, sig, start, asof, cash, **opts):
+    """Follow the people who know: S&P 500 members (that day) that insiders (Form 4 open-market
+    purchases) or members of Congress were buying, as known from filings up to that day.
+    Ranked by how many different insiders / members bought, then by dollars. Equal weight,
+    at most n names; empty slots sit in `fill` (SPY). Rebalanced every `every` days.
+    source "both": a name needs either signal; trend: also above its 200-day average."""
+    o = dict(SIGNAL_DEFAULT, **opts)
+
+    def choose(d):
+        members = uni.members_on(d)
+        rows = []
+        if o["source"] in ("insiders", "both"):
+            for t, x in sig.insider_buys(d, o["days"]).items():
+                if x["insiders"] >= o["min_count"] and (not o["officers"] or x["officers"] >= 1):
+                    rows.append(((x["insiders"], x["value"]), t))
+        if o["source"] in ("congress", "both"):
+            for t, x in sig.congress_buys(d, max(o["days"], 90)).items():
+                if x["members"] >= o["min_count"]:
+                    rows.append(((x["members"], x["low"]), t))
+        picks = []
+        for _, t in sorted(rows, reverse=True):
+            q = data.quick(t, d, 21) if t in members else None
+            if q and (q["above200"] or not o["trend"]) and t not in picks:
+                picks.append(t)
+        picks = picks[:o["n"]]
+        return picks + [o["fill"]] * (o["n"] - len(picks)) if o["fill"] in data.charts else picks
+    return run_targets(data, start, asof, cash, choose, o["every"])
+
+
+def run_momentum_signals(data, uni, sig, start, asof, cash, n=20, days=180, **opts):
+    """Momentum, but only among S&P 500 members that insiders or Congress bought in the last
+    `days` (filing dates): price strength confirmed by people with an information edge."""
+    o = dict(MOMENTUM_DEFAULT, n=n, **opts)
+    held = []
+
+    def choose(d):
+        backed = set(sig.insider_buys(d, days)) | set(sig.congress_buys(d, days))
+        rows = []
+        for sym in uni.members_on(d):
+            if sym not in backed:
+                continue
+            q = data.quick(sym, d, 21 * o["months"], 21 * o["skip"])
+            if q and (q["above200"] or not o["trend"]):
+                rows.append((q["ret"], sym))
+        rank = [sym for _, sym in sorted(rows, reverse=True)]
+        keep = [t for t in held if t in rank[:o["n"] * o["buffer"]]]
+        out = keep + [t for t in rank if t not in keep][:max(0, o["n"] - len(keep))]
+        held[:] = out
+        return out + ["SPY"] * (o["n"] - len(out)) if "SPY" in data.charts else out
+    return run_targets(data, start, asof, cash, choose, o["every"])
 
 
 def run_hold(data, weights, start, asof, cash):
@@ -1048,6 +1105,17 @@ MOMENTUM_VARIANTS = [
     ("Momentum: bonds while the S&P 500 is under its 200-day", {"market": True}),
     ("Momentum: no trend filter", {"trend": False}),
 ]
+SIGNAL_VARIANTS = [
+    ("insider buys", "Insiders: 2+ buying in 60 days (default)", {}),
+    ("insider buys", "Insiders: 3+ buying in 60 days", {"min_count": 3}),
+    ("insider buys", "Insiders: 1+ officer buying, 90 days", {"min_count": 1, "officers": True, "days": 90}),
+    ("insider buys", "Insiders: 2+, above the 200-day average", {"trend": True}),
+    ("insider buys", "Insiders: 2+, top 10", {"n": 10}),
+    ("congress buys", "Congress: 2+ members buying in 90 days (default)", {"source": "congress", "days": 90}),
+    ("congress buys", "Congress: any member buying in 90 days", {"source": "congress", "days": 90, "min_count": 1}),
+    ("congress buys", "Congress: 2+ members, 180 days", {"source": "congress", "days": 180}),
+    ("congress buys", "Insiders or Congress, 2+ buyers", {"source": "both", "days": 90}),
+]
 DUAL_VARIANTS = [
     ("Dual momentum: best 1 fund (default)", {}),
     ("Dual momentum: best 3 funds", {"k": 3}),
@@ -1089,6 +1157,16 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
             add("momentum", name, over, lambda st, o=over: run_momentum(data, ctx["uni"], st, asof, cash, **o))
         for name, over in DUAL_VARIANTS:
             add("dual momentum", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
+    sig = ctx.get("signals")
+    if ctx.get("uni") is not None and sig:
+        for fam, name, over in SIGNAL_VARIANTS:
+            if over.get("source", "insiders") in ("insiders", "both") and not sig.insiders:
+                continue
+            if over.get("source") in ("congress", "both") and not sig.congress:
+                continue
+            add(fam, name, over, lambda st, o=over: run_signals(data, ctx["uni"], sig, st, asof, cash, **o))
+        add("momentum", "Momentum: only names insiders or Congress bought (180 days)", {"backed": "180 days"},
+            lambda st: run_momentum_signals(data, ctx["uni"], sig, st, asof, cash))
     if VIX_SYM in data.charts:
         for name, rule in VIX_RULES:
             add("vix", name, rule, lambda st, r=rule: run_vix_agent(data, st, asof, cash, r))
@@ -1254,7 +1332,8 @@ def mine_rows(data, mine, watch, start, end, cash, uni=None):
 
 # ---------------------------------------------------------------- rolling windows: does it KEEP working?
 
-def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec=ROLLING, include_pelosi=True, uni=None):
+def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec=ROLLING, include_pelosi=True, uni=None,
+            sig=None):
     """Many equal-length windows (default 3 months, a new one each month for a year). The
     question is not 'did it win once' but 'how often did it beat the S&P 500'."""
     starts = []
@@ -1272,6 +1351,10 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
         if uni is not None:
             row["momentum"] = run_momentum(data, uni, start, end, cash)
             row["dual momentum"] = run_dual(data, start, end, cash)
+            if sig and sig.insiders:
+                row["insider buys"] = run_signals(data, uni, sig, start, end, cash)
+            if sig and sig.congress:
+                row["congress buys"] = run_signals(data, uni, sig, start, end, cash, source="congress", days=90)
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
@@ -1368,13 +1451,15 @@ HISTORY_YEARS = {"2y": 2, "5y": 5, "10y": 10}
 
 
 def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_type="TFSA", log=print, mc_runs=5000,
-           windows=None, holdings=None, rolling_spec=ROLLING, uni=None, history="5y", save_dir=None):
+           windows=None, holdings=None, rolling_spec=ROLLING, uni=None, history="5y", save_dir=None, signals=None):
     """uni: "auto" (the point-in-time S&P 500 + index funds + the Canadian list), a Universe, or
     None (today's hand-picked watchlists). history: how much price data to load ("5y", "10y").
     save_dir: also write every chart there, for later runs with offline=save_dir."""
     windows = windows or WINDOWS
     if uni == "auto":
         uni = univ.load()
+    sig = sigs.Signals.load(signals) if isinstance(signals, str) else signals
+    sig = sig if sig else None
     watch = watchlists(base)
     mine = my_holdings(base, holdings)
     labels = {}
@@ -1427,6 +1512,10 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
             row["coverage"] = coverage(data, uni, start)
             row["momentum"] = run_momentum(data, uni, start, asof, cash)
             row["dual momentum"] = run_dual(data, start, asof, cash)
+            if sig and sig.insiders:
+                row["insider buys"] = run_signals(data, uni, sig, start, asof, cash)
+            if sig and sig.congress:
+                row["congress buys"] = run_signals(data, uni, sig, start, asof, cash, source="congress", days=90)
         if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
@@ -1463,13 +1552,14 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     starts = [(label, results[label]["start"]) for label, _ in windows]
     scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base), uni)
     ctx = {"universe": universe, "filings": filings, "skip": skip, "offline": offline, "base": base, "uni": uni,
+           "signals": sig,
            "errors": errors, "candles": candles}
     scen += agent_scenarios(data, ctx, starts, asof, cash, windows[0][0])
     roll = None
     if rolling_spec:
         log("rolling %d-day windows..." % rolling_spec["horizon_days"])
         roll = rolling(data, watch, universe, filings, mine, asof, cash, account_type, rolling_spec,
-                       include_pelosi="pelosi" not in skip, uni=uni)
+                       include_pelosi="pelosi" not in skip, uni=uni, sig=sig)
     out = {"asof": asof, "cash": cash, "account_type": account_type, "costs": COSTS, "results": results,
            "monte_carlo": mc, "scenarios": scen, "rolling": roll, "labels": labels,
            "windows": [w for w, _ in windows], "has_holdings": bool(mine),
@@ -1496,13 +1586,15 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     return out, text
 
 
-ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "crypto team", "VIX agent",
+ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
+         "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
 LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer",
           "dividend": "Dividend reviewer (Wealthsimple)", "stock bot": "Stock bot (ATR, paper)",
           "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (Nasdaq 100 or cash)",
-          "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)"}
+          "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)",
+          "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 
@@ -1685,6 +1777,7 @@ def main(argv=None):
                          "watchlists: today's hand-picked lists (hindsight)")
     ap.add_argument("--history", choices=sorted(HISTORY_YEARS), default="5y", help="price history to load")
     ap.add_argument("--save-data", metavar="DIR", help="also save every chart to DIR (reuse with --offline DIR)")
+    ap.add_argument("--signals", metavar="DIR", help="congress.json.gz / insiders.json.gz from signals.py")
     ap.add_argument("--strict", action="store_true", help="exit 3 if any self-check fails")
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--json", action="store_true")
@@ -1693,7 +1786,8 @@ def main(argv=None):
         out, text = replay(a.dir, a.asof, a.cash, a.skip, a.offline, a.account_type,
                            log=lambda m: print(m, file=sys.stderr), windows=parse_windows(a.windows),
                            holdings=a.holdings, rolling_spec=None if a.no_rolling else ROLLING,
-                           uni="auto" if a.universe == "auto" else None, history=a.history, save_dir=a.save_data)
+                           uni="auto" if a.universe == "auto" else None, history=a.history, save_dir=a.save_data,
+                           signals=a.signals)
     except (ReplayError, mk.MarketError) as e:
         print("replay: %s" % e, file=sys.stderr)
         return 2

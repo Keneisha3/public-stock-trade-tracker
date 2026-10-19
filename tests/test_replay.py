@@ -533,6 +533,34 @@ class PointInTimeUniverse(unittest.TestCase):
         self.assertIn("XLK", r["holdings"])
         self.assertNotIn("XLE", r["holdings"])
 
+    def test_signal_baskets_wait_for_the_filing_and_membership(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+        finally:
+            shutil.rmtree(d)
+        uni = fake_universe(data.days)
+        filed, bbb_filed = data.days[350], data.days[440]
+        sig = replay.sigs.Signals(
+            insiders={"rows": [[filed, "AAA", "1", "officer", 10, 100, 1000], [filed, "AAA", "2", "director", 5, 100, 500],
+                               [bbb_filed, "BBB", "3", "officer", 10, 60, 600], [bbb_filed, "BBB", "4", "other", 10, 60, 600],
+                               [filed, "ZZZ", "5", "officer", 1, 1, 1], [filed, "ZZZ", "6", "officer", 1, 1, 1]]},
+            congress={"rows": [[filed, "Ann A", "MMM", "buy", 1001, 15000, filed, "self"],
+                               [filed, "Ben B", "MMM", "buy", 1001, 15000, filed, "self"]]})
+        r = replay.run_signals(data, uni, sig, data.days[300], ASOF, 100, n=3, every=7)
+        for day, picks in r["picks"]:
+            names = set(picks) - {"SPY"}
+            self.assertTrue(names <= {"AAA", "BBB"}, picks)       # ZZZ is not an index member
+            if day < filed:
+                self.assertEqual(names, set())                    # nothing public yet: all in SPY
+            if "BBB" in names:
+                self.assertGreaterEqual(day, data.days[450])       # filed before it joined: only once a member
+        c = replay.run_signals(data, uni, sig, data.days[300], data.days[400], 100, source="congress", n=2, every=7)
+        self.assertTrue(any("MMM" in p for _, p in c["picks"]))
+        m = replay.run_momentum_signals(data, uni, sig, data.days[300], ASOF, 100, n=2)
+        self.assertTrue(all(set(p) - {"SPY"} <= {"AAA", "BBB", "MMM"} for _, p in m["picks"]))
+
     def test_walk_forward_table(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("walkforward", os.path.join(FIX, "..", "..", "scripts", "walkforward.py"))
