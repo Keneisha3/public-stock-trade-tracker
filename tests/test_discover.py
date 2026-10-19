@@ -85,11 +85,14 @@ class SnapshotAndFunnel(unittest.TestCase):
             self.assertEqual(json.load(fh)["date"], "2026-10-16")
         snap = discover.load_snapshot(base)
         pool = discover.candidates(snap)
+        self.assertEqual(pool, {"AAA": ["trending", "news"]})  # BBB is not a listed stock: dropped
+        snap["sources"]["listed_us"]["symbols"] += ["BBB"]
+        pool = discover.candidates(snap)
         self.assertEqual(pool, {"AAA": ["trending", "news"], "BBB": ["reddit"]})
         self.assertIn("AAPL", discover.candidates(snap, deep=True))
         off = os.path.join(self.dir, "off")
-        _synth.write(off, "AAA", _synth.chart("AAA", p0=40, growth=0.6, n=260))
-        _synth.write(off, "BBB", _synth.chart("BBB", p0=40, growth=-0.5, n=260))
+        _synth.write(off, "AAA", _synth.chart("AAA", p0=40, growth=0.6, n=300))
+        _synth.write(off, "BBB", _synth.chart("BBB", p0=40, growth=-0.5, n=300))
         out = discover.funnel(snap, offline=off, log=lambda m: None)
         self.assertEqual([r["symbol"] for r in out["ideas"]], ["AAA"])  # BBB is falling: under its 200-day average
         self.assertEqual(out["ideas"][0]["sources"], ["trending", "news"])

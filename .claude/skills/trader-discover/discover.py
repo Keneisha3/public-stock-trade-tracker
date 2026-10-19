@@ -245,6 +245,8 @@ def gather(only=None, sec_ua=None, http=None, log=print):
             except DiscoverError as e:
                 hold[fund] = []
                 log("  %s holdings: %s" % (fund, e))
+        if not any(hold.values()):
+            raise DiscoverError("every iShares holdings file failed")
         return {"symbols": sorted({t for v in hold.values() for t in v}), "detail": {k: len(v) for k, v in hold.items()}}
 
     def trending():
@@ -324,11 +326,20 @@ def load_snapshot(base, day=None):
 # ---------------------------------------------------------------- funnel
 
 def candidates(snap, deep=False):
-    """{symbol: [sources]}: the idea lists (and, deep, the whole market)."""
+    """{symbol: [sources]}: the idea lists (and, deep, the whole market). When the snapshot has
+    the exchange listings, idea-list symbols must be real listed stocks or funds there (pages
+    and posts contain look-alike codes)."""
+    srcs = (snap or {}).get("sources", {})
+    listed = set()
+    for name in ("listed_us", "listed_tsx"):
+        listed |= set((srcs.get(name) or {}).get("symbols", []))
+    funds = set((srcs.get("trending") or {}).get("symbols", [])) | set((srcs.get("screens") or {}).get("symbols", []))
     out = {}
-    for name, src in (snap or {}).get("sources", {}).items():
+    for name, src in srcs.items():
         if name in IDEAS or (deep and name in MARKET):
             for s in dict.fromkeys(src.get("symbols", [])):
+                if name in IDEAS and listed and s not in listed and s not in funds:
+                    continue
                 out.setdefault(s, []).append(name)
     return out
 
@@ -352,7 +363,7 @@ def funnel(snap, deep=False, offline=None, top=30, log=print, pause=0.15):
     rows, errors = [], 0
     for i, (sym, srcs) in enumerate(sorted(pool.items())):
         try:
-            ch = mk.get_chart(sym, offline=offline, range_="1y")
+            ch = mk.get_chart(sym, offline=offline, range_="2y")  # 12-month momentum needs a bit over a year
         except mk.MarketError:
             errors += 1
             continue
