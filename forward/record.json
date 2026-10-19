@@ -1,0 +1,49 @@
+{
+ "start": "2026-10-19",
+ "plan": {
+  "start": "2026-10-19",
+  "cash": 100.0,
+  "note": "Frozen when the live record started. Change the settings only by starting a new record with a new start date.",
+  "strategies": {
+   "70% Nasdaq 100 + 30% dual momentum (chosen)": {
+    "kind": "dual",
+    "opts": {
+     "core": "QQQ",
+     "core_weight": 0.7
+    }
+   },
+   "Dual momentum (single strongest fund)": {
+    "kind": "dual",
+    "opts": {}
+   },
+   "Nasdaq 100 (QQQ)": {
+    "kind": "hold",
+    "weights": {
+     "QQQ": 1.0
+    }
+   },
+   "S&P 500 (SPY)": {
+    "kind": "hold",
+    "weights": {
+     "SPY": 1.0
+    }
+   }
+  },
+  "chosen_by": "walk-forward pit-v6-safety: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods (+14.9 pts, worst drop -22.4%); held-out last 12 months: +9.2 pts"
+ },
+ "days": {
+  "2026-10-19": {
+   "70% Nasdaq 100 + 30% dual momentum (chosen)": 100.0,
+   "Dual momentum (single strongest fund)": 100.0,
+   "Nasdaq 100 (QQQ)": 100.0,
+   "S&P 500 (SPY)": 100.0
+  }
+ },
+ "holdings": {
+  "70% Nasdaq 100 + 30% dual momentum (chosen)": [],
+  "Dual momentum (single strongest fund)": [],
+  "Nasdaq 100 (QQQ)": [],
+  "S&P 500 (SPY)": []
+ },
+ "updated": "2026-10-19"
+}
