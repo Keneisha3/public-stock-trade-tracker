@@ -136,6 +136,24 @@ class Retries(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class NoMarketData(unittest.TestCase):
+    def test_stop_and_cap_still_fire_without_price_history(self):
+        a = {"id": "w", "name": "W", "strategy": "dividend", "type": "TFSA", "fractional": True,
+             "rules": dict(acc.RULES["dividend"])}
+        h = {"cash": {}, "positions": [
+            {"ticker": "T.TO", "shares": 32, "avg_cost": 18.95, "last_price": 11.69, "currency": "CAD"},
+            {"ticker": "APTX", "shares": 31, "avg_cost": 32.3, "last_price": 31.72, "currency": "CAD"},
+            {"ticker": "RY.TO", "shares": 3, "avg_cost": 235.0, "last_price": 277.4, "currency": "CAD"}]}
+        r = acc.review_account(a, h, {"symbols": {}, "fx": {}})
+        codes = {p["ticker"]: {f["code"] for f in p["flags"]} for p in r["positions"]}
+        self.assertIn("stop", codes["T.TO"])  # down 38% vs a 30% stop, with no market history at all
+        self.assertIn("no_data", codes["T.TO"])
+        trims = [o for o in r["proposals"] if o["side"] == "sell"]
+        for o in trims:
+            gain = [p for p in r["positions"] if p["ticker"] == o["ticker"]][0]["gain_pct"]
+            self.assertIn("lock in part of the gain" if gain > 0 else "cut the concentration", o["reason"])
+
+
 class CsvImport(unittest.TestCase):
     def test_wealthsimple_holdings_report(self):
         doc = acc.parse_holdings_csv(WS_CSV, "wealthsimple", filter_text="HQ123")
