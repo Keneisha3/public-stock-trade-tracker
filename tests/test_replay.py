@@ -17,7 +17,9 @@ def write_world(folder, end=_synth.END, crash_after=None):
     """Synthetic market + the real Pelosi filing of 2026-08-21 (BE and INTC buys)."""
     off = os.path.join(folder, "off")
     spec = {
-        "SPY": dict(p0=500, growth=0.25, divs=_synth.quarterly("2024-12-20", "2026-09-19", 1.7)),
+        "SPY": dict(p0=500, growth=0.25, divs=_synth.quarterly("2024-12-20", "2026-09-19", 1.7),
+                    gaps={461: -7, 481: 5}),  # a sell-off in late August, half recovered in September
+        "^VIX": dict(p0=15, growth=0.0, wiggle=0.03, gaps={460: 140, 480: -58}),  # fear spikes the day before
         "XIU.TO": dict(p0=35, growth=0.2, currency="CAD"),
         "AAA": dict(p0=100, growth=0.9),        # growth names
         "BBB": dict(p0=60, growth=0.4),
@@ -28,7 +30,8 @@ def write_world(folder, end=_synth.END, crash_after=None):
         "INTC": dict(p0=30, growth=0.2),
     }
     for sym, kw in spec.items():
-        doc = _synth.chart(sym, n=520, wiggle=0.01, end=end, **kw)
+        kw.setdefault("wiggle", 0.01)
+        doc = _synth.chart(sym, n=520, end=end, **kw)
         if crash_after:
             r = doc["chart"]["result"][0]
             q = r["indicators"]["quote"][0]
@@ -49,6 +52,11 @@ def write_world(folder, end=_synth.END, crash_after=None):
     with open(os.path.join(base, "paper", "config.json"), "w") as fh:
         json.dump({"universe": ["AAA", "BBB", "MMM", "INTC"]}, fh)
     return base, off
+
+
+def load_data(off):
+    charts = {f[6:-5]: replay.mk.get_chart(f[6:-5], offline=off) for f in os.listdir(off) if f.startswith("chart-")}
+    return replay.Data(charts, {})
 
 
 class Replay(unittest.TestCase):
@@ -269,6 +277,53 @@ class Settings(unittest.TestCase):
         self.assertEqual(sorted(curves), ["S&P 500 (SPY)", "growth"])
         mc = replay.monte_carlo(curves, runs=100, horizon=40)
         self.assertEqual(mc["sample_days"], 119)  # the full 6 months, not the short curve's 29 days
+
+
+class Vix(unittest.TestCase):
+    def test_regimes_and_rules(self):
+        v = replay.vix
+        self.assertEqual([v.regime(x) for x in (12, 17, 25, 40)], ["calm", "normal", "nervous", "fear"])
+        self.assertEqual(v.decide([14, 26])[0], False)
+        self.assertEqual(v.decide([14, 25])[0], True)
+        self.assertEqual(v.decide([30] * 49 + [29], {"mode": "trend", "days": 50})[0], True)
+        self.assertEqual(v.decide([20] * 49 + [22], {"mode": "trend", "days": 50})[0], False)
+        st = v.status([{"d": "2026-10-15", "c": 18.0}, {"d": "2026-10-16", "c": 27.0}])
+        self.assertEqual((st["regime"], st["risk_on"], st["agent"]), ("nervous", False, "step aside to cash"))
+        self.assertEqual(st["day_change_pct"], 50.0)
+
+    def test_agent_steps_aside_during_the_spike(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200)
+            days = load_data(off).days
+        finally:
+            shutil.rmtree(d)
+        six = out["results"]["6 months"]
+        agent, spy = six["VIX agent"], six["S&P 500 (SPY)"]
+        self.assertGreaterEqual(agent["switches"], 2)          # out at the spike, back in after it
+        self.assertLess(agent["risk_on_days_pct"], 100)
+        self.assertGreater(agent["value"], spy["value"])       # it dodged the sell-off
+        sells = [f for f in agent["fills"] if f["side"] == "sell"]
+        self.assertEqual(sells[0]["day"], days[461])  # VIX spiked at the close of day 460: out at the next open
+        self.assertIn("vix_end", six["factors"])
+        self.assertIn("calm", six["S&P 500 (SPY)"]["vix_regimes"])
+        self.assertIn("## By VIX regime", text)
+        self.assertTrue(any(x["strategy"] == "vix" for x in out["scenarios"]))
+
+    def test_risk_off_cancels_a_waiting_buy(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            data = load_data(off)
+            days = data.days
+            spike = days[460]
+            # start the day of the spike: decided risk-off at that close, so never buys
+            r = replay.run_vix_agent(data, spike, days[465], 100)
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual(r["trades"], 0)
+        self.assertEqual(r["value"], 100)
 
 
 class NoLookahead(unittest.TestCase):

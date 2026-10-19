@@ -153,6 +153,12 @@ On top of the replay:
   returns give the bad, median and good case for the next 6 months, the
   chance of a profit, and the chance of beating the S&P 500.
 - **Risk stats.** Volatility, Sharpe ratio, max drawdown and share of up days.
+- **VIX agent and VIX analysis.** A rule-based agent holds the S&P 500 while
+  the VIX (the market's fear gauge) is calm and steps aside to cash when it
+  spikes (tested at 20, 25, 30 and "above its 50-day average"). Every strategy
+  is also broken down by VIX regime (calm, normal, nervous, fear) and by how
+  it moves with the VIX. The daily briefing and the dashboard show today's
+  VIX and what the agent would do.
 
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the

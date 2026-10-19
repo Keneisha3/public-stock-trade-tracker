@@ -43,6 +43,7 @@ import market as mk  # noqa: E402
 import paper  # noqa: E402
 import ptr  # noqa: E402
 import team  # noqa: E402
+import vix  # noqa: E402
 
 WINDOWS = [("6 months", 182), ("1 month", 30), ("2 weeks", 14), ("1 week", 7)]
 COSTS = {"fx_fee_pct": 1.5, "slippage_pct": 0.05, "us_withholding_pct": 15.0}
@@ -270,6 +271,74 @@ def run_hold(data, weights, start, asof, cash):
         orders = pf.fill(orders, d)
         pf.mark(d)
     return pf.result(asof, cash)
+
+
+VIX_SYM = "^VIX"
+VIX_RULES = [
+    ("VIX agent: S&P 500 unless VIX > 25", {"mode": "level", "threshold": 25}),
+    ("VIX agent: S&P 500 unless VIX > 20", {"mode": "level", "threshold": 20}),
+    ("VIX agent: S&P 500 unless VIX > 30", {"mode": "level", "threshold": 30}),
+    ("VIX agent: S&P 500 while VIX is under its 50-day average", {"mode": "trend", "days": 50}),
+]
+
+
+def run_vix_agent(data, start, asof, cash, rule=None):
+    """Hold SPY while the VIX agent says risk-on, cash while it says risk-off.
+    Decided at each close from VIX closes up to that day; acted on at the next open."""
+    pf, pending, invested = Portfolio(data, cash), [], None
+    days = [d for d in data.days if start <= d <= asof]
+    on_days = switches = 0
+    vix_dates = data.dates[VIX_SYM]
+    for d in days:
+        pf.pay_dividends(d)
+        pending = pf.fill(pending, d)
+        pf.mark(d)
+        if d == asof:
+            break
+        closes = [b["c"] for b in data.charts[VIX_SYM]["bars"][:bisect.bisect_right(vix_dates, d)]]
+        on, _ = vix.decide(closes, rule)
+        on_days += 1 if on else 0
+        if on and invested is not True:
+            pending = [{"side": "buy", "ticker": "SPY", "cad": pf.value(d) * 0.995, "decided": d}]
+        elif not on and invested is not False:  # risk-off also cancels a buy still waiting for the open
+            pending = [{"side": "sell", "ticker": "SPY", "shares": pf.pos["SPY"]["shares"], "decided": d}] \
+                if pf.pos.get("SPY") else []
+        if invested is not None and on != invested:
+            switches += 1
+        invested = on
+    out = pf.result(asof, cash)
+    out["switches"] = switches
+    out["risk_on_days_pct"] = round(100.0 * on_days / max(1, len(days) - 1), 1)
+    return out
+
+
+def vix_regimes(curve, data):
+    """Average daily return by the VIX regime known at the PREVIOUS close, and the
+    correlation of daily returns with daily VIX changes (descriptive only)."""
+    import statistics
+    buckets, pairs = {}, []
+    for (d0, v0), (d1, v1) in zip(curve, curve[1:]):
+        if not v0:
+            continue
+        r = v1 / v0 - 1
+        x0, x1 = data.close(VIX_SYM, d0), data.close(VIX_SYM, d1)
+        reg = vix.regime(x0)
+        if reg:
+            buckets.setdefault(reg, []).append(r)
+        if x0 and x1:
+            pairs.append((r, x1 / x0 - 1))
+    out = {name: {"days": len(buckets.get(name, [])),
+                  "avg_daily_pct": round(100 * statistics.mean(buckets[name]), 3) if buckets.get(name) else None}
+           for _, name in vix.REGIMES}
+    corr = None
+    if len(pairs) > 10:
+        a, b = [p[0] for p in pairs], [p[1] for p in pairs]
+        sa, sb = statistics.pstdev(a), statistics.pstdev(b)
+        if sa and sb:
+            ma, mb = statistics.mean(a), statistics.mean(b)
+            corr = round(sum((x - ma) * (y - mb) for x, y in pairs) / len(pairs) / (sa * sb), 2)
+    out["corr_with_vix"] = corr
+    return out
 
 
 def run_stockbot(data, universe, start, asof, cash):
@@ -506,6 +575,11 @@ def factors(data, start, asof, filings, candles_btc=None):
     tsx0, tsx1 = data.close("XIU.TO", start), data.close("XIU.TO", asof)
     if tsx0 and tsx1:
         out["tsx_pct"] = round(100 * (tsx1 / tsx0 - 1), 2)
+    if VIX_SYM in data.charts:
+        v0, v1 = data.close(VIX_SYM, start), data.close(VIX_SYM, asof)
+        inside = [b["c"] for b in data.charts[VIX_SYM]["bars"] if start <= b["d"] <= asof]
+        out.update(vix_start=v0, vix_end=v1, vix_max=round(max(inside), 2) if inside else None,
+                   vix_regime=vix.regime(v1))
     return out
 
 
@@ -550,6 +624,13 @@ def insights(row, fac, cash):
         if er.get("stop-loss", 0) > er.get("take-profit", 0) * 2 and er.get("stop-loss", 0) >= 3:
             bad.append("stopped out %d times vs %d targets hit: stops too tight for the noise" % (
                 er["stop-loss"], er.get("take-profit", 0)))
+        if k == "VIX agent" and r.get("switches") is not None:
+            note = "in the market %.0f%% of days, switched %d times" % (r["risk_on_days_pct"], r["switches"])
+            (good if r["switches"] <= 4 else bad).append(note + ("" if r["switches"] <= 4 else ": whipsaw costs"))
+        reg = r.get("vix_regimes") or {}
+        fear = [reg[n]["avg_daily_pct"] for n in ("nervous", "fear") if reg.get(n, {}).get("avg_daily_pct") is not None]
+        if fear and min(fear) < -0.3:
+            bad.append("lost %.2f%% a day on average when the VIX was 20+" % -min(fear))
         if k == "Pelosi copycat" and not r.get("filings_used"):
             bad.append("no Pelosi filing in or before this window: stayed in cash")
         if k in ("growth", "medium", "stock bot", "Pelosi copycat") and fac.get("usdcad_pct") is not None \
@@ -757,7 +838,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                                        pdf_dir=os.path.join(base, "state", "ptr-pdfs"))
         errors += errs
     pelosi_syms = sorted({t for _, rows in filings for t in pelosi_signals(rows)[0]})
-    syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X"]) | {s for v in watch.values() for s in v} | set(universe)
+    syms = sorted(set(["SPY", "XIU.TO", "USDCAD=X", VIX_SYM]) | {s for v in watch.values() for s in v} | set(universe)
                   | set(pelosi_syms))
     charts = {}
     for s in syms:
@@ -800,10 +881,16 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
                 row["Bitcoin (hold)"] = c["btc_hold"]
         if "pelosi" not in skip:
             row["Pelosi copycat"] = run_pelosi(data, filings, start, asof, cash)
+        if VIX_SYM in data.charts:
+            row["VIX agent"] = run_vix_agent(data, start, asof, cash, VIX_RULES[0][1])
         row["S&P 500 (SPY)"] = run_hold(data, {"SPY": 1.0}, start, asof, cash)
         row["TSX 60 (XIU.TO)"] = run_hold(data, {"XIU.TO": 1.0}, start, asof, cash)
         row["cash"] = {"value": round(cash, 2), "return_pct": 0.0}
         row["factors"] = factors(data, start, asof, filings)
+        if VIX_SYM in data.charts:
+            for k, r in row.items():
+                if isinstance(r, dict) and len(r.get("curve") or []) > 5:
+                    r["vix_regimes"] = vix_regimes(r["curve"], data)
         row["insights"] = insights(row, row["factors"], cash)
         results[label] = row
     longest = results[WINDOWS[0][0]]
@@ -815,6 +902,16 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         mc["left_out"] = short
     starts = [(label, results[label]["start"]) for label, _ in WINDOWS]
     scen = run_scenarios(data, watch, starts, asof, cash, account_type, scenario_list(base))
+    if VIX_SYM in data.charts:
+        for name, rule in VIX_RULES:
+            row = {"strategy": "vix", "name": name, "inputs": dict(rule), "settings": dict(rule), "results": {}}
+            for label, start in starts:
+                r = run_vix_agent(data, start, asof, cash, rule)
+                row["results"][label] = {"value": r["value"], "return_pct": r["return_pct"], "trades": r["trades"],
+                                         "fees": r["fees"], "holdings": r["holdings"]}
+                if label == WINDOWS[0][0]:
+                    row["risk"] = risk_stats(r["curve"]) if len(r["curve"]) > 20 else None
+            scen.append(row)
     out = {"asof": asof, "cash": cash, "account_type": account_type, "costs": COSTS, "results": results,
            "monte_carlo": mc, "scenarios": scen,
            "overall": overall(results), "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -831,11 +928,11 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
     return out, text
 
 
-ORDER = ["growth", "medium", "dividend", "stock bot", "crypto team", "Pelosi copycat",
+ORDER = ["growth", "medium", "dividend", "stock bot", "crypto team", "VIX agent", "Pelosi copycat",
          "S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
 LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer",
           "dividend": "Dividend reviewer (Wealthsimple)", "stock bot": "Stock bot (ATR, paper)",
-          "crypto team": "Crypto bot team (paper)"}
+          "crypto team": "Crypto bot team (paper)", "VIX agent": "VIX agent (S&P 500 or cash)"}
 
 
 def _p(x):
@@ -889,9 +986,11 @@ def render(out):
         r = out["results"][w]
         f = r.get("factors") or {}
         L.append("### %s: the backdrop" % w)
-        L.append("S&P 500 %s, TSX 60 %s, USD/CAD %s, S&P 500 %s its 200-day average, Pelosi filings posted: %d" % (
+        L.append("S&P 500 %s, TSX 60 %s, USD/CAD %s, S&P 500 %s its 200-day average, Pelosi filings posted: %d%s" % (
             _p(f.get("spy_pct")), _p(f.get("tsx_pct")), _p(f.get("usdcad_pct")),
-            "above" if f.get("spy_above_200d") else "below", len(f.get("pelosi_filings") or [])))
+            "above" if f.get("spy_above_200d") else "below", len(f.get("pelosi_filings") or []),
+            (", VIX %.1f -> %.1f (high %.1f, now %s)" % (f["vix_start"], f["vix_end"], f["vix_max"], f["vix_regime"]))
+            if f.get("vix_end") else ""))
         for k, n in (r.get("insights") or {}).items():
             L.append("- **%s**: + %s / - %s" % (LABELS.get(k, k), "; ".join(n["going_well"]) or "nothing stood out",
                                                  "; ".join(n["not_going_well"]) or "nothing stood out"))
@@ -907,9 +1006,22 @@ def render(out):
                 " | ".join("%+.1f%%" % sc["results"][w]["return_pct"] for w in wins),
                 rk.get("sharpe", "–"), _p(rk.get("max_dd_pct"))))
         L.append("")
+    six = out["results"][WINDOWS[0][0]]
+    if any(isinstance(r, dict) and r.get("vix_regimes") for r in six.values()):
+        names = [n for _, n in vix.REGIMES]
+        L += ["## By VIX regime (6 months)", "",
+              "Average daily return on days after the VIX closed calm (<15), normal (15-20), nervous (20-30) "
+              "or in fear (30+), and how each strategy moved with the VIX (-1 = falls when fear rises).", "",
+              "| strategy | " + " | ".join(names) + " | corr. with VIX |", "| --- |" + " ---: |" * (len(names) + 1)]
+        for k in ORDER:
+            vr = (six.get(k) or {}).get("vix_regimes")
+            if vr:
+                L.append("| %s | %s | %s |" % (LABELS.get(k, k), " | ".join(
+                    ("%+.2f%% (%dd)" % (vr[n]["avg_daily_pct"], vr[n]["days"])) if vr[n]["avg_daily_pct"] is not None
+                    else "–" for n in names), vr.get("corr_with_vix", "–")))
+        L.append("")
     mc = out.get("monte_carlo")
     if mc:
-        six = out["results"][WINDOWS[0][0]]
         L += ["## Monte Carlo: the next %d trading days" % mc["horizon_days"], "",
               "%d runs, resampling %d-day blocks of each strategy's own daily returns from the last %d days "
               "(the same days for every strategy). $%g today becomes:" % (

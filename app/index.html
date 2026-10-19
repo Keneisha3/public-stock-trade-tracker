@@ -221,7 +221,9 @@ function setupView() {
 function render() {
   if (!S.setup) return setupView();
   const R = S.review, B = S.briefing, P = S.paper;
-  $("#asof").textContent = R.market_as_of ? "prices " + R.market_as_of.replace("T", " ").replace("Z", " UTC") : "no prices yet: press Refresh";
+  const V = B && B.vix;
+  $("#asof").textContent = (V ? "VIX " + V.level + " (" + V.regime + ", agent: " + V.agent + ") · " : "") +
+    (R.market_as_of ? "prices " + R.market_as_of.replace("T", " ").replace("Z", " UTC") : "no prices yet: press Refresh");
   const accts = R.accounts;
   const noHoldings = accts.every(a => !a.positions.length);
   const todo = R.todo, props = accts.flatMap(a => a.proposals.map(o => ({...o, account: a.name})));
@@ -368,7 +370,7 @@ function paperView(P) {
     <p class="small">${esc(P.note)}</p>`;
 }
 
-const RL = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer", "dividend": "Dividend reviewer (Wealthsimple)",
+const RL = {"VIX agent": "VIX agent (S&P 500 or cash)", "growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer", "dividend": "Dividend reviewer (Wealthsimple)",
   "stock bot": "Stock bot (ATR)", "crypto team": "Crypto bot team", "Pelosi copycat": "Pelosi copycat"};
 const RBENCH = ["S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"];
 
@@ -393,7 +395,7 @@ function replayView(R) {
   const ov = Object.entries(R.overall || {}).sort((a, b) => b[1].beat_spy - a[1].beat_spy);
   return runBar + `<div class="small" style="margin-bottom:8px">As of the close on <b>${esc(R.asof)}</b> · $${esc(R.cash)} each · ${esc(R.account_type)} · run ${esc(R.generated || "")}</div>
     <div class="tabs">${wins.map(w => `<button data-rtab="${esc(w)}" aria-selected="${w === rtab}">${esc(w)} <span class="small">from ${esc(R.results[w].start)}</span></button>`).join("")}</div>
-    <div class="small" style="margin-bottom:10px">Backdrop: S&amp;P 500 <b class="${cls(f.spy_pct)}">${pct(f.spy_pct)}</b> · TSX 60 <b class="${cls(f.tsx_pct)}">${pct(f.tsx_pct)}</b> · USD/CAD ${pct(f.usdcad_pct)} · S&amp;P 500 ${f.spy_above_200d ? "above" : "below"} its 200-day average · Pelosi filings posted: ${(f.pelosi_filings || []).length}</div>
+    <div class="small" style="margin-bottom:10px">Backdrop: S&amp;P 500 <b class="${cls(f.spy_pct)}">${pct(f.spy_pct)}</b> · TSX 60 <b class="${cls(f.tsx_pct)}">${pct(f.tsx_pct)}</b> · USD/CAD ${pct(f.usdcad_pct)} · S&amp;P 500 ${f.spy_above_200d ? "above" : "below"} its 200-day average · Pelosi filings posted: ${(f.pelosi_filings || []).length}${f.vix_end != null ? ` · VIX ${f.vix_start != null ? f.vix_start.toFixed(1) + " → " : ""}<b>${f.vix_end.toFixed(1)}</b> (high ${f.vix_max}, now ${esc(f.vix_regime)})` : ""}</div>
     <div class="scroll"><table><thead><tr><th>Strategy (click one)</th><th class="num">Value</th><th class="num">Return</th><th class="num hide-sm">vs S&amp;P 500</th><th class="num hide-sm">Trades</th><th class="num hide-sm">Costs</th><th class="num hide-sm">Dividends</th></tr></thead><tbody>
       ${strat.map(k => line(k)).join("")}
       ${row["Pelosi copycat"] ? `<tr><td colspan="7" class="small" style="padding-top:14px"><b>Separate: following Nancy Pelosi</b> (copies a trade only after its filing was posted)</td></tr>${line("Pelosi copycat")}` : ""}
@@ -416,6 +418,7 @@ function replayView(R) {
         <td class="num ${cls(c.pnl)}" style="width:90px">${money(c.pnl)}</td><td class="small" style="width:70px">${c.held ? "still held" : "closed"}</td></tr>`).join("")}</tbody></table></div>` : ""}
     ${(sel.fills || []).length ? `<details style="margin-top:10px"><summary class="small">Last trades (${sel.fills.length})</summary><div class="scroll"><table><thead><tr><th>Day</th><th>Side</th><th>Ticker</th><th class="num">Shares</th><th class="num">Price</th><th class="num">CAD</th></tr></thead><tbody>
       ${sel.fills.slice().reverse().map(x => `<tr><td class="small">${esc(x.day)}</td><td>${esc(x.side)}</td><td class="tick">${esc(x.ticker)}</td><td class="num">${esc(x.shares)}</td><td class="num">${esc(x.price)} ${esc(x.currency)}</td><td class="num">${money(x.cad)}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
+    ${vixView(R, wins)}
     ${scenariosView(R, wins)}
     ${mcView(R, rsel)}
     ${ov.length ? `<p style="margin:14px 0 4px"><b>Across all windows</b></p><div class="scroll"><table><thead><tr><th>Strategy</th>${wins.map(w => `<th class="num">${esc(w)}</th>`).join("")}<th class="num">Beat S&amp;P 500</th></tr></thead><tbody>
@@ -437,6 +440,17 @@ function settingsView(a, meta) {
   return `<details style="margin:0 0 12px"><summary class="small"><b>Strategy settings</b>: what this account's review uses (and the replay's "Your settings" scenario)</summary>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin:10px 0">${keys.map(field).join("")}</div>
     <div class="row"><button id="rulesSave" data-acct="${esc(a.id)}">Save settings</button><button id="rulesReset" data-acct="${esc(a.id)}">Back to defaults</button><span id="rulesMsg" class="small"></span></div></details>`;
+}
+
+function vixView(R, wins) {
+  const six = R.results[wins[0]] || {}, names = ["calm", "normal", "nervous", "fear"];
+  const rows = Object.keys(six).filter(k => six[k] && six[k].vix_regimes);
+  if (!rows.length) return "";
+  return `<p style="margin:16px 0 4px"><b>By VIX regime (${esc(wins[0])})</b> <span class="small">(average daily return on days after the VIX closed calm &lt;15, normal 15–20, nervous 20–30, fear 30+; days in brackets)</span></p>
+    <div class="scroll"><table><thead><tr><th>Strategy</th>${names.map(n => `<th class="num">${n}</th>`).join("")}<th class="num">Moves with VIX</th></tr></thead><tbody>
+    ${rows.map(k => { const v = six[k].vix_regimes; return `<tr><td>${esc(RL[k] || k)}</td>${names.map(n => v[n].avg_daily_pct == null ? `<td class="num">–</td>` :
+      `<td class="num ${cls(v[n].avg_daily_pct)}">${pct(v[n].avg_daily_pct, 2)} <span class="small">(${v[n].days}d)</span></td>`).join("")}<td class="num">${v.corr_with_vix ?? "–"}</td></tr>`; }).join("")}
+    </tbody></table></div><p class="small">"Moves with VIX" is the correlation of daily returns with daily VIX changes: near -1 falls when fear rises, near 0 doesn't care.</p>`;
 }
 
 function scenariosView(R, wins) {

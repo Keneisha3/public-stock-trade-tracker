@@ -133,6 +133,7 @@ class DailyOffline(unittest.TestCase):
                 _synth.write(off, s, _synth.chart(s, growth=0.3, currency=cur,
                                                   divs=_synth.quarterly("2022-01-15", "2026-07-15", 0.9) if cur == "CAD" else None))
             _synth.write(off, "USDCAD=X", _synth.chart("USDCAD=X", p0=1.4, n=22, wiggle=0, currency="CAD"))
+            _synth.write(off, "^VIX", _synth.chart("^VIX", p0=16, n=120, wiggle=0.02, gaps={119: 80}))
             with open(os.path.join(base, "paper", "config.json"), "w") as fh:
                 json.dump({"universe": ["NVDA", "MSFT"]}, fh)
             b = daily.run(base, offline=off, today="2026-10-16")
@@ -144,6 +145,8 @@ class DailyOffline(unittest.TestCase):
             with open(os.path.join(base, "history.json")) as fh:
                 self.assertEqual(json.load(fh)["points"][-1]["date"], "2026-10-16")
             self.assertIn("Not financial advice", daily.render(b))
+            self.assertEqual((b["vix"]["regime"], b["vix"]["agent"]), ("nervous", "step aside to cash"))
+            self.assertIn("The VIX agent says: step aside to cash", daily.render(b))
         finally:
             shutil.rmtree(d)
 
