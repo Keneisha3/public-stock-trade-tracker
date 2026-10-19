@@ -528,6 +528,8 @@ class PointInTimeUniverse(unittest.TestCase):
         r = replay.run_dual(data, data.days[300], ASOF, 100, k=3)
         last = r["picks"][-1][1]
         self.assertEqual(sorted(last), ["IEF", "SPY", "XLK"])  # XLE is under the short-bond hurdle: its share goes to IEF
+        one = replay.run_dual(data, data.days[300], ASOF, 100)  # default: the single best fund
+        self.assertEqual(len(one["picks"][-1][1]), 1)
         self.assertIn("XLK", r["holdings"])
         self.assertNotIn("XLE", r["holdings"])
 

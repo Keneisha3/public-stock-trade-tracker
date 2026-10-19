@@ -508,7 +508,7 @@ def run_momentum(data, uni, start, asof, cash, **opts):
     return run_targets(data, start, asof, cash, choose, o["every"])
 
 
-DUAL_DEFAULT = {"k": 3, "months": 12, "safe": "IEF", "cash_like": "SHY"}
+DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY"}  # best 1 fund: won the walk-forward
 DUAL_POOL = ("us_broad", "us_sector", "us_factor", "world", "commodities")
 
 
@@ -1049,8 +1049,8 @@ MOMENTUM_VARIANTS = [
     ("Momentum: no trend filter", {"trend": False}),
 ]
 DUAL_VARIANTS = [
-    ("Dual momentum: best 3 funds (default)", {}),
-    ("Dual momentum: best 1 fund", {"k": 1}),
+    ("Dual momentum: best 1 fund (default)", {}),
+    ("Dual momentum: best 3 funds", {"k": 3}),
     ("Dual momentum: best 5 funds", {"k": 5}),
     ("Dual momentum: 6-month lookback", {"months": 6}),
 ]
@@ -1328,13 +1328,12 @@ def checks(out, data, rolling_spec):
         spy = row.get("S&P 500 (SPY)")
         p0, p1 = data.close("SPY", row["start"]), data.close("SPY", asof)
         f0, f1 = data.fx(row["start"]), data.fx(asof)
-        if spy and p0 and p1:
-            expect = 100 * ((p1 / p0) * (f1 / f0) - 1)  # US-dollar cash: no conversion fee
+        if spy and p0 and p1:  # US-dollar cash, no conversion fee; dividends net of 15% withholding
+            divs = sum(a for d, a in data.charts["SPY"]["dividends"] if row["start"] < d <= asof)
+            expect = 100 * (((p1 + divs * (1 - COSTS["us_withholding_pct"] / 100)) / p0) * (f1 / f0) - 1)
             worst = max(worst, abs(spy["return_pct"] - expect))
-    years = max(1.0, max((_gap(row["start"], asof) for row in out["results"].values()), default=365) / 365.0)
-    allow = 1.0 + 1.5 * years  # dividends (about 1.3% a year) and the overnight gap at the first fill
-    add("S&P 500 row matches the raw price change in CAD (overnight gap, slippage and dividends allowed)",
-        worst <= allow, "largest gap %.2f points (allowed %.1f)" % (worst, allow))
+    add("S&P 500 row matches the raw price change in CAD (dividends counted; overnight gap and slippage allowed)",
+        worst <= 2.5, "largest gap %.2f points" % worst)
     cov = [(w, row["coverage"]) for w, row in out["results"].items() if row.get("coverage")]
     if cov:
         low = [(w, c) for w, c in cov if (c["pct"] or 0) < 80]
