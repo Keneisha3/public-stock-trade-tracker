@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Tracker</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --raise: #ffffff;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #6f6d68;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+  --good: #0ca30c; --good-text: #006300; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --bad-text: #b42f2f;
+  --chip-action: #fdecec; --chip-watch: #fff4dc; --chip-good: #e7f6e7; --chip-info: #edf2fa;
+  --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --raise: #222220;
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #9a988f;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --good-text: #0ca30c; --bad-text: #e66767;
+    --chip-action: #3a1f1f; --chip-watch: #3a3020; --chip-good: #1d3320; --chip-info: #1f2a3a;
+    --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --raise: #222220;
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #9a988f;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+  --good-text: #0ca30c; --bad-text: #e66767;
+  --chip-action: #3a1f1f; --chip-watch: #3a3020; --chip-good: #1d3320; --chip-info: #1f2a3a;
+  --accent: #3987e5;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); }
+header { position: sticky; top: 0; z-index: 5; background: var(--page); border-bottom: 1px solid var(--ring);
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; flex: 1; min-width: 160px; }
+header .meta { color: var(--muted); font-size: 12px; }
+main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 16px; min-width: 0; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); margin: 0 0 12px; }
+.grid { display: grid; gap: 16px; }
+.tiles { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.two { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.tile .label { color: var(--ink-2); font-size: 12px; }
+.tile .value { font-size: 28px; font-weight: 650; margin: 2px 0; letter-spacing: -.01em; }
+.tile .sub { font-size: 12px; color: var(--muted); }
+.up { color: var(--good-text); } .down { color: var(--bad-text); }
+button, select, input { font: inherit; color: var(--ink); background: var(--raise); border: 1px solid var(--ring);
+  border-radius: 8px; padding: 7px 12px; }
+button { cursor: pointer; } button:hover { border-color: var(--axis); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .6; cursor: progress; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.tabs button[aria-selected="true"] { border-color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+td { padding: 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+.tick { font-weight: 600; } .name { color: var(--muted); font-size: 12px; max-width: 220px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip { font-size: 11.5px; border-radius: 6px; padding: 2px 6px; color: var(--ink); display: inline-flex; gap: 4px; align-items: baseline; }
+.chip.action { background: var(--chip-action); } .chip.watch { background: var(--chip-watch); }
+.chip.good { background: var(--chip-good); } .chip.info { background: var(--chip-info); }
+.chip b { font-weight: 650; font-size: 10.5px; letter-spacing: .03em; }
+.wbar { position: relative; height: 8px; width: 90px; background: var(--grid); border-radius: 4px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.wbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--s1); border-radius: 4px; }
+.wbar i.over { background: var(--critical); }
+.wbar s { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink-2); }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.list li { padding: 8px 10px; border-radius: 8px; background: var(--raise); border: 1px solid var(--ring); }
+.small { font-size: 12px; color: var(--muted); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.tooltip { position: absolute; pointer-events: none; background: var(--raise); border: 1px solid var(--ring);
+  border-radius: 8px; padding: 6px 8px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.12); white-space: nowrap; display: none; z-index: 3; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 3px; border-radius: 2px; background: var(--c); margin-right: 6px; vertical-align: middle; }
+.mixrow { display: grid; grid-template-columns: 130px 1fr 90px; gap: 10px; align-items: center; margin: 8px 0; }
+.mixbar { position: relative; height: 12px; background: var(--grid); border-radius: 6px; }
+.mixbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: var(--c); }
+.mixbar s { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
+.check::before { content: "\2715"; color: var(--critical); margin-right: 6px; font-weight: 700; }
+.check.ok::before { content: "\2713"; color: var(--good); }
+.empty { color: var(--muted); padding: 12px 0; }
+.banner { border-radius: 10px; padding: 10px 12px; background: var(--chip-watch); }
+.err { background: var(--chip-action); }
+footer { text-align: center; color: var(--muted); font-size: 12px; padding: 8px 16px 28px; }
+@media (max-width: 640px) {
+  .mixrow { grid-template-columns: 90px 1fr 70px; }
+  .hide-sm { display: none; }
+  .tile .value { font-size: 24px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Portfolio Tracker</h1>
+  <span class="meta" id="asof"></span>
+  <button id="refresh" class="primary" title="Sync, prices, review, paper bot, news, Congress">Refresh everything</button>
+</header>
+<main id="app"><div class="card empty">Loading…</div></main>
+<footer>Not financial advice. Delayed public data and simple rules. Nothing here places a trade: you decide, and you place every order yourself.</footer>
+<div class="tooltip" id="tip"></div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const safeUrl = (u) => /^https?:\/\//i.test(String(u || "")) ? esc(u) : "#";
+const money = (x, d = 2) => (x < 0 ? "-$" : "$") + Math.abs(+x || 0).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const pct = (x, d = 1) => x == null ? "–" : (x > 0 ? "+" : "") + (+x).toFixed(d) + "%";
+const cls = (x) => x == null ? "" : x > 0 ? "up" : x < 0 ? "down" : "";
+const SERIES = ["var(--s1)", "var(--s2)", "var(--s3)"];
+let S = null, tab = 0, contribute = 0;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Trader": "1"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({error: "bad response"}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function load() {
+  try {
+    S = await api("/api/state" + (contribute ? "?contribute=" + contribute : ""));
+    render();
+  } catch (e) { $("#app").innerHTML = `<div class="card banner err">Could not load: ${esc(e.message)}</div>`; }
+}
+
+// ---------------------------------------------------------------- charts
+function lineChart(el, series, opts = {}) {
+  const W = 640, H = opts.h || 220, L = 64, R = 12, T = 10, B = 26;
+  const all = series.flatMap(s => s.points);
+  if (all.length < 2) { el.innerHTML = `<div class="empty">${esc(opts.empty || "Not enough history yet. It fills in one point a day.")}</div>`; return; }
+  const dates = [...new Set(all.map(p => p[0]))].sort();
+  const xi = Object.fromEntries(dates.map((d, i) => [d, i]));
+  let lo = Math.min(...all.map(p => p[1])), hi = Math.max(...all.map(p => p[1]));
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  const x = i => L + (W - L - R) * (dates.length === 1 ? 0.5 : i / (dates.length - 1));
+  const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const fmt = opts.fmt || (v => money(v, 0));
+  let g = "";
+  for (let k = 0; k <= 3; k++) {
+    const v = lo + (hi - lo) * k / 3, yy = y(v).toFixed(1);
+    g += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+    g += `<text x="${L - 8}" y="${+yy + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${esc(fmt(v))}</text>`;
+  }
+  g += `<text x="${L}" y="${H - 6}" font-size="11" fill="var(--muted)">${esc(dates[0])}</text>`;
+  g += `<text x="${W - R}" y="${H - 6}" text-anchor="end" font-size="11" fill="var(--muted)">${esc(dates[dates.length - 1])}</text>`;
+  const paths = series.map(s => {
+    const d = s.points.map((p, i) => (i ? "L" : "M") + x(xi[p[0]]).toFixed(1) + " " + y(p[1]).toFixed(1)).join(" ");
+    return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).join("");
+  const legend = series.length > 1 ? `<div class="legend">${series.map(s => `<span style="--c:${s.color}">${esc(s.name)}</span>`).join("")}</div>` : "";
+  el.innerHTML = `${legend}<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label || "chart")}">${g}${paths}
+    <line class="xh" y1="${T}" y2="${H - B}" stroke="var(--axis)" stroke-width="1" visibility="hidden"/>
+    ${series.map((s, k) => `<circle class="dot${k}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`).join("")}
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/></svg></div>`;
+  const svg = $("svg", el), tip = $("#tip");
+  const maps = series.map(s => Object.fromEntries(s.points));
+  svg.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) * W / r.width;
+    const i = Math.max(0, Math.min(dates.length - 1, Math.round((px - L) / (W - L - R) * (dates.length - 1))));
+    const d = dates[i], xx = x(i);
+    const xh = $(".xh", svg); xh.setAttribute("x1", xx); xh.setAttribute("x2", xx); xh.setAttribute("visibility", "visible");
+    let rows = "";
+    series.forEach((s, k) => {
+      const c = $(".dot" + k, svg), v = maps[k][d];
+      if (v == null) { c.setAttribute("visibility", "hidden"); return; }
+      c.setAttribute("cx", xx); c.setAttribute("cy", y(v)); c.setAttribute("visibility", "visible");
+      rows += `<div>${series.length > 1 ? `<span style="color:${s.color}">●</span> ${esc(s.name)}: ` : ""}<b>${esc(fmt(v))}</b></div>`;
+    });
+    tip.innerHTML = `<div class="small">${esc(d)}</div>${rows}`;
+    tip.style.display = "block";
+    const tx = Math.min(window.innerWidth - tip.offsetWidth - 8, ev.clientX + 14);
+    tip.style.left = tx + window.scrollX + "px"; tip.style.top = ev.clientY + window.scrollY - 10 + "px";
+  });
+  svg.addEventListener("mouseleave", () => { tip.style.display = "none"; svg.querySelectorAll(".xh,circle").forEach(n => n.setAttribute("visibility", "hidden")); });
+}
+
+function spark(values) {
+  if (!values || values.length < 2) return "";
+  const W = 80, H = 22, lo = Math.min(...values), hi = Math.max(...values) || 1;
+  const d = values.map((v, i) => (i ? "L" : "M") + (i * W / (values.length - 1)).toFixed(1) + " " + (H - 2 - (H - 4) * (v - lo) / ((hi - lo) || 1)).toFixed(1)).join(" ");
+  const col = values[values.length - 1] >= values[0] ? "var(--good)" : "var(--critical)";
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d}" fill="none" stroke="${col}" stroke-width="1.5"/></svg>`;
+}
+
+// ---------------------------------------------------------------- views
+function chip(f) { return `<span class="chip ${esc(f.level)}"><b>${esc(f.level.toUpperCase())}</b>${esc(f.text)}</span>`; }
+
+function setupView() {
+  $("#app").innerHTML = `<div class="card"><h2>Welcome</h2>
+    <p>Nothing is set up yet. This creates <code>trader/</code> with your two accounts: <b>Questrade</b> for aggressive growth (US stocks) and <b>Wealthsimple</b> for steady dividends. You can change everything later in <code>trader/accounts.json</code>.</p>
+    <div class="row"><button class="primary" id="init">Set up my accounts</button>
+    <button id="initm">With a medium-term account too</button>
+    <button id="demo">Try it with demo holdings</button></div>
+    <p class="small">Demo holdings are made up, so you can see the dashboard working. Replace them by importing your real holdings.</p></div>`;
+  const go = async (body) => { await api("/api/init", body); await load(); };
+  $("#init").onclick = () => go({});
+  $("#initm").onclick = () => go({medium: true});
+  $("#demo").onclick = async () => { await go({demo: true}); refresh(["congress", "news"]); };
+}
+
+function render() {
+  if (!S.setup) return setupView();
+  const R = S.review, B = S.briefing, P = S.paper;
+  $("#asof").textContent = R.market_as_of ? "prices " + R.market_as_of.replace("T", " ").replace("Z", " UTC") : "no prices yet: press Refresh";
+  const accts = R.accounts;
+  const noHoldings = accts.every(a => !a.positions.length);
+  const todo = R.todo, props = accts.flatMap(a => a.proposals.map(o => ({...o, account: a.name})));
+  const hist = S.history;
+  let h = "";
+  if (noHoldings) h += `<div class="card banner">No holdings yet. Import a CSV or sync Questrade below, then press <b>Refresh everything</b>.</div>`;
+  if (R.market_errors && R.market_errors.length) h += `<div class="card banner">Some prices failed: ${esc(R.market_errors.slice(0, 3).join("; "))}</div>`;
+  const ps = P && P.stats || {}, pb = P && P.buy_hold || {};
+  h += `<section class="grid tiles">
+    <div class="card tile"><div class="label">Total (${esc(R.base_currency)})</div><div class="value">${money(R.total, 0)}</div>
+      <div class="sub ${cls(R.day_change)}">${money(R.day_change)} (${pct(R.day_pct, 2)}) today</div></div>
+    <div class="card tile"><div class="label">Dividend income</div><div class="value">${money(R.income_net / 12, 0)}<span class="small"> /mo</span></div>
+      <div class="sub">${money(R.income_net, 0)} a year after US withholding</div></div>
+    <div class="card tile"><div class="label">To do</div><div class="value">${todo.length}</div>
+      <div class="sub">${props.length} proposed trade${props.length === 1 ? "" : "s"}</div></div>
+    <div class="card tile"><div class="label">Paper bot</div><div class="value">${P ? money(P.equity, 0) : "–"}</div>
+      <div class="sub">${P && ps.total_pct != null ? `<span class="${cls(ps.total_pct)}">${pct(ps.total_pct)}</span> vs buy-and-hold ${pct(pb.total_pct)}` : "starts on the first Refresh"}</div></div>
+  </section>`;
+  h += `<section class="grid two">
+    <div class="card"><h2>Portfolio value</h2><div id="histChart"></div></div>
+    <div class="card"><h2>Mix vs your target</h2>${R.mix.map((m, i) => `
+      <div class="mixrow"><div>${esc(m.label)}</div>
+        <div class="mixbar" title="${esc(m.label)}: ${m.pct}% now, target ${m.target_pct ?? "–"}%"><i style="--c:${SERIES[i % 3]};width:${Math.min(100, m.pct)}%"></i>${m.target_pct != null ? `<s style="left:calc(${m.target_pct}% - 1px)"></s>` : ""}</div>
+        <div class="num">${m.pct.toFixed(0)}% <span class="small">/ ${m.target_pct != null ? m.target_pct.toFixed(0) + "%" : "–"}</span></div></div>`).join("")}
+      <p class="small">The tick marks your target. New money goes to whatever is under its target.</p>
+      <div class="row"><label for="contrib">Plan a contribution</label><input id="contrib" type="number" min="0" step="50" placeholder="e.g. 500" value="${contribute || ""}" style="width:120px"><button id="plan">Show me</button></div>
+      ${contribute && R.contribution_split ? `<p>${money(contribute, 0)} goes: ${Object.entries(R.contribution_split).map(([k, v]) => `<b>${esc((accts.find(a => a.id === k) || {}).name || k)}</b> ${money(v, 0)}`).join(", ")}. The buys are in the proposals below.</p>` : ""}
+    </div></section>`;
+  h += `<section class="grid two">
+    <div class="card"><h2>To do</h2>${todo.length ? `<ul class="list">${todo.map(t => `<li><b>${esc(t.account)}${t.ticker ? " · " + esc(t.ticker) : ""}</b><br>${esc(t.text)}</li>`).join("")}</ul>` : `<div class="empty">Nothing needs action today.</div>`}</div>
+    <div class="card"><h2>Proposed trades</h2>${props.length ? `<ul class="list">${props.map(o => `<li><b class="${o.side === "buy" ? "up" : "down"}">${esc(o.side.toUpperCase())}</b> ${esc(o.shares)} <b>${esc(o.ticker)}</b> ~${money(o.value, 0)} ${esc(o.currency)} <span class="small">in ${esc(o.account)}</span><br><span class="small">${esc(o.reason)}</span></li>`).join("")}</ul>
+      <p class="small">You place these yourself in Questrade or Wealthsimple, only if you agree. Nothing is sent anywhere.</p>` : `<div class="empty">No trades proposed.</div>`}</div>
+  </section>`;
+  const a = accts[Math.min(tab, accts.length - 1)];
+  h += `<section class="card"><h2>Accounts</h2><div class="tabs" role="tablist">${accts.map((x, i) =>
+      `<button role="tab" aria-selected="${i === tab}" data-tab="${i}">${esc(x.name)} · ${money(x.total, 0)}</button>`).join("")}</div>`;
+  if (a) {
+    h += `<div class="row small" style="margin-bottom:8px">${esc(a.strategy_label)} · ${esc(a.type)} · cash ${money(a.cash, 0)} (${a.cash_pct.toFixed(0)}%) · gain ${a.gain_pct != null ? `<span class="${cls(a.gain_pct)}">${pct(a.gain_pct)}</span>` : "–"} · yield ${a.yield_pct.toFixed(2)}% · score ${a.score ?? "–"} · cap ${a.cap_pct}% per stock</div>`;
+    if (a.flags.length || a.notes.length) h += `<div class="chips" style="margin-bottom:10px">${a.flags.map(chip).join("")}${a.notes.map(n => chip({level: "info", text: n})).join("")}</div>`;
+    h += a.positions.length ? `<div class="scroll"><table><thead><tr><th>Holding</th><th class="num">Value</th><th>Weight</th><th class="num">Gain</th><th class="num">Today</th><th class="num">12 mo</th><th class="num">Yield</th><th class="num">Score</th><th class="hide-sm">1 year</th></tr></thead><tbody>${
+      a.positions.map(p => { const m = p.m || {}, cap = a.cap_pct;
+        return `<tr><td><div class="tick">${esc(p.ticker)}</div><div class="name">${esc(p.name)}</div>${p.flags.length ? `<div class="chips">${p.flags.map(chip).join("")}</div>` : ""}</td>
+        <td class="num">${money(p.value_base, 0)}<div class="small">${esc(p.shares)} @ ${p.price != null ? money(p.price) : "–"} ${esc(p.currency)}</div></td>
+        <td><span class="wbar" title="${p.weight}% of the account; cap ${cap}%"><i class="${p.weight > cap ? "over" : ""}" style="width:${Math.min(100, p.weight)}%"></i><s style="left:${Math.min(100, cap)}%"></s></span>${p.weight.toFixed(1)}%</td>
+        <td class="num ${cls(p.gain_pct)}">${pct(p.gain_pct)}</td><td class="num ${cls(m.day_pct)}">${pct(m.day_pct, 2)}</td>
+        <td class="num ${cls(m.ret_12m)}">${pct(m.ret_12m)}</td><td class="num">${m.yield_pct ? m.yield_pct.toFixed(2) + "%" : "–"}</td>
+        <td class="num">${p.score ?? "–"}</td><td class="hide-sm">${spark(m.spark)}</td></tr>`; }).join("")}</tbody></table></div>` : `<div class="empty">No holdings in this account yet.</div>`;
+  }
+  h += `</section>`;
+  h += `<section class="grid two"><div class="card"><h2>Paper trading bot</h2>${paperView(P)}</div>
+    <div class="card"><h2>Backtest: 5 years</h2>${backtestView(S.backtest)}</div></section>`;
+  const news = (B && B.news) || [], cong = (B && B.congress) || [];
+  h += `<section class="grid two">
+    <div class="card"><h2>News on your holdings</h2>${news.length ? `<ul class="list">${news.map(n => `<li><b>${esc(n.ticker)}</b> <a href="${safeUrl(n.link)}" target="_blank" rel="noopener noreferrer">${esc(n.title)}</a><div class="small">${esc(n.source || "")} ${esc((n.time || "").slice(0, 16).replace("T", " "))}</div></li>`).join("")}</ul>` : `<div class="empty">No new headlines since the last refresh.</div>`}</div>
+    <div class="card"><h2>New Congress trade filings</h2>${cong.length ? `<ul class="list">${cong.map(c => `<li><b>${esc(c.name)}</b> <span class="small">${esc(c.district)} · filed ${esc(c.filed)}</span><br><a href="${safeUrl(c.url)}" target="_blank" rel="noopener noreferrer">Open the filing</a></li>`).join("")}</ul>` : `<div class="empty">Nothing new from the House Clerk.</div>`}
+      <p class="small">Ask Claude to run <code>/trader-pelosi</code> to read a filing into rows.</p></div>
+  </section>`;
+  h += `<section class="card"><h2>Update holdings</h2><div class="grid two">
+    <div><p class="small">Upload a holdings CSV (Wealthsimple: Activity → export holdings report; Questrade or any broker: positions export).</p>
+      <div class="row"><select id="impAcct">${accts.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select>
+      <input id="impFile" type="file" accept=".csv,text/csv"><input id="impFilter" placeholder="filter (e.g. TFSA)" style="width:140px">
+      <button id="impGo">Import</button></div></div>
+    <div><p class="small">Set an account's cash balance.</p>
+      <div class="row"><select id="cashAcct">${accts.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select>
+      <input id="cashAmt" type="number" step="0.01" placeholder="amount" style="width:120px"><select id="cashCcy"><option>CAD</option><option>USD</option></select>
+      <button id="cashGo">Save</button></div>
+      <p class="small">Questrade: sync from the terminal with <code>accounts.py sync questrade --token …</code> once. After that, Refresh syncs it.</p></div>
+  </div><div id="msg"></div></section>`;
+  if (B && B.steps) {
+    const bad = Object.entries(B.steps).filter(([, v]) => !v.ok);
+    if (bad.length) h += `<section class="card banner"><b>Last refresh:</b> ${bad.map(([k, v]) => `${esc(k)}: ${esc(v.detail)}`).join(" · ")}</section>`;
+  }
+  $("#app").innerHTML = h;
+  const hs = [{name: "Total", color: SERIES[0], points: hist.map(p => [p.date, p.total])}];
+  if (accts.length > 1) accts.slice(0, 2).forEach((x, i) => hs.push({name: x.name, color: SERIES[i + 1], points: hist.filter(p => p.accounts && p.accounts[x.id] != null).map(p => [p.date, p.accounts[x.id]])}));
+  lineChart($("#histChart"), hs, {label: "Portfolio value over time"});
+  if (P && $("#paperChart")) lineChart($("#paperChart"), [
+    {name: "Bot", color: SERIES[0], points: P.equity_curve},
+    {name: "Buy and hold", color: SERIES[1], points: P.benchmark_curve || []}], {h: 180, label: "Paper bot vs buy and hold", empty: "The bot's curve starts after its first day."});
+  if (S.backtest && $("#btChart")) lineChart($("#btChart"), [
+    {name: "Bot", color: SERIES[0], points: S.backtest.equity},
+    {name: "Buy and hold", color: SERIES[1], points: S.backtest.benchmark}], {h: 180, label: "Backtest equity"});
+  document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { tab = +b.dataset.tab; render(); });
+  $("#plan").onclick = () => { contribute = Math.max(0, +$("#contrib").value || 0); load(); };
+  $("#impGo").onclick = importCsv;
+  $("#cashGo").onclick = async () => {
+    try { await api("/api/cash", {account: $("#cashAcct").value, amount: +$("#cashAmt").value, currency: $("#cashCcy").value}); await load(); }
+    catch (e) { $("#msg").innerHTML = `<p class="banner err">${esc(e.message)}</p>`; }
+  };
+  const bt = $("#btGo"); if (bt) bt.onclick = async () => {
+    bt.disabled = true; bt.textContent = "Running… (about a minute)";
+    try { await api("/api/backtest", {}); await load(); } catch (e) { bt.textContent = "Failed: " + e.message; }
+  };
+}
+
+function paperView(P) {
+  if (!P) return `<div class="empty">The bot starts trading on paper the first time you press Refresh. It buys strong up-moves in a rising market, holds 3 days, and uses a stop.</div>`;
+  const s = P.stats || {}, pos = Object.entries(P.positions || {});
+  return `<div class="small">Started ${esc(P.since)} with ${money(P.start_cash, 0)} · market regime <b>${esc(P.regime || "–")}</b> · ${s.trades || 0} closed trades · win rate ${s.win_rate_pct ?? "–"}%</div>
+    <div id="paperChart" style="margin-top:8px"></div>
+    ${pos.length ? `<table><thead><tr><th>Holding</th><th class="num">Shares</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Day</th></tr></thead><tbody>${pos.map(([t, p]) => `<tr><td class="tick">${esc(t)}</td><td class="num">${p.shares}</td><td class="num">${money(p.entry)}</td><td class="num">${money(p.stop)}</td><td class="num">${p.days}/3</td></tr>`).join("")}</tbody></table>` : ""}
+    ${(P.pending || []).length ? `<p class="small">Buys at the next open: ${P.pending.map(o => esc(o.ticker)).join(", ")}</p>` : ""}
+    <p style="margin-bottom:4px"><b>Ready for real money?</b></p>
+    <ul class="list" style="gap:2px">${P.readiness.map(c => `<li class="check ${c.ok ? "ok" : ""}" style="background:none;border:0;padding:2px 0">${esc(c.check)}</li>`).join("")}</ul>
+    <p class="small">${esc(P.note)}</p>`;
+}
+
+function backtestView(bt) {
+  if (!bt) return `<div class="empty">Test the bot's rule on the last 5 years of 30 large US stocks before trusting it.</div><button id="btGo">Run the backtest</button>`;
+  const r = (x) => x ? `${pct(x.total_pct)} total · ${pct(x.cagr_pct)} a year · Sharpe ${x.sharpe ?? "–"} · worst drop ${pct(x.max_dd_pct)}` : "–";
+  return `<div class="small">${esc(bt.from)} to ${esc(bt.to)}</div><div id="btChart" style="margin-top:8px"></div>
+    <p><b>Bot:</b> ${r(bt.bot)}<br><b>Buy and hold:</b> ${r(bt.buy_hold)}</p>
+    <div class="scroll"><table><thead><tr><th>Year</th><th class="num">Bot</th><th class="num">Buy and hold</th></tr></thead><tbody>${(bt.per_year || []).map(y => `<tr><td>${esc(y.year)}</td><td class="num ${cls(y.bot_pct)}">${pct(y.bot_pct)}</td><td class="num ${cls(y.buy_hold_pct)}">${pct(y.buy_hold_pct)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="small">Simulated on past prices with 5 bps costs. Past results do not predict future ones.</p><button id="btGo">Run it again</button>`;
+}
+
+async function importCsv() {
+  const f = $("#impFile").files[0];
+  if (!f) { $("#msg").innerHTML = `<p class="banner">Choose a CSV file first.</p>`; return; }
+  try {
+    const r = await api("/api/import", {account: $("#impAcct").value, csv: await f.text(), filter: $("#impFilter").value});
+    $("#msg").innerHTML = `<p class="banner">Imported ${r.imported} holdings (${r.skipped} rows skipped). Press Refresh for prices.</p>`;
+    await load();
+  } catch (e) { $("#msg").innerHTML = `<p class="banner err">${esc(e.message)}</p>`; }
+}
+
+async function refresh(skip = []) {
+  const b = $("#refresh"); b.disabled = true; b.textContent = "Refreshing…";
+  try { await api("/api/refresh", {skip}); await load(); }
+  catch (e) { alert("Refresh failed: " + e.message); }
+  finally { b.disabled = false; b.textContent = "Refresh everything"; }
+}
+$("#refresh").onclick = () => refresh();
+load();
+</script>
+</body>
+</html>
