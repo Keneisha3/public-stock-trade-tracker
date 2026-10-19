@@ -325,6 +325,20 @@ class Vix(unittest.TestCase):
         self.assertEqual(r["trades"], 0)
         self.assertEqual(r["value"], 100)
 
+    def test_trades_the_cad_fund_when_it_can_so_switches_pay_no_fx(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            _synth.write(off, "VFV.TO", _synth.chart("VFV.TO", p0=130, growth=0.25, wiggle=0.01, currency="CAD",
+                                                     n=520, gaps={461: -7, 481: 5}))
+            data = load_data(off)
+            r = replay.run_vix_agent(data, data.days[400], data.days[519], 100)
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual(r["fund"], "VFV.TO")
+        self.assertGreaterEqual(r["switches"], 2)
+        self.assertEqual(r["fx_fees"], 0)
+
 
 class YourHoldingsAndRolling(unittest.TestCase):
     def test_parse_windows(self):
