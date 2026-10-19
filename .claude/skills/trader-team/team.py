@@ -48,7 +48,7 @@ import trade_log  # noqa: E402
 
 DEFAULTS = {
     "coins": ["BTC", "ETH", "SOL", "XRP", "DOGE", "LTC", "BCH", "LINK", "AVAX", "DOT"],
-    "interval_min": 15, "lookback_bars": 200,
+    "interval_min": 1440, "lookback_bars": 200,  # daily bars: the only timeframe that made money in both test periods
     "ema_fast": 9, "ema_slow": 21, "ema_trend": 50, "rsi_period": 14, "rsi_min": 50, "rsi_max": 70,
     "atr_period": 14, "stop_atr": 1.5, "tp_atr": 3.0,
     "risk_pct": 2.0, "max_position_pct": 25, "max_open": 3, "max_total_risk_pct": 6,
@@ -219,6 +219,9 @@ def cycle(state, bars_all, now, broker, cfg, paths, log=print):
         if sig["action"] != "BUY":
             rep["refused"].append({"coin": c, "by": "Analyst", "why": "; ".join(sig["reasons"])})
             continue
+        if state.get("entered_bar", {}).get(c) == bars_by[c][-1]["t"]:  # one entry per signal bar
+            rep["refused"].append({"coin": c, "by": "Analyst", "why": "already traded this bar's signal"})
+            continue
         acct = broker.account(prices)
         acct.update(positions=pos, cooldown=state.get("cooldown", {}))
         plan = risk_manager.plan_entry(sig, acct, cfg, now)
@@ -237,6 +240,7 @@ def cycle(state, bars_all, now, broker, cfg, paths, log=print):
                   "risk_usd": plan["risk_usd"], "approved_by": "Scanner > Analyst > Risk Manager > Executor (%s)"
                   % broker.label, "scanner_note": s["why"], "analyst_note": "; ".join(sig["reasons"]),
                   "risk_note": "; ".join(plan["reasons"])}
+        state.setdefault("entered_bar", {})[c] = bars_by[c][-1]["t"]
         rep["entries"].append({"coin": c, "qty": fill["qty"], "price": fill["price"]})
         log("[%s] BUY %s %s @ %.6g  stop %.6g  target %.6g  risking $%.2f" % (
             broker.label, fill["qty"], c, fill["price"], pos[c]["stop"], pos[c]["tp"], plan["risk_usd"]))
@@ -330,7 +334,8 @@ def run_loop(base, log=print):
             if read_kill(Paths(base)):
                 log("KILL SWITCH set after repeated errors. Stopped.")
                 return 1
-        wait = iv - (time.time() % iv) + 20  # 20 s after the bar closes
+        step = min(iv, 900)  # check stops every 15 minutes even on daily bars
+        wait = step - (time.time() % step) + 20  # 20 s after a 15-minute mark
         time.sleep(wait)
 
 

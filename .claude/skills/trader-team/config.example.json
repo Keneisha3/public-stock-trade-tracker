@@ -4,7 +4,7 @@
   "data": "coinbase",
   "start_cash": 10000,
   "coins": ["BTC", "ETH", "SOL", "XRP", "DOGE", "LTC", "BCH", "LINK", "AVAX", "DOT"],
-  "interval_min": 15,
+  "interval_min": 1440,
   "ema_fast": 9,
   "ema_slow": 21,
   "ema_trend": 50,

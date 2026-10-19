@@ -9,6 +9,12 @@ name: replay
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "replay (one as-of date), walk-forward (five periods 2019-2026, needs a label) or build-signals (Congress + insider data)"
+        required: false
+        default: "replay"
+        type: choice
+        options: ["replay", "walk-forward", "build-signals", "discover"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -17,18 +23,33 @@ on:
         description: "Parts to skip: crypto, pelosi, or 'crypto pelosi' (blank = run everything)"
         required: false
         default: ""
+      windows:
+        description: "Windows, e.g. 24m,12m,6m (blank = 12m,6m,3m,1m,2w,1w)"
+        required: false
+        default: ""
+      sec_user_agent:
+        description: "Optional 'Name email' for SEC downloads (read privately, hidden in logs, never saved)"
+        required: false
+        default: ""
+      label:
+        description: "Research label, e.g. older-period (saves to research/<label>.md instead of the weekly report)"
+        required: false
+        default: ""
   schedule:
-    - cron: "17 13 * * 6"  # Saturdays, 13:17 UTC
+    - cron: "17 13 * * 6"  # Saturdays, 13:17 UTC: the weekly replay
+    - cron: "41 22 * * 1-5"  # weekdays after the close: archive the idea lists (discover)
+    - cron: "23 7 3 * *"  # the 3rd of each month: refresh the Congress and insider signals
 
 permissions:
   contents: write
 
 concurrency:
-  group: replay
+  group: replay-${{ inputs.label || 'weekly' }}
   cancel-in-progress: false
 
 jobs:
   replay:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 13 * * 6') || inputs.mode == 'replay' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -40,10 +61,19 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
       - name: Set up trader/ with the default watchlists
         run: python trade.py init
+      - name: Dated signals (Congress, insiders) from the replay-results branch
+        run: |
+          mkdir -p signals
+          git fetch -q origin replay-results || true
+          for f in congress.json.gz insiders.json.gz; do
+            git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
+          done
       - name: Replay $100 in every strategy
         env:
           ASOF: ${{ inputs.asof }}
           SKIP: ${{ inputs.skip }}
+          WINDOWS: ${{ inputs.windows }}
+          LABEL: ${{ inputs.label }}
         run: |
           args=()
           if [ -n "$ASOF" ]; then
@@ -56,7 +86,14 @@ jobs:
               case "$part" in crypto|pelosi) args+=("$part") ;; *) echo "skip: crypto or pelosi only"; exit 1 ;; esac
             done
           fi
-          python trade.py replay --strict "${args[@]}"
+          if [ -n "$WINDOWS" ]; then
+            [[ "$WINDOWS" =~ ^[0-9]+[dwmy](,[0-9]+[dwmy])*$ ]] || { echo "windows like 24m,12m,6m"; exit 1; }
+            args+=(--windows "$WINDOWS")
+          fi
+          if [ -n "$LABEL" ]; then
+            [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
+          fi
+          python trade.py replay --strict --signals signals "${args[@]}"
       - name: Summary page
         if: always()
         run: |
@@ -72,6 +109,8 @@ jobs:
           path: trader/replay/report.*
           if-no-files-found: ignore
       - name: Save to the replay-results branch
+        env:
+          LABEL: ${{ inputs.label }}
         run: |
           asof=$(python -c "import json; print(json.load(open('trader/replay/report.json'))['asof'])")
           mkdir -p "$RUNNER_TEMP/out"
@@ -84,9 +123,240 @@ jobs:
             git checkout -q --orphan replay-results
             git rm -rqf .
           fi
-          mkdir -p history
-          cp "$RUNNER_TEMP/out/report.md" "$RUNNER_TEMP/out/report.json" .
-          cp "$RUNNER_TEMP/out/report.md" "history/$asof.md"
-          git add report.md report.json "history/$asof.md"
-          git commit -qm "Replay as of the close on $asof" || echo "no change"
-          git push -q origin replay-results
+          if [ -n "$LABEL" ]; then  # a research run: never replaces the weekly report
+            mkdir -p research
+            cp "$RUNNER_TEMP/out/report.md" "research/$LABEL.md"
+            cp "$RUNNER_TEMP/out/report.json" "research/$LABEL.json"
+            git add "research/$LABEL.md" "research/$LABEL.json"
+            git commit -qm "Research run $LABEL as of $asof" || echo "no change"
+          else
+            mkdir -p history
+            cp "$RUNNER_TEMP/out/report.md" "$RUNNER_TEMP/out/report.json" .
+            cp "$RUNNER_TEMP/out/report.md" "history/$asof.md"
+            git add report.md report.json "history/$asof.md"
+            git commit -qm "Replay as of the close on $asof" || echo "no change"
+          fi
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- walk-forward
+  # Download 10 years of prices once (every S&P 500 member since 2016 + index
+  # funds + a Canadian list), replay five periods in parallel (including the 2020
+  # crash and the 2022 bear market), combine them into research/<label>/.
+
+  wf-data:
+    if: ${{ inputs.mode == 'walk-forward' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check inputs
+        env:
+          LABEL: ${{ inputs.label }}
+          WINDOWS: ${{ inputs.windows }}
+        run: |
+          [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
+          [[ -z "$WINDOWS" || "$WINDOWS" =~ ^[0-9]+[dwmy](,[0-9]+[dwmy])*$ ]] || { echo "windows like 24m,12m"; exit 1; }
+      - name: Download 10 years of prices
+        run: |
+          python trade.py init
+          python .claude/skills/trader-replay/replay.py --history 10y --save-data market --windows 1m \
+            --no-rolling --skip crypto pelosi > /dev/null
+          ls market | wc -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: market-data
+          path: market
+          retention-days: 3
+
+  wf-period:
+    needs: wf-data
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        asof: ["2019-10-18", "2020-10-16", "2022-10-14", "2024-10-18", "2026-10-16"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: market-data
+          path: market
+      - name: Dated signals (Congress, insiders) from the replay-results branch
+        run: |
+          mkdir -p signals
+          git fetch -q origin replay-results || true
+          for f in congress.json.gz insiders.json.gz; do
+            git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
+          done
+          ls -la signals
+      - name: Replay the period ending ${{ matrix.asof }}
+        env:
+          WINDOWS: ${{ inputs.windows || '24m,12m,6m,1m' }}
+          ASOF: ${{ matrix.asof }}
+        run: |
+          python trade.py init
+          mkdir -p out
+          status=0
+          python .claude/skills/trader-replay/replay.py --offline market --history 10y --asof "$ASOF" \
+            --windows "$WINDOWS" --skip crypto pelosi --signals signals --strict > /dev/null || status=$?
+          cp trader/replay/report.md "out/report-$ASOF.md"
+          cp trader/replay/report.json "out/report-$ASOF.json"
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: period-${{ matrix.asof }}
+          path: out
+          if-no-files-found: ignore
+
+  wf-combine:
+    needs: wf-period
+    if: ${{ always() && inputs.mode == 'walk-forward' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: period-*
+          path: out
+          merge-multiple: true
+      - name: Walk-forward table
+        run: |
+          python scripts/walkforward.py out/summary.md out/report-*.json
+          cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        env:
+          LABEL: ${{ inputs.label }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out" && cp out/* "$RUNNER_TEMP/out/"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p "research/$LABEL"
+          cp "$RUNNER_TEMP"/out/summary.md "$RUNNER_TEMP"/out/report-*.md "$RUNNER_TEMP"/out/report-*.json "research/$LABEL/"
+          git add "research/$LABEL"
+          git commit -qm "Walk-forward research: $LABEL" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- build-signals
+  # Every House member's trades since 2015 and every insider purchase (SEC Form 4
+  # bulk data) since 2015, saved to replay-results/signals/ for the walk-forward.
+
+  sig-congress:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'congress')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+      - name: House PTRs, every member, 2015 on
+        run: python .claude/skills/trader-replay/signals.py congress --years "2015-$(date +%Y)" --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-congress
+          path: out/congress.json.gz
+
+  sig-insiders:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SEC insider purchases, 2015 on
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")  # from the trigger, not printed
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          [ -n "$SEC_USER_AGENT" ] || { echo "no SEC user agent: pass sec_user_agent or set the SEC_USER_AGENT secret"; exit 1; }
+          y=$(date +%Y); q=$(( ($(date +%-m) - 1) / 3 ))
+          if [ "$q" -eq 0 ]; then y=$((y - 1)); q=4; fi
+          python .claude/skills/trader-replay/signals.py insiders --quarters "2015q1-${y}q${q}" --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-insiders
+          path: out/insiders.json.gz
+
+  sig-save:
+    needs: [sig-congress, sig-insiders]
+    if: ${{ always() && ((github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sig-*
+          path: out
+          merge-multiple: true
+      - name: Save to the replay-results branch
+        run: |
+          ls -la out
+          mkdir -p "$RUNNER_TEMP/out" && cp out/* "$RUNNER_TEMP/out/" || true
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p signals
+          cp "$RUNNER_TEMP"/out/*.json.gz signals/ 2>/dev/null || true
+          git add signals
+          git commit -qm "Dated signals: Congress trades and insider purchases" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- discover
+  # Every weekday: snapshot every source (the whole market and the idea lists),
+  # rank the whole market, and archive both to replay-results/discover/, so the
+  # lists build a dated history that can be backtested later.
+
+  discover:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '41 22 * * 1-5') || inputs.mode == 'discover' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Snapshot every source, rank the whole market
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH" 2>/dev/null)
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          python trade.py init
+          python trade.py discover snapshot
+          python trade.py discover funnel --deep --top 100 > /dev/null
+          python trade.py discover show
+      - name: Save to the replay-results branch
+        run: |
+          day=$(date -u +%Y-%m-%d)
+          mkdir -p "$RUNNER_TEMP/out"
+          cp trader/discover/archive/*.json.gz "$RUNNER_TEMP/out/"
+          cp trader/discover/ideas.json "$RUNNER_TEMP/out/ideas-$day.json"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p discover/archive discover/ideas
+          cp "$RUNNER_TEMP"/out/*.json.gz discover/archive/
+          cp "$RUNNER_TEMP"/out/ideas-*.json discover/ideas/
+          cp "$RUNNER_TEMP"/out/ideas-*.json discover/latest-ideas.json
+          git add discover
+          git commit -qm "Discover snapshot $day" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done

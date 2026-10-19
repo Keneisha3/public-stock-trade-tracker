@@ -194,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/replay":
             skip = [x for x in body.get("skip", []) if x in ("crypto", "pelosi")]
             out, _ = replay.replay(b, body.get("asof") or None, float(body.get("cash") or 100), skip,
-                                   log=lambda m: None)
+                                   log=lambda m: None, uni="auto")
             return {"ok": True, "asof": out["asof"], "errors": out["errors"][:5]}
         if path == "/api/backtest":
             charts, errors = paper.load_charts(paper.universe(os.path.join(b, "paper", "config.json")))

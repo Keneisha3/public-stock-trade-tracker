@@ -33,7 +33,7 @@ def after(b):
 
 
 def cfg(**over):
-    c = dict(team.DEFAULTS)
+    c = dict(team.DEFAULTS, interval_min=15)  # these tests drive the team on 15-minute bars
     c.update(over)
     return c
 
@@ -326,7 +326,7 @@ class Live(unittest.TestCase):
         os.makedirs(self.off)
         os.makedirs(self.team_dir)
         with open(os.path.join(self.team_dir, "config.json"), "w") as fh:
-            json.dump({"coins": ["BTC"]}, fh)
+            json.dump({"coins": ["BTC"], "interval_min": 15}, fh)
         self.b = bars(UP_DIP_UP)
         with open(os.path.join(self.off, "candles-BTC.json"), "w") as fh:
             json.dump(self.b, fh)

@@ -2,7 +2,7 @@
 name: trader-team
 description: >-
   A crypto trading bot TEAM on PAPER money only: a Scanner checks 10 major
-  coins every 15 minutes, an Analyst looks for an EMA 9/21 crossover with RSI
+  coins on daily bars, an Analyst looks for an EMA 9/21 crossover with RSI
   50-70 in an uptrend, a Risk Manager risks at most 2% of the paper account
   per trade with a stop-loss and take-profit (2:1), and an Executor places
   SIMULATED trades (default, no account) or Alpaca PAPER trades, refusing
@@ -17,7 +17,7 @@ argument-hint: "[check | run | status | summary | kill | resume | backtest]"
 
 # trader-team
 
-Four roles, one cycle every 15 minutes, fake money only. The beginner guide
+Four roles, daily bars checked every 15 minutes, fake money only. The beginner guide
 with every file explained is `docs/crypto-bot-team.md` in the repo.
 
 `${CLAUDE_SKILL_DIR}` below is this skill's folder. Run from the repo root.
@@ -25,7 +25,7 @@ with every file explained is `docs/crypto-bot-team.md` in the repo.
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/team.py" check            # set up right? never trades
 python3 "${CLAUDE_SKILL_DIR}/team.py" backtest --days 30
-python3 "${CLAUDE_SKILL_DIR}/team.py" run              # every 15 min until Ctrl+C or the kill switch
+python3 "${CLAUDE_SKILL_DIR}/team.py" run              # checks every 15 min until Ctrl+C or the kill switch
 python3 "${CLAUDE_SKILL_DIR}/team.py" run --once       # one cycle, for cron
 python3 "${CLAUDE_SKILL_DIR}/team.py" status
 python3 "${CLAUDE_SKILL_DIR}/team.py" summary --day 2026-10-20
@@ -45,7 +45,7 @@ defaults), or copy `config.example.json` there.
 | Risk Manager | `risk_manager.py` | stop = entry - 1.5 ATR, target = entry + 3 ATR; size so a stop-out costs at most 2 % of the account including fees; max 25 % in a coin, 3 open trades, 6 % total risk; cool-off after a stop; -5 % in a day trips the kill switch |
 | Executor | `executor.py` | SIMULATED broker (default) or Alpaca PAPER; refuses unless `TRADING_MODE=paper`, the paper URL, a `PK` paper key and an Alpaca paper account (`PA...`) all check out |
 
-`team.py` runs the cycle, `candles.py` fetches 15-minute candles (Coinbase,
+`team.py` runs the cycle, `candles.py` fetches daily candles by default (Coinbase,
 no key; or Alpaca), `trade_log.py` writes `trades.csv`, `events.csv` and
 `equity.csv` and builds the summary.
 

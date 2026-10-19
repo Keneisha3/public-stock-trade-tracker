@@ -144,14 +144,22 @@ def parse_chart(text, symbol):
             "bars": bars, "dividends": divs}
 
 
-def get_chart(symbol, offline=None, range_="5y"):
+def get_chart(symbol, offline=None, range_="5y", save=None):
+    """One Yahoo chart. offline: read DIR/chart-SYM.json instead. save: also write the raw
+    answer there, so a later run can use it with offline=DIR."""
     if offline:
         path = os.path.join(offline, "chart-%s.json" % symbol.upper())
         if not os.path.exists(path):
             raise MarketError("no offline chart file %s" % path)
         with open(path, encoding="utf-8") as fh:
             return parse_chart(fh.read(), symbol)
-    return parse_chart(fetch(CHART % (urllib.parse.quote(symbol.upper()), range_)), symbol)
+    text = fetch(CHART % (urllib.parse.quote(symbol.upper()), range_))
+    chart = parse_chart(text, symbol)
+    if save:
+        os.makedirs(save, exist_ok=True)
+        with open(os.path.join(save, "chart-%s.json" % symbol.upper()), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return chart
 
 
 # ---------------------------------------------------------------- metrics

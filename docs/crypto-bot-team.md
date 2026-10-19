@@ -7,7 +7,7 @@ unless everything says "paper".
 
 ## What it is
 
-Four "team members" (small Python files) work together every 15 minutes:
+Four "team members" (small Python files) work together, checking every 15 minutes and deciding on daily price bars:
 
 1. **Scanner** checks 10 big coins (BTC, ETH, SOL, XRP, DOGE, LTC, BCH, LINK,
    AVAX, DOT) and picks the ones that might be starting a move.
@@ -161,8 +161,8 @@ All in `.claude/skills/trader-team/`:
 
 | file | what it does |
 | --- | --- |
-| `team.py` | The boss (`python3 trade.py crypto ...` runs it). Runs a cycle every 15 minutes, in this order: check the kill switch, check stops and targets, then Scanner, Analyst, Risk Manager, Executor, then save everything. Also the commands: check, run, status, summary, kill, resume, backtest, reset. |
-| `candles.py` | Downloads 15-minute price bars ("candles") from Coinbase (no key needed) or Alpaca. Reads your `.env` file without ever printing your keys. |
+| `team.py` | The boss (`python3 trade.py crypto ...` runs it). Runs a cycle every 15 minutes (decisions on daily bars), in this order: check the kill switch, check stops and targets, then Scanner, Analyst, Risk Manager, Executor, then save everything. Also the commands: check, run, status, summary, kill, resume, backtest, reset. |
+| `candles.py` | Downloads daily price bars (the default; `interval_min` in config.json changes it) ("candles") from Coinbase (no key needed) or Alpaca. Reads your `.env` file without ever printing your keys. |
 | `scanner.py` | The Scanner. Skips coins with bad or old data and passes possible setups to the Analyst. |
 | `analyst.py` | The Analyst. Works out the averages (EMA), RSI and ATR, and says BUY, EXIT or nothing, with the reasons written out. |
 | `risk_manager.py` | The Risk Manager. Sets the stop-loss and take-profit and decides the size, or says no. Also the 5 %-a-day loss limit. |

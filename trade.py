@@ -10,6 +10,7 @@
     python3 trade.py paper status             the stock paper bot
     python3 trade.py crypto run               the crypto bot team (paper money)
     python3 trade.py replay                   what $100 would have done in each strategy
+    python3 trade.py discover snapshot        today's idea lists (news, Yahoo, Motley Fool, Reddit, the whole market)
 
 Research tools: copycat, news, pelosi, analyst, screener, budget, risk,
 broker, tax, alerts, rebalance. Add --help to any command for its options.
@@ -30,6 +31,7 @@ TOOLS = {
     "paper": "trader-paper/paper.py",
     "crypto": "trader-team/team.py",
     "replay": "trader-replay/replay.py",
+    "discover": "trader-discover/discover.py",
     "copycat": "trader-copycat/edgar13f.py",
     "news": "trader-news/news.py",
     "pelosi": "trader-pelosi/ptr.py",

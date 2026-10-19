@@ -7,13 +7,20 @@ like the crypto team's roles, and only ever looks at closes up to today:
   level   risk-on while the VIX closes at or under a threshold (default 25)
   trend   risk-on while the VIX closes at or under its own N-day average (default 50):
           fear is not rising
+  term    risk-on while the VIX closes at or under the 3-month VIX (^VIX3M): the
+          normal "contango" shape. When short-term fear tops longer-term fear
+          ("backwardation") the market is in real stress.
 
-Risk-on means hold the S&P 500; risk-off means step aside to cash. The
-decision is made at the close and acted on at the next open.
+Risk-on means hold the fund (default the Nasdaq 100, QQQ; "asset": "SPY" for the
+S&P 500); risk-off means step aside to US-dollar cash. The default (QQQ unless
+the VIX closes over 30) won both test periods among the rules tried, but it
+still trailed simply holding QQQ: stepping out on fear mostly protects, it
+rarely adds. The decision is made at the close and acted on at the next open.
 """
 
 REGIMES = ((15.0, "calm"), (20.0, "normal"), (30.0, "nervous"), (float("inf"), "fear"))
-DEFAULT_RULE = {"mode": "level", "threshold": 25.0}
+DEFAULT_RULE = {"mode": "level", "threshold": 30.0, "asset": "QQQ"}
+NAMES = {"QQQ": "the Nasdaq 100", "SPY": "the S&P 500"}
 
 
 def regime(level):
@@ -26,12 +33,19 @@ def regime(level):
     return "fear"
 
 
-def decide(closes, rule=None):
-    """closes: VIX closes up to and including today, oldest first. -> (risk_on, reason)."""
+def decide(closes, rule=None, closes3m=None):
+    """closes: VIX closes up to and including today, oldest first (closes3m: the same for
+    ^VIX3M, for the term rule). -> (risk_on, reason)."""
     rule = dict(DEFAULT_RULE, **(rule or {}))
     if not closes:
         return True, "no VIX data: stay invested"
     now = closes[-1]
+    if rule["mode"] == "term":
+        if not closes3m:
+            return True, "no 3-month VIX data: stay invested"
+        on = now <= closes3m[-1]
+        return on, "VIX %.1f is %s the 3-month VIX %.1f (%s)" % (
+            now, "at or under" if on else "above", closes3m[-1], "calm shape" if on else "stress: backwardation")
     if rule["mode"] == "trend":
         n = int(rule.get("days", 50))
         if len(closes) < n:
@@ -54,5 +68,6 @@ def status(bars, rule=None):
     prev = closes[-2] if len(closes) > 1 else None
     return {"level": round(closes[-1], 2), "day_change_pct": round(100 * (closes[-1] / prev - 1), 1) if prev else None,
             "regime": regime(closes[-1]), "avg_50d": round(avg, 2), "risk_on": on,
-            "agent": "hold the S&P 500" if on else "step aside to cash", "reason": why,
+            "agent": ("hold " + NAMES.get(dict(DEFAULT_RULE, **(rule or {}))["asset"], "the fund")) if on
+            else "step aside to cash", "reason": why,
             "date": bars[-1].get("d")}
