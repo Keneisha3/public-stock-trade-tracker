@@ -124,7 +124,7 @@ const money = (x, d = 2) => (x < 0 ? "-$" : "$") + Math.abs(+x || 0).toLocaleStr
 const pct = (x, d = 1) => x == null ? "–" : (x > 0 ? "+" : "") + (+x).toFixed(d) + "%";
 const cls = (x) => x == null ? "" : x > 0 ? "up" : x < 0 ? "down" : "";
 const SERIES = ["var(--s1)", "var(--s2)", "var(--s3)"];
-let S = null, tab = 0, contribute = 0;
+let S = null, tab = 0, contribute = 0, rtab = null, rsel = "growth";
 
 async function api(path, body) {
   const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Trader": "1"}, body: JSON.stringify(body)};
@@ -260,6 +260,7 @@ function render() {
       `<button role="tab" aria-selected="${i === tab}" data-tab="${i}">${esc(x.name)} · ${money(x.total, 0)}</button>`).join("")}</div>`;
   if (a) {
     h += `<div class="row small" style="margin-bottom:8px">${esc(a.strategy_label)} · ${esc(a.type)} · cash ${money(a.cash, 0)} (${a.cash_pct.toFixed(0)}%) · gain ${a.gain_pct != null ? `<span class="${cls(a.gain_pct)}">${pct(a.gain_pct)}</span>` : "–"} · yield ${a.yield_pct.toFixed(2)}% · score ${a.score ?? "–"} · cap ${a.cap_pct}% per stock</div>`;
+    h += settingsView(a, (S.accounts || []).find(x => x.id === a.id));
     if (a.flags.length || a.notes.length) h += `<div class="chips" style="margin-bottom:10px">${a.flags.map(chip).join("")}${a.notes.map(n => chip({level: "info", text: n})).join("")}</div>`;
     h += a.positions.length ? `<div class="scroll"><table><thead><tr><th>Holding</th><th class="num">Value</th><th>Weight</th><th class="num">Gain</th><th class="num">Today</th><th class="num">12 mo</th><th class="num">Yield</th><th class="num">Score</th><th class="hide-sm">1 year</th></tr></thead><tbody>${
       a.positions.map(p => { const m = p.m || {}, cap = a.cap_pct;
@@ -273,6 +274,7 @@ function render() {
   h += `</section>`;
   h += `<section class="grid two"><div class="card"><h2>Paper trading bot</h2>${paperView(P)}</div>
     <div class="card"><h2>Backtest: 5 years</h2>${backtestView(S.backtest)}</div></section>`;
+  h += `<section class="card" id="replay"><h2>Replay: what $100 would have done</h2>${replayView(S.replay)}</section>`;
   h += `<section class="card"><h2>Crypto bot team (paper money)</h2>${cryptoView(S.crypto)}</section>`;
   const news = (B && B.news) || [], cong = (B && B.congress) || [];
   h += `<section class="grid two">
@@ -316,6 +318,33 @@ function render() {
     {name: "Bot team", color: SERIES[0], points: S.crypto.curve.map(c => [c[0], c[1]])},
     {name: "Holding the same coins", color: SERIES[1], points: S.crypto.curve.filter(c => c[2] != null).map(c => [c[0], c[2]])}],
     {h: 180, label: "Crypto bot team vs buy and hold", empty: "The chart starts after a few cycles."});
+  if (S.replay && $("#rpChart")) {
+    const row = S.replay.results[rtab] || {};
+    const pick = [[rsel, SERIES[0]], ["S&P 500 (SPY)", SERIES[1]], ["TSX 60 (XIU.TO)", SERIES[2]]];
+    lineChart($("#rpChart"), pick.filter(([k]) => row[k] && row[k].curve).map(([k, c]) => (
+      {name: RL[k] || k, color: c, points: row[k].curve})), {h: 200, label: "Replay value over time", fmt: v => money(v, 2),
+      empty: "No daily curve for this one."});
+  }
+  const mcs = S.replay && S.replay.monte_carlo && S.replay.monte_carlo.strategies[rsel];
+  if (mcs && $("#mcChart")) lineChart($("#mcChart"), [
+    {name: "good case (95%)", color: SERIES[2], points: mcs.fan.map(f => ["day " + String(f[0]).padStart(3, "0"), f[3]])},
+    {name: "median", color: SERIES[0], points: mcs.fan.map(f => ["day " + String(f[0]).padStart(3, "0"), f[2]])},
+    {name: "bad case (5%)", color: SERIES[1], points: mcs.fan.map(f => ["day " + String(f[0]).padStart(3, "0"), f[1]])}],
+    {h: 180, label: "Monte Carlo outcome range", fmt: v => money(v, 0)});
+  document.querySelectorAll("[data-rtab]").forEach(b => b.onclick = () => { rtab = b.dataset.rtab; render(); });
+  document.querySelectorAll("[data-rsel]").forEach(b => b.onclick = () => { rsel = b.dataset.rsel; render(); });
+  const saveRules = async (reset) => {
+    const id = $("#rulesSave").dataset.acct, rules = {};
+    document.querySelectorAll("[data-rule]").forEach(i => { if (i.value !== "") rules[i.dataset.rule] = +i.value; });
+    try { await api("/api/rules", reset ? {account: id, reset: true} : {account: id, rules}); await load(); }
+    catch (e) { $("#rulesMsg").textContent = e.message; }
+  };
+  if ($("#rulesSave")) { $("#rulesSave").onclick = () => saveRules(false); $("#rulesReset").onclick = () => saveRules(true); }
+  const rg = $("#rpGo"); if (rg) rg.onclick = async () => {
+    rg.disabled = true; rg.textContent = "Replaying… (a few minutes with crypto)";
+    try { await api("/api/replay", {skip: $("#rpFast") && $("#rpFast").checked ? ["crypto"] : []}); await load(); }
+    catch (e) { rg.disabled = false; rg.textContent = "Failed: " + e.message; }
+  };
   const kb = $("#teamKill"); if (kb) kb.onclick = async () => {
     if (!confirm("Kill switch: sell every paper position on the next cycle and stop the bot?")) return;
     await api("/api/team/kill", {}); await load();
@@ -337,6 +366,108 @@ function paperView(P) {
     <p style="margin-bottom:4px"><b>Ready for real money?</b></p>
     <ul class="list" style="gap:2px">${P.readiness.map(c => `<li class="check ${c.ok ? "ok" : ""}" style="background:none;border:0;padding:2px 0">${esc(c.check)}</li>`).join("")}</ul>
     <p class="small">${esc(P.note)}</p>`;
+}
+
+const RL = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term reviewer", "dividend": "Dividend reviewer (Wealthsimple)",
+  "stock bot": "Stock bot (ATR)", "crypto team": "Crypto bot team", "Pelosi copycat": "Pelosi copycat"};
+const RBENCH = ["S&P 500 (SPY)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"];
+
+function replayView(R) {
+  const runBar = `<div class="row" style="margin-bottom:10px"><button id="rpGo" class="primary">${R ? "Run again" : "Run the replay"}</button>
+    <label class="small"><input type="checkbox" id="rpFast"> skip crypto (faster)</label>
+    <span class="small">Needs internet: Yahoo Finance, Coinbase, the House Clerk.</span></div>`;
+  if (!R) return runBar + `<div class="empty">Gives $100 to every strategy 1 week, 2 weeks, 1 month and 6 months before the last Friday close, deciding only with what was known each day, and compares them with holding the S&P 500, the TSX 60, Bitcoin or cash.</div>`;
+  const wins = Object.keys(R.results);
+  if (!rtab || !R.results[rtab]) rtab = wins[0];
+  const row = R.results[rtab], f = row.factors || {};
+  const strat = Object.keys(row).filter(k => row[k] && row[k].return_pct !== undefined && !RBENCH.includes(k) && k !== "Pelosi copycat");
+  if (!row[rsel]) rsel = strat[0] || "growth";
+  const spy = (row["S&P 500 (SPY)"] || {}).return_pct;
+  const line = (k, bench) => { const r = row[k]; if (!r) return "";
+    return `<tr data-rsel="${esc(k)}" style="cursor:pointer;${k === rsel ? "background:var(--chip-info)" : ""}${bench ? ";color:var(--ink-2)" : ""}">
+      <td>${k === rsel ? "▸ " : ""}${esc(RL[k] || k)}</td><td class="num">${money(r.value)}</td><td class="num ${cls(r.return_pct)}">${pct(r.return_pct, 2)}</td>
+      <td class="num hide-sm ${cls(spy == null ? null : r.return_pct - spy)}">${bench || spy == null ? "–" : (r.return_pct - spy >= 0 ? "+" : "") + (r.return_pct - spy).toFixed(1) + " pts"}</td>
+      <td class="num hide-sm">${r.trades ?? "–"}</td><td class="num hide-sm">${r.fees != null ? money(r.fees) : "–"}</td><td class="num hide-sm">${r.dividends ? money(r.dividends) : "–"}</td></tr>`; };
+  const sel = row[rsel] || {}, n = (row.insights || {})[rsel] || {going_well: [], not_going_well: []};
+  const contrib = sel.contrib || [], maxAbs = Math.max(0.01, ...contrib.map(c => Math.abs(c.pnl)));
+  const ov = Object.entries(R.overall || {}).sort((a, b) => b[1].beat_spy - a[1].beat_spy);
+  return runBar + `<div class="small" style="margin-bottom:8px">As of the close on <b>${esc(R.asof)}</b> · $${esc(R.cash)} each · ${esc(R.account_type)} · run ${esc(R.generated || "")}</div>
+    <div class="tabs">${wins.map(w => `<button data-rtab="${esc(w)}" aria-selected="${w === rtab}">${esc(w)} <span class="small">from ${esc(R.results[w].start)}</span></button>`).join("")}</div>
+    <div class="small" style="margin-bottom:10px">Backdrop: S&amp;P 500 <b class="${cls(f.spy_pct)}">${pct(f.spy_pct)}</b> · TSX 60 <b class="${cls(f.tsx_pct)}">${pct(f.tsx_pct)}</b> · USD/CAD ${pct(f.usdcad_pct)} · S&amp;P 500 ${f.spy_above_200d ? "above" : "below"} its 200-day average · Pelosi filings posted: ${(f.pelosi_filings || []).length}</div>
+    <div class="scroll"><table><thead><tr><th>Strategy (click one)</th><th class="num">Value</th><th class="num">Return</th><th class="num hide-sm">vs S&amp;P 500</th><th class="num hide-sm">Trades</th><th class="num hide-sm">Costs</th><th class="num hide-sm">Dividends</th></tr></thead><tbody>
+      ${strat.map(k => line(k)).join("")}
+      ${row["Pelosi copycat"] ? `<tr><td colspan="7" class="small" style="padding-top:14px"><b>Separate: following Nancy Pelosi</b> (copies a trade only after its filing was posted)</td></tr>${line("Pelosi copycat")}` : ""}
+      <tr><td colspan="7" class="small" style="padding-top:14px"><b>Benchmarks</b> (buy and hold)</td></tr>
+      ${RBENCH.map(k => line(k, true)).join("")}
+    </tbody></table></div>
+    <div class="grid two" style="margin-top:14px">
+      <div><b>${esc(RL[rsel] || rsel)}</b> vs the S&amp;P 500 and TSX 60<div id="rpChart" style="margin-top:6px"></div></div>
+      <div>
+        <p style="margin:0 0 4px"><b>Going well</b></p>
+        <ul class="list" style="gap:2px">${(n.going_well.length ? n.going_well : ["nothing stood out"]).map(x => `<li class="check ok" style="background:none;border:0;padding:2px 0">${esc(x)}</li>`).join("")}</ul>
+        <p style="margin:10px 0 4px"><b>Not going well</b></p>
+        <ul class="list" style="gap:2px">${(n.not_going_well.length ? n.not_going_well : ["nothing stood out"]).map(x => `<li class="check" style="background:none;border:0;padding:2px 0">${esc(x)}</li>`).join("")}</ul>
+        ${sel.risk ? `<p class="small" style="margin-top:10px">Past 6 months: volatility ${sel.risk.vol_pct}% a year · Sharpe ${sel.risk.sharpe ?? "–"} · worst drop ${pct(sel.risk.max_dd_pct)} · up days ${sel.risk.up_days_pct}%</p>` : ""}
+        ${rsel === "Pelosi copycat" ? `<p class="small">Filings used: ${esc((sel.filings_used || []).join(", ") || "none")} · basket: ${esc((sel.basket || []).join(", ") || "empty")}</p>` : ""}
+      </div></div>
+    ${contrib.length ? `<p style="margin:14px 0 4px"><b>What drove it</b> <span class="small">(profit or loss per holding, CAD, after costs)</span></p>
+      <div class="scroll"><table><tbody>${contrib.slice(0, 10).map(c => `<tr><td class="tick" style="width:90px">${esc(c.ticker)}</td>
+        <td><span style="display:inline-block;height:10px;border-radius:4px;vertical-align:middle;width:${(46 * Math.abs(c.pnl) / maxAbs).toFixed(1)}%;background:${c.pnl >= 0 ? "var(--good)" : "var(--critical)"}"></span></td>
+        <td class="num ${cls(c.pnl)}" style="width:90px">${money(c.pnl)}</td><td class="small" style="width:70px">${c.held ? "still held" : "closed"}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${(sel.fills || []).length ? `<details style="margin-top:10px"><summary class="small">Last trades (${sel.fills.length})</summary><div class="scroll"><table><thead><tr><th>Day</th><th>Side</th><th>Ticker</th><th class="num">Shares</th><th class="num">Price</th><th class="num">CAD</th></tr></thead><tbody>
+      ${sel.fills.slice().reverse().map(x => `<tr><td class="small">${esc(x.day)}</td><td>${esc(x.side)}</td><td class="tick">${esc(x.ticker)}</td><td class="num">${esc(x.shares)}</td><td class="num">${esc(x.price)} ${esc(x.currency)}</td><td class="num">${money(x.cad)}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
+    ${scenariosView(R, wins)}
+    ${mcView(R, rsel)}
+    ${ov.length ? `<p style="margin:14px 0 4px"><b>Across all windows</b></p><div class="scroll"><table><thead><tr><th>Strategy</th>${wins.map(w => `<th class="num">${esc(w)}</th>`).join("")}<th class="num">Beat S&amp;P 500</th></tr></thead><tbody>
+      ${ov.map(([k, t]) => `<tr><td>${esc(RL[k] || k)}</td>${wins.map(w => `<td class="num ${cls(t.returns[w])}">${pct(t.returns[w])}</td>`).join("")}<td class="num">${t.beat_spy} of ${t.windows}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${(R.errors || []).length ? `<p class="small">Data problems: ${esc(R.errors.slice(0, 4).join("; "))}</p>` : ""}
+    <p class="small">1-week and 2-week results are mostly noise. Watchlists are today's (hindsight bias). Not financial advice.</p>`;
+}
+
+const EVERY = [[1, "every day"], [7, "weekly"], [14, "every 2 weeks"], [28, "monthly"], [91, "quarterly"]];
+function settingsView(a, meta) {
+  if (!meta || !S.tunable) return "";
+  const keys = Object.keys(S.tunable).filter(k => S.tunable[k].strategies.includes(a.strategy));
+  const field = k => { const t = S.tunable[k], v = meta.rules[k], d = meta.defaults[k];
+    let input;
+    if (k === "momentum_months") input = `<select data-rule="${k}">${[1, 3, 6, 12].map(m => `<option value="${m}" ${m == v ? "selected" : ""}>${m} month${m > 1 ? "s" : ""}</option>`).join("")}</select>`;
+    else if (k === "review_every_days") input = `<select data-rule="${k}">${EVERY.map(([n, l]) => `<option value="${n}" ${n == v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+    else input = `<input data-rule="${k}" type="number" step="any" min="${t.min}" max="${t.max}" value="${esc(v)}" style="width:90px">`;
+    return `<label class="small" style="display:grid;gap:2px">${esc(t.label)} ${v != d ? `<span style="color:var(--accent)">(default ${esc(d)})</span>` : ""}${input}</label>`; };
+  return `<details style="margin:0 0 12px"><summary class="small"><b>Strategy settings</b>: what this account's review uses (and the replay's "Your settings" scenario)</summary>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin:10px 0">${keys.map(field).join("")}</div>
+    <div class="row"><button id="rulesSave" data-acct="${esc(a.id)}">Save settings</button><button id="rulesReset" data-acct="${esc(a.id)}">Back to defaults</button><span id="rulesMsg" class="small"></span></div></details>`;
+}
+
+function scenariosView(R, wins) {
+  const sc = R.scenarios || [];
+  if (!sc.length) return "";
+  const best = {};
+  sc.forEach(x => { const v = x.results[wins[0]].return_pct; if (!(x.strategy in best) || v > best[x.strategy]) best[x.strategy] = v; });
+  return `<p style="margin:16px 0 4px"><b>Scenarios: same strategy, different settings</b> <span class="small">(inputs on the left, outputs on the right; best 6-month result per strategy in bold)</span></p>
+    <div class="scroll"><table><thead><tr><th>Strategy</th><th>Scenario</th><th class="hide-sm">Changed inputs</th>${wins.map(w => `<th class="num">${esc(w)}</th>`).join("")}<th class="num hide-sm">Sharpe</th><th class="num hide-sm">Worst drop</th></tr></thead><tbody>
+    ${sc.map(x => { const rk = x.risk || {}; const top = x.results[wins[0]].return_pct === best[x.strategy];
+      return `<tr><td class="small">${esc(x.strategy)}</td><td>${top ? "<b>" : ""}${esc(x.name)}${top ? "</b>" : ""}</td>
+        <td class="small hide-sm">${esc(Object.entries(x.inputs).map(([k, v]) => k.replace(/_/g, " ") + " " + v).join(", ") || "defaults")}</td>
+        ${wins.map(w => `<td class="num ${cls(x.results[w].return_pct)}">${pct(x.results[w].return_pct)}</td>`).join("")}
+        <td class="num hide-sm">${rk.sharpe ?? "–"}</td><td class="num hide-sm">${pct(rk.max_dd_pct)}</td></tr>`; }).join("")}
+    </tbody></table></div>
+    <p class="small">Save settings on an account above, or add scenarios to <code>trader/replay/scenarios.json</code>, then run the replay again. Pick settings that win across windows, not just one.</p>`;
+}
+
+function mcView(R, rsel) {
+  const mc = R.monte_carlo;
+  if (!mc) return "";
+  const order = Object.keys(RL).concat(RBENCH).filter(k => mc.strategies[k]);
+  return `<p style="margin:16px 0 4px"><b>Monte Carlo: the next ${mc.horizon_days} trading days</b> <span class="small">(${mc.runs.toLocaleString()} runs, ${mc.block_days}-day blocks of each strategy's own daily returns over the last ${mc.sample_days} days)</span></p>
+    <div class="grid two"><div class="scroll"><table><thead><tr><th>$${esc(R.cash)} becomes</th><th class="num">Bad (5%)</th><th class="num">Median</th><th class="num">Good (95%)</th><th class="num">P(profit)</th><th class="num">P(beat S&amp;P)</th></tr></thead><tbody>
+      ${order.map(k => { const m = mc.strategies[k]; return `<tr data-rsel="${esc(k)}" style="cursor:pointer;${k === rsel ? "background:var(--chip-info)" : ""}"><td>${esc(RL[k] || k)}</td>
+        <td class="num">${money(m.p5)}</td><td class="num"><b>${money(m.median)}</b></td><td class="num">${money(m.p95)}</td>
+        <td class="num">${m.prob_profit_pct}%</td><td class="num">${m.prob_beat_bench_pct == null ? "–" : m.prob_beat_bench_pct + "%"}</td></tr>`; }).join("")}
+    </tbody></table></div>
+    <div>${mc.strategies[rsel] ? `<b>${esc(RL[rsel] || rsel)}</b>: range of outcomes<div id="mcChart" style="margin-top:6px"></div>
+      <p class="small">Typical worst drop along the way ${pct(mc.strategies[rsel].median_max_dd_pct)}; in a bad run ${pct(mc.strategies[rsel].bad_max_dd_pct)}. Chance of losing more than 10%: ${mc.strategies[rsel].prob_loss_10_pct}%.</p>` : `<div class="empty">No daily curve for this strategy, so no simulation.</div>`}</div></div>
+    <p class="small">A bootstrap of one past period shows the spread that period implies. It is not a forecast.</p>`;
 }
 
 function cryptoView(C) {

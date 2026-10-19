@@ -54,18 +54,55 @@ RULES = {
         "max_position_pct": 20, "trim_band_pct": 5, "cash_target_pct": 3, "cash_max_pct": 10,
         "stop_loss_pct": 25, "drawdown_review_pct": 30, "laggard_12m_pct": -10,
         "keep_score": 45, "min_trade": 100, "min_positions": 6,
+        "momentum_months": 12, "review_every_days": 7,
     },
     "medium": {
         "max_position_pct": 15, "trim_band_pct": 4, "cash_target_pct": 3, "cash_max_pct": 10,
         "stop_loss_pct": 20, "drawdown_review_pct": 25, "laggard_12m_pct": -5,
         "keep_score": 50, "min_trade": 100, "min_positions": 6,
+        "momentum_months": 6, "review_every_days": 7,
     },
     "dividend": {
         "max_position_pct": 12, "trim_band_pct": 3, "cash_target_pct": 2, "cash_max_pct": 8,
         "stop_loss_pct": 30, "drawdown_review_pct": 25, "min_yield_pct": 2.0, "max_yield_pct": 8.0,
         "max_volatility_pct": 30, "cut_pct": 10, "keep_score": 50, "min_trade": 100, "min_positions": 8,
+        "review_every_days": 7,
     },
 }
+# The rules a person can tune: (label, min, max, strategies). Everything else stays internal.
+TUNABLE = {
+    "momentum_months": ("Momentum lookback (months)", 1, 12, ("growth", "medium")),
+    "max_position_pct": ("Max per stock (%)", 5, 50, ("growth", "medium", "dividend")),
+    "min_positions": ("Aim for at least N holdings", 1, 30, ("growth", "medium", "dividend")),
+    "stop_loss_pct": ("Stop-loss from your cost (%)", 5, 60, ("growth", "medium", "dividend")),
+    "cash_target_pct": ("Cash to keep (%)", 0, 30, ("growth", "medium", "dividend")),
+    "trim_band_pct": ("Trim when over the cap by (points)", 0, 20, ("growth", "medium", "dividend")),
+    "review_every_days": ("Rebalance every N days", 1, 92, ("growth", "medium", "dividend")),
+    "min_yield_pct": ("Minimum dividend yield (%)", 0, 10, ("dividend",)),
+    "max_yield_pct": ("Yield-trap warning above (%)", 4, 20, ("dividend",)),
+}
+MOMENTUM_CHOICES = (1, 3, 6, 12)
+
+
+def check_rules(strategy, rules):
+    """Keep only known, in-range tunables. Raises AccountsError on a bad value."""
+    out = {}
+    for k, v in (rules or {}).items():
+        if k not in TUNABLE or strategy not in TUNABLE[k][3]:
+            raise AccountsError("%s is not a setting for a %s account" % (k, strategy))
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            raise AccountsError("%s must be a number" % k)
+        lo, hi = TUNABLE[k][1], TUNABLE[k][2]
+        if not lo <= v <= hi:
+            raise AccountsError("%s must be between %g and %g" % (TUNABLE[k][0], lo, hi))
+        if k == "momentum_months" and int(v) not in MOMENTUM_CHOICES:
+            raise AccountsError("momentum lookback must be 1, 3, 6 or 12 months")
+        out[k] = int(v) if k in ("momentum_months", "min_positions", "review_every_days") else v
+    return out
+
+
 STRATEGY_LABEL = {"growth": "Aggressive growth", "medium": "Medium term", "dividend": "Steady dividend"}
 NO_US_WITHHOLDING = {"RRSP", "RRIF", "LIRA", "SPOUSAL RRSP"}  # Canada-US treaty exemption
 TFSA_LIKE = {"TFSA", "FHSA", "RESP", "RDSP"}  # 15% US withholding, not recoverable
@@ -353,18 +390,24 @@ def _clip(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def score(strategy, m):
-    """0-100. A rough heuristic to rank holdings inside one account, not a forecast."""
+def score(strategy, m, rules=None):
+    """0-100. A rough heuristic to rank holdings inside one account, not a forecast.
+
+    momentum_months picks the lookback that drives growth and medium scores; returns over
+    shorter lookbacks are scaled to a yearly pace so the score ranges stay comparable."""
     if not m:
         return None
     g = lambda k: m.get(k) or 0.0  # noqa: E731
     up = m.get("above_sma200")
+    mm = int((rules or {}).get("momentum_months") or (12 if strategy == "growth" else 6))
+    fast = 3 if mm >= 6 else 1
     if strategy == "growth":
-        s = 50 + _clip(g("ret_12m") / 2, -20, 25) + _clip(g("ret_3m") / 2, -10, 10)
+        s = 50 + _clip(g("ret_%dm" % mm) * (12.0 / mm) / 2, -20, 25) + _clip(g("ret_%dm" % fast) * (3.0 / fast) / 2, -10, 10)
         s += 10 if up else (-10 if up is False else 0)
         s -= 10 if g("off_high_pct") <= -30 else 0
     elif strategy == "medium":
-        s = 50 + _clip(g("ret_6m") / 2, -15, 20) + _clip(g("ret_12m") / 4, -10, 10)
+        slow = 12 if mm < 12 else 6
+        s = 50 + _clip(g("ret_%dm" % mm) * (6.0 / mm) / 2, -15, 20) + _clip(g("ret_%dm" % slow) * (12.0 / slow) / 4, -10, 10)
         s += 12 if up else (-12 if up is False else 0)
         s -= 8 if g("vol_pct") > 45 else 0
     else:
@@ -487,7 +530,7 @@ def review_account(acct, holdings, market, base="CAD", contribute=0.0):
     cap = effective_cap(r, len(rows))
     for row in rows:
         row["weight"] = round(100.0 * row["value_base"] / total, 2) if total else 0.0
-        row["score"] = score(strategy, row["metrics"])
+        row["score"] = score(strategy, row["metrics"], r)
         row["flags"] = position_flags(strategy, r, row, row["metrics"], row["weight"], acct["type"], cap)
     acct_flags = []
     cash_pct = 100.0 * cash / total if total else 0.0
@@ -540,7 +583,7 @@ def _keepers(acct, rows, market, cap):
         m = market.get("symbols", {}).get(t)
         if t in cand or not m or any(x["ticker"] == t for x in rows):
             continue
-        sc = score(strategy, m)
+        sc = score(strategy, m, r)
         new = {"ticker": t, "name": m.get("name", ""), "shares": 0, "currency": m["currency"], "price": m["price"],
                "value_base": 0.0, "weight": 0.0, "score": sc, "metrics": m, "watchlist": True,
                "flags": position_flags(strategy, r, {"gain_pct": None, "currency": m["currency"]}, m, 0.0,

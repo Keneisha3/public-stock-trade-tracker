@@ -8,7 +8,7 @@ from _load import REPO, ROOT
 UPSTREAM = ["trader-copycat", "trader-news", "trader-budget", "trader-pelosi", "trader-analyst",
             "trader-screener", "trader-risk", "trader-broker", "trader-tax", "trader-alerts",
             "trader-rebalance"]
-OURS = ["trader-accounts", "trader-paper", "trader-daily", "trader-init", "trader-team"]
+OURS = ["trader-accounts", "trader-paper", "trader-daily", "trader-init", "trader-team", "trader-replay"]
 
 
 def frontmatter(path):
@@ -92,7 +92,7 @@ class Repo(unittest.TestCase):
         allowed = {"argparse", "copy", "csv", "datetime", "io", "json", "math", "os", "re", "statistics", "sys",
                    "time", "urllib", "subprocess", "threading", "traceback", "webbrowser", "http", "contextlib",
                    "bisect", "market", "accounts", "paper", "daily", "init", "team", "analyst", "candles",
-                   "executor", "risk_manager", "scanner", "trade_log"}
+                   "executor", "risk_manager", "scanner", "trade_log", "ptr", "replay"}
         for path in [os.path.join(ROOT, s, f) for s in OURS for f in os.listdir(os.path.join(ROOT, s))
                      if f.endswith(".py")] + [os.path.join(REPO, "app", "server.py")]:
             with open(path, encoding="utf-8") as fh:

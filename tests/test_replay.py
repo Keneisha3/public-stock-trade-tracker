@@ -1,0 +1,334 @@
+import io
+import json
+import os
+import shutil
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+
+from _load import FIX, load
+import _synth
+
+replay = load("trader-replay", "replay")
+ASOF = "2026-10-16"  # a Friday; _synth charts end here
+
+
+def write_world(folder, end=_synth.END, crash_after=None):
+    """Synthetic market + the real Pelosi filing of 2026-08-21 (BE and INTC buys)."""
+    off = os.path.join(folder, "off")
+    spec = {
+        "SPY": dict(p0=500, growth=0.25, divs=_synth.quarterly("2024-12-20", "2026-09-19", 1.7)),
+        "XIU.TO": dict(p0=35, growth=0.2, currency="CAD"),
+        "AAA": dict(p0=100, growth=0.9),        # growth names
+        "BBB": dict(p0=60, growth=0.4),
+        "MMM": dict(p0=80, growth=0.3),         # medium
+        "DIV.TO": dict(p0=40, growth=0.15, currency="CAD",
+                       divs=_synth.quarterly("2023-01-15", "2026-10-15", 0.5, 0.01)),
+        "BE": dict(p0=20, growth=0.8),
+        "INTC": dict(p0=30, growth=0.2),
+    }
+    for sym, kw in spec.items():
+        doc = _synth.chart(sym, n=520, wiggle=0.01, end=end, **kw)
+        if crash_after:
+            r = doc["chart"]["result"][0]
+            q = r["indicators"]["quote"][0]
+            for i, ts in enumerate(r["timestamp"]):
+                if _synth.datetime.datetime.utcfromtimestamp(ts).date().isoformat() > crash_after:
+                    for k in ("open", "high", "low", "close"):
+                        q[k][i] = q[k][i] * 0.3
+        _synth.write(off, sym, doc)
+    _synth.write(off, "USDCAD=X", _synth.chart("USDCAD=X", p0=1.37, n=520, wiggle=0.002, currency="CAD", end=end))
+    shutil.copy(os.path.join(FIX, "trader-pelosi", "2026FD.zip"), os.path.join(off, "2026FD.zip"))
+    shutil.copy(os.path.join(FIX, "trader-pelosi", "ptr-20035143.txt"), os.path.join(off, "ptr-20035143.txt"))
+    base = os.path.join(folder, "trader")
+    os.makedirs(os.path.join(base, "paper"), exist_ok=True)
+    with open(os.path.join(base, "accounts.json"), "w") as fh:
+        json.dump({"accounts": [{"id": "q", "strategy": "growth", "watchlist": ["AAA", "BBB"]},
+                                {"id": "m", "strategy": "medium", "watchlist": ["MMM", "AAA"]},
+                                {"id": "w", "strategy": "dividend", "watchlist": ["DIV.TO"]}]}, fh)
+    with open(os.path.join(base, "paper", "config.json"), "w") as fh:
+        json.dump({"universe": ["AAA", "BBB", "MMM", "INTC"]}, fh)
+    return base, off
+
+
+class Replay(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.base, cls.off = write_world(cls.dir)
+        cls.out, cls.text = replay.replay(cls.base, ASOF, 100, skip=("crypto",), offline=cls.off, log=lambda m: None, mc_runs=200)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.dir)
+
+    def test_windows_and_report(self):
+        r = self.out["results"]
+        self.assertEqual(list(r), ["6 months", "1 month", "2 weeks", "1 week"])
+        self.assertEqual(r["1 week"]["start"], "2026-10-09")
+        self.assertEqual(r["2 weeks"]["start"], "2026-10-02")
+        for w in r.values():
+            for k in ("growth", "medium", "dividend", "stock bot", "Pelosi copycat", "S&P 500 (SPY)", "cash"):
+                self.assertIn(k, w)
+        self.assertIn("Pelosi copycat (separate)", self.text)
+        self.assertTrue(os.path.exists(os.path.join(self.base, "replay", "report.md")))
+
+    def test_strategies_actually_invest(self):
+        r = self.out["results"]["6 months"]
+        self.assertGreater(r["growth"]["trades"], 0)
+        self.assertTrue(r["growth"]["holdings"])
+        self.assertGreater(r["dividend"]["dividends"], 0)  # quarterly payer held across ex-dates
+        self.assertGreater(r["S&P 500 (SPY)"]["value"], 100)  # synthetic SPY rose
+        bot = r["stock bot"]
+        if bot["trades"] == 0:  # never traded: no FX round trip charged on money that never moved
+            self.assertEqual((bot["value"], bot["fees"]), (100, 0.0))
+
+    def test_pelosi_acts_only_after_the_filing_was_posted(self):
+        six = self.out["results"]["6 months"]["Pelosi copycat"]
+        self.assertEqual(six["filings_used"], ["2026-08-21"])
+        self.assertEqual(sorted(six["basket"]), ["BE", "INTC"])
+        one = self.out["results"]["1 month"]["Pelosi copycat"]  # filing was public before this start
+        self.assertEqual(one["filings_used"], ["2026-08-21"])
+        self.assertTrue(one["holdings"])
+
+    def data(self):
+        charts = {}
+        for f in os.listdir(self.off):
+            if f.startswith("chart-"):
+                sym = f[6:-5]
+                charts[sym] = replay.mk.get_chart(sym, offline=self.off)
+        return replay.Data(charts, {})
+
+    def test_pelosi_first_trade_date(self):
+        d = self.data()
+        filings, _ = replay.pelosi_filings([2026], offline=self.off)
+        start = d.trading_day_on_or_before("2026-04-17")
+        pf_out = replay.run_pelosi(d, filings, start, ASOF, 100)
+        self.assertEqual(pf_out["filings_used"], ["2026-08-21"])
+        # an order decided on the filing date fills at the next open, never the same day
+        pf = replay.Portfolio(d, 100)
+        orders = [{"side": "buy", "ticker": "BE", "cad": 50, "decided": "2026-08-21"}]
+        for day in [x for x in d.days if x >= "2026-08-20"][:3]:
+            orders = pf.fill(orders, day)
+        self.assertEqual(pf.log[0]["day"], "2026-08-24")  # Aug 21 is a Friday: first open after is Monday
+
+    def test_dividends_need_shares_before_the_ex_date(self):
+        d = self.data()
+        ex = [x for x, _ in d.charts["DIV.TO"]["dividends"] if x > "2026-06-01"][0]
+        ex = d.trading_day_on_or_before(ex) if ex not in d.days else ex
+        before = d.days[d.days.index(ex) - 1]
+        early = replay.Portfolio(d, 100)
+        early.fill([{"side": "buy", "ticker": "DIV.TO", "cad": 90, "decided": d.days[d.days.index(before) - 1]}], before)
+        late = replay.Portfolio(d, 100)
+        orders = [{"side": "buy", "ticker": "DIV.TO", "cad": 90, "decided": before}]
+        for p, o in ((early, []), (late, orders)):
+            p.pay_dividends(ex)
+            p.fill(o, ex)
+        self.assertGreater(early.dividends_cad, 0)
+        self.assertEqual(late.dividends_cad, 0)
+
+    def test_usd_costs_include_fx(self):
+        d = self.data()
+        pf = replay.Portfolio(d, 100)
+        day = d.days[-10]
+        pf.fill([{"side": "buy", "ticker": "AAA", "cad": 99, "decided": d.days[-11]}], day)
+        self.assertGreater(pf.fees, 99 * 0.014)  # 1.5% conversion on the way in
+        self.assertLess(pf.value(day), 100 * 0.99)
+
+
+class Insights(unittest.TestCase):
+    def test_notes_name_the_drivers(self):
+        row = {"S&P 500 (SPY)": {"return_pct": 4.0}, "TSX 60 (XIU.TO)": {"return_pct": 2.0}, "cash": {"return_pct": 0},
+               "growth": {"return_pct": 1.0, "fees": 3.1, "fx_fees": 3.0, "cash_drag_pct": 45, "trades": 4,
+                          "contrib": [{"ticker": "AAA", "pnl": 2.5}, {"ticker": "BBB", "pnl": -1.2}]},
+               "dividend": {"return_pct": 3.0, "fees": 0.1, "dividends": 0.8, "trades": 2, "contrib": []},
+               "crypto team": {"return_pct": -3.0, "trades": 12, "win_rate_pct": 25, "fees": 2.0,
+                               "exit_reasons": {"stop-loss": 9, "take-profit": 2}}}
+        n = replay.insights(row, {"usdcad_pct": 1.2}, 100)
+        g = " ".join(n["growth"]["not_going_well"])
+        self.assertIn("trailed the S&P 500 by 3.0 points", g)
+        self.assertIn("worst holding: BBB", g)
+        self.assertIn("costs took 3.1%", g)
+        self.assertIn("sat 45% in cash", g)
+        self.assertIn("best holding: AAA", " ".join(n["growth"]["going_well"]))
+        self.assertIn("lifted US holdings", " ".join(n["growth"]["going_well"]))
+        self.assertIn("beat the TSX 60", " ".join(n["dividend"]["going_well"]))
+        self.assertIn("collected $0.80 in dividends", " ".join(n["dividend"]["going_well"]))
+        self.assertIn("stops too tight", " ".join(n["crypto team"]["not_going_well"]))
+        self.assertNotIn("cash", n)
+
+    def test_report_has_curves_contributions_and_notes(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200)
+        finally:
+            shutil.rmtree(d)
+        six = out["results"]["6 months"]
+        self.assertEqual(six["growth"]["curve"][0][0], six["start"])
+        self.assertEqual(six["growth"]["curve"][-1], [ASOF, six["growth"]["value"]])
+        self.assertTrue(six["growth"]["contrib"])
+        self.assertIn("spy_pct", six["factors"])
+        self.assertIn("growth", six["insights"])
+        self.assertIn("What is going well, what is not", text)
+        self.assertIn("growth", out["overall"])
+
+
+class MonteCarlo(unittest.TestCase):
+    def test_bootstrap_is_reproducible_and_sane(self):
+        up = [["d%03d" % i, 100 * 1.001 ** i] for i in range(120)]           # steady riser
+        flat = [["d%03d" % i, 100.0] for i in range(120)]                    # cash
+        wobble = [["d%03d" % i, 100 * (1 + 0.02 * ((-1) ** i))] for i in range(120)]
+        curves = {"S&P 500 (SPY)": wobble, "growth": up, "cash": flat}
+        a = replay.monte_carlo(curves, runs=400, horizon=60)
+        b = replay.monte_carlo(curves, runs=400, horizon=60)
+        self.assertEqual(a, b)  # seeded: same answer every time
+        g = a["strategies"]["growth"]
+        self.assertEqual(g["prob_profit_pct"], 100.0)
+        self.assertAlmostEqual(g["median"], 100 * 1.001 ** 60, places=1)
+        self.assertLessEqual(g["p5"], g["median"])
+        self.assertLessEqual(g["median"], g["p95"])
+        self.assertEqual(a["strategies"]["cash"]["median"], 100.0)
+        self.assertEqual(a["strategies"]["cash"]["prob_profit_pct"], 0.0)
+        self.assertIsNone(a["strategies"]["S&P 500 (SPY)"]["prob_beat_bench_pct"])
+        self.assertEqual(g["fan"][0][1:], [100.0, 100.0, 100.0])
+
+    def test_risk_stats(self):
+        dip = [["d%02d" % i, v] for i, v in enumerate([100, 110, 99, 105] + [105 + i for i in range(20)])]
+        r = replay.risk_stats(dip)
+        self.assertEqual(r["max_dd_pct"], -10.0)
+        self.assertGreater(r["sharpe"], 0)
+        self.assertIsNone(replay.risk_stats(dip[:5]))
+
+    def test_replay_report_includes_monte_carlo(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200)
+        finally:
+            shutil.rmtree(d)
+        self.assertIn("growth", out["monte_carlo"]["strategies"])
+        self.assertIn("risk", out["results"]["6 months"]["growth"])
+        self.assertIn("## Monte Carlo", text)
+
+
+class Settings(unittest.TestCase):
+    def test_check_rules(self):
+        acc = replay.acc
+        self.assertEqual(acc.check_rules("growth", {"momentum_months": "3", "max_position_pct": 30}),
+                         {"momentum_months": 3, "max_position_pct": 30.0})
+        for bad in ({"momentum_months": 5}, {"max_position_pct": 90}, {"min_yield_pct": 3}, {"leverage": 2},
+                    {"stop_loss_pct": "lots"}):
+            with self.assertRaises(acc.AccountsError):
+                acc.check_rules("growth", bad)
+        self.assertEqual(acc.check_rules("dividend", {"min_yield_pct": 3.5}), {"min_yield_pct": 3.5})
+
+    def test_momentum_lookback_changes_the_score(self):
+        m = {"ret_1m": 1, "ret_3m": 15, "ret_6m": 2, "ret_12m": -5, "above_sma200": True, "off_high_pct": -5}
+        long = replay.acc.score("growth", m, {"momentum_months": 12})
+        short = replay.acc.score("growth", m, {"momentum_months": 3})
+        self.assertGreater(short, long)  # a hot 3 months counts for more with a short lookback
+        self.assertEqual(replay.acc.score("growth", m), long)  # default is 12 months
+
+    def test_rebalance_every(self):
+        days = ["2026-%02d-%02d" % (mo, d) for mo in range(4, 10) for d in (1, 8, 15, 22, 29)]
+        weekly = replay._review_days(days, days[0], days[-1], 7)
+        monthly = replay._review_days(days, days[0], days[-1], 28)
+        self.assertGreater(len(weekly), len(monthly))
+        self.assertIn(days[0], monthly)
+
+    def test_scenarios_show_inputs_and_outputs(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            with open(os.path.join(base, "accounts.json")) as fh:
+                cfg = json.load(fh)
+            cfg["accounts"][0]["rules"] = {"momentum_months": 3, "max_position_pct": 40}
+            with open(os.path.join(base, "accounts.json"), "w") as fh:
+                json.dump(cfg, fh)
+            out, text = replay.replay(base, ASOF, 100, skip=("crypto",), offline=off, log=lambda m: None, mc_runs=200)
+        finally:
+            shutil.rmtree(d)
+        sc = {x["name"]: x for x in out["scenarios"]}
+        self.assertIn("Your settings (q)", sc)
+        self.assertEqual(sc["Your settings (q)"]["inputs"], {"momentum_months": 3, "max_position_pct": 40})
+        conc = sc["Concentrated: 35% cap, 3+ names"]
+        div = sc["Diversified: 10% cap, 10+ names"]
+        self.assertEqual(conc["settings"]["max_position_pct"], 35)
+        self.assertNotEqual(conc["results"]["6 months"]["value"], div["results"]["6 months"]["value"])
+        self.assertEqual(set(conc["results"]), {"6 months", "1 month", "2 weeks", "1 week"})
+        self.assertIn("## Scenarios", text)
+
+    def test_monte_carlo_leaves_out_short_histories(self):
+        long = [["d%03d" % i, 100 * 1.001 ** i] for i in range(120)]
+        out = {"6 months": {"start": "x", "S&P 500 (SPY)": {"curve": long, "return_pct": 1},
+                            "growth": {"curve": long, "return_pct": 1},
+                            "crypto team": {"curve": long[:30], "return_pct": 1}}}
+        curves, short = replay.mc_curves(out["6 months"])
+        self.assertEqual(short, ["crypto team"])
+        self.assertEqual(sorted(curves), ["S&P 500 (SPY)", "growth"])
+        mc = replay.monte_carlo(curves, runs=100, horizon=40)
+        self.assertEqual(mc["sample_days"], 119)  # the full 6 months, not the short curve's 29 days
+
+
+class NoLookahead(unittest.TestCase):
+    def test_identical_results_with_a_different_future(self):
+        """Same past, different future: every number up to the as-of date is identical."""
+        a, b = tempfile.mkdtemp(), tempfile.mkdtemp()
+        try:
+            base_a, off_a = write_world(a)
+            base_b, off_b = write_world(b)
+            out_a, _ = replay.replay(base_a, ASOF, 100, skip=("crypto",), offline=off_a, log=lambda m: None, mc_runs=200)
+            for f in os.listdir(off_b):  # world B: same past, then 20 days of prices collapsing 80%
+                if f.startswith("chart-"):
+                    with open(os.path.join(off_b, f)) as fh:
+                        doc = json.load(fh)
+                    r = doc["chart"]["result"][0]
+                    q = r["indicators"]["quote"][0]
+                    last_ts = r["timestamp"][-1]
+                    for i in range(1, 21):
+                        r["timestamp"].append(last_ts + i * 86400)
+                        for k in ("open", "high", "low", "close"):
+                            q[k].append(q[k][-1] * 0.92)
+                        q["volume"].append(1)
+                    r["meta"]["regularMarketPrice"] = q["close"][-1]
+                    r["meta"]["regularMarketTime"] = r["timestamp"][-1]
+                    with open(os.path.join(off_b, f), "w") as fh:
+                        json.dump(doc, fh)
+            out_b, _ = replay.replay(base_b, ASOF, 100, skip=("crypto",), offline=off_b, log=lambda m: None, mc_runs=200)
+        finally:
+            shutil.rmtree(a)
+            shutil.rmtree(b)
+        for w in out_a["results"]:  # values, curves, holdings, fills, insights, factors: all identical
+            for k, va in out_a["results"][w].items():
+                self.assertEqual(va, out_b["results"][w][k], "%s %s" % (w, k))
+
+
+class Crypto(unittest.TestCase):
+    def test_crypto_window_runs_on_closed_bars(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off = write_world(d)
+            t1 = replay.market_close_utc(ASOF)
+            n = 4 * 24 * 24  # 24 days of 15-minute bars
+            steps = ([0.0015] * 120 + [-0.002] * 12 + [0.002] * 60) * 20
+            for c in ("BTC", "ETH"):
+                bars, px = [], 100.0
+                for i in range(n):
+                    o = px
+                    px *= 1 + steps[i % len(steps)]
+                    t = t1 - (n - i) * 900
+                    bars.append({"t": t, "o": o, "h": max(o, px) * 1.001, "l": min(o, px) * 0.999, "c": px, "v": 5})
+                with open(os.path.join(off, "candles-%s.json" % c), "w") as fh:
+                    json.dump(bars, fh)
+            out, text = replay.replay(base, ASOF, 100, skip=("pelosi",), offline=off, log=lambda m: None, mc_runs=200)
+        finally:
+            shutil.rmtree(d)
+        one = out["results"]["1 week"]["crypto team"]
+        self.assertIn("value", one)
+        self.assertIsNotNone(out["results"]["1 week"]["Bitcoin (hold)"])
+        self.assertIn("Crypto bot team", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

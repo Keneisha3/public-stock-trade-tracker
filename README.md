@@ -92,6 +92,7 @@ python3 trade.py daily                            # the whole daily run
 python3 trade.py paper backtest                   # stock bot: 5 years vs buy-and-hold
 python3 trade.py paper status                     # equity, trades, readiness
 python3 trade.py crypto status                    # crypto bot team
+python3 trade.py replay                           # $100 in every strategy, 1 week to 6 months ago
 python3 trade.py news                             # also: copycat, pelosi, analyst, screener,
                                                   # budget, risk, broker, tax, alerts, rebalance
 ```
@@ -130,6 +131,31 @@ That is why it trades paper money, and why `status` shows a readiness
 checklist (60+ days, 30+ trades, profit after costs, beating buy-and-hold,
 drawdown under 15 %). Most people who day trade lose money; this exists to
 find out with evidence instead of with savings.
+
+## Replay: what would $100 have done?
+
+`python3 trade.py replay` gives every strategy $100 CAD 1 week, 2 weeks, 1
+month and 6 months before the latest Friday close, and compares them with
+holding the S&P 500, the TSX 60, Bitcoin or cash. It is strictly point in time:
+each decision sees only what was known at that day's close and fills at the
+next open. It counts FX fees, slippage, dividends and US withholding. A
+separate **Pelosi copycat** row copies Nancy Pelosi's disclosed trades from
+the day each filing was posted, not the day she traded. A test wrecks every
+price after the as-of date and checks that no result moves.
+
+On top of the replay:
+
+- **Scenarios.** Each strategy is replayed with different settings (momentum
+  lookback, per-stock cap, number of holdings, stop-loss, cash, rebalance
+  frequency, yield floor). The table shows the inputs beside the outputs,
+  including a **Your settings** row for whatever you saved on the dashboard.
+- **Monte Carlo.** 5,000 block-bootstrap runs of each strategy's own daily
+  returns give the bad, median and good case for the next 6 months, the
+  chance of a profit, and the chance of beating the S&P 500.
+- **Risk stats.** Volatility, Sharpe ratio, max drawdown and share of up days.
+
+Every account's settings are editable on the dashboard (**Strategy settings**)
+and are range-checked. The live review and the replay use the same rules.
 
 ## The crypto bot team
 
