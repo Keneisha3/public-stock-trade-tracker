@@ -1,0 +1,92 @@
+name: replay
+
+# Runs the $100 point-in-time replay on GitHub's machines (which can reach
+# Yahoo Finance, Coinbase and the House Clerk), every Saturday after
+# Friday's close, or on demand from the Actions tab. The report goes to the
+# run's summary page, an artifact, and the replay-results branch.
+# It uses the default watchlists only: no personal holdings are involved.
+
+on:
+  workflow_dispatch:
+    inputs:
+      asof:
+        description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
+        required: false
+        default: ""
+      skip:
+        description: "Parts to skip: crypto, pelosi, or 'crypto pelosi' (blank = run everything)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 13 * * 6"  # Saturdays, 13:17 UTC
+
+permissions:
+  contents: write
+
+concurrency:
+  group: replay
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pdftotext (reads the Congress disclosure PDFs)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+      - name: Set up trader/ with the default watchlists
+        run: python trade.py init
+      - name: Replay $100 in every strategy
+        env:
+          ASOF: ${{ inputs.asof }}
+          SKIP: ${{ inputs.skip }}
+        run: |
+          args=()
+          if [ -n "$ASOF" ]; then
+            [[ "$ASOF" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "asof must be YYYY-MM-DD"; exit 1; }
+            args+=(--asof "$ASOF")
+          fi
+          if [ -n "$SKIP" ]; then
+            args+=(--skip)
+            for part in $SKIP; do
+              case "$part" in crypto|pelosi) args+=("$part") ;; *) echo "skip: crypto or pelosi only"; exit 1 ;; esac
+            done
+          fi
+          python trade.py replay "${args[@]}"
+      - name: Summary page
+        if: always()
+        run: |
+          if [ -f trader/replay/report.md ]; then
+            cat trader/replay/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No report: see the replay step's log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: replay-report
+          path: trader/replay/report.*
+          if-no-files-found: ignore
+      - name: Save to the replay-results branch
+        run: |
+          asof=$(python -c "import json; print(json.load(open('trader/replay/report.json'))['asof'])")
+          mkdir -p "$RUNNER_TEMP/out"
+          cp trader/replay/report.md trader/replay/report.json "$RUNNER_TEMP/out/"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch -q origin replay-results 2>/dev/null; then
+            git checkout -q -B replay-results FETCH_HEAD
+          else
+            git checkout -q --orphan replay-results
+            git rm -rqf .
+          fi
+          mkdir -p history
+          cp "$RUNNER_TEMP/out/report.md" "$RUNNER_TEMP/out/report.json" .
+          cp "$RUNNER_TEMP/out/report.md" "history/$asof.md"
+          git add report.md report.json "history/$asof.md"
+          git commit -qm "Replay as of the close on $asof" || echo "no change"
+          git push -q origin replay-results
