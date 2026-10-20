@@ -292,6 +292,30 @@ instead of it. `python3 trade.py replay --picks P2 --signals DIR` writes
 today's picks to `trader/targets.json` for `/trader-budget`, `/trader-risk`
 and `/trader-broker`.
 
+**Hindsight check** (`research/pit-v14-hindsight/`). Choosing Pelosi or
+the 23 investors because they are famous today is hindsight even when every
+trade is dated right. So every House member with 10+ disclosed buys was
+copied the same way, and every investor's top 3 on its own:
+
+| training period ending | members who beat the S&P 500 | Pelosi's rank | investors who beat it |
+| --- | ---: | ---: | ---: |
+| 2019-10 | 23 of 40 | 24 of 40 | 12 of 23 |
+| 2020-10 | 18 of 47 | 2 of 47 | 14 of 23 |
+| 2022-10 | 34 of 57 | 51 of 57 | 9 of 23 |
+| 2024-10 | 14 of 46 | 1 of 46 | 14 of 23 |
+
+Copying Congress is not a method: most members did not beat the index, and
+Pelosi swung from first to near last. By the rule written beforehand her
+result is hindsight-driven; she stays in the live record only as a watch
+line. Copying the famous investors held up as a group (more than half beat
+the index in 3 of 4 periods), and their consensus picks (C4: stocks in the
+top 10 of at least 3 of them) beat the Nasdaq 100 and the plan in training
+(+20.5 pts, worst drop -23.7 %; 28 windows +8.3 pts, range -0.9 to +17.0;
+held-out year -2.9 pts). C4 joins the live record beside the plan. Mixes of
+C4, the screener and Pelosi (+12.6 to +14.8 pts) did not beat the plan. A
+test also confirms no agent can see the future: prices cut at the as-of date
+and later prices plus later filings give identical results.
+
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the
 Actions tab, with an optional as-of date). The report appears on the run's

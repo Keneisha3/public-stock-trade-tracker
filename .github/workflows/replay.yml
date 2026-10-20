@@ -418,7 +418,8 @@ jobs:
 
   sig-13f:
     # the upstream copycat's 23 investors: every 13F-HR since mid 2013, top 50 stocks each
-    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, '13f')) }}
+    # also every Saturday: the live copycat line checks for new 13Fs weekly, like the backtest
+    if: ${{ (github.event_name == 'schedule' && (github.event.schedule == '23 7 3 * *' || github.event.schedule == '17 13 * * 6')) || (inputs.mode == 'build-signals' && !contains(inputs.skip, '13f')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -462,7 +463,7 @@ jobs:
 
   sig-save:
     needs: [sig-congress, sig-insiders, sig-events, sig-eps, sig-13f, sig-fundamentals]
-    if: ${{ always() && ((github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals') }}
+    if: ${{ always() && ((github.event_name == 'schedule' && (github.event.schedule == '23 7 3 * *' || github.event.schedule == '17 13 * * 6')) || inputs.mode == 'build-signals') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -548,6 +549,7 @@ jobs:
           git show origin/replay-results:forward/record.json > forward/record.json 2>/dev/null || rm -f forward/record.json
           mkdir -p "$RUNNER_TEMP/signals"  # the Pelosi copy reads the dated Congress filings
           git show origin/replay-results:signals/congress.json.gz > "$RUNNER_TEMP/signals/congress.json.gz"
+          git show origin/replay-results:signals/f13.json.gz > "$RUNNER_TEMP/signals/f13.json.gz"  # the copycat line
           sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null  # her latest filings
           python .claude/skills/trader-replay/signals.py congress --years "$(date -u +%Y)" --member Pelosi \
             --merge "$RUNNER_TEMP/signals/congress.json.gz" --out "$RUNNER_TEMP/signals" > /dev/null \
