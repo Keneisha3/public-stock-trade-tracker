@@ -175,6 +175,67 @@ class Events(unittest.TestCase):
         self.assertEqual(s.news("2026-07-31", 3, item="2.02"), {"ACME": ["2026-07-31"]})
 
 
+def fact(start, end, val, filed, form="10-Q"):
+    return {"start": start, "end": end, "val": val, "filed": filed, "form": form, "accn": "x", "fy": 2023, "fp": "Q"}
+
+
+class Eps(unittest.TestCase):
+    def doc(self):
+        return {"units": {"USD/shares": [
+            fact("2022-01-01", "2022-03-31", 1.0, "2022-05-01"), fact("2022-04-01", "2022-06-30", 1.0, "2022-08-01"),
+            fact("2022-07-01", "2022-09-30", 1.0, "2022-11-01"),
+            fact("2022-01-01", "2022-12-31", 5.0, "2023-02-15", "10-K"),                # Q4 = 5 - 3
+            fact("2023-01-01", "2023-03-31", 1.5, "2023-05-01"),
+            fact("2022-01-01", "2022-03-31", 0.7, "2023-05-01"),                        # restated later: ignored
+            fact("2023-01-01", "2023-06-30", 3.0, "2023-08-01"),                        # six months: ignored
+            fact("2023-04-01", "2023-06-30", 0.9, "2023-08-01", "8-K")]}}               # not a 10-Q or 10-K
+
+    def test_quarters_first_filed_and_the_fourth_from_the_year(self):
+        rows = signals.parse_concept(self.doc(), "ACME")
+        self.assertEqual(rows, [["2022-05-01", "ACME", "2022-03-31", 1.0], ["2022-08-01", "ACME", "2022-06-30", 1.0],
+                                ["2022-11-01", "ACME", "2022-09-30", 1.0], ["2023-02-15", "ACME", "2022-12-31", 2.0],
+                                ["2023-05-01", "ACME", "2023-03-31", 1.5]])
+
+    def test_surprise_is_point_in_time(self):
+        rows = signals.parse_concept(self.doc(), "ACME")
+        s = signals.Signals(eps={"rows": rows})
+        self.assertIsNone(s.eps_surprise("ACME", "2023-04-30"))   # Q4 2022 has no year-ago quarter on file
+        e = s.eps_surprise("ACME", "2023-05-01")                   # the day the Q1 2023 10-Q was filed
+        self.assertEqual((e["end"], e["eps"], e["prior"], e["change"]), ("2023-03-31", 1.5, 1.0, 0.5))
+        self.assertIsNone(e["sue"])                                 # too little history to judge the size
+        self.assertIsNone(s.eps_surprise("ACME", "2023-12-01"))   # stale: no newer quarter filed
+        self.assertIsNone(s.eps_surprise("ZZZ", "2023-05-01"))
+
+    def test_sue_with_enough_history(self):
+        rows, filed = [], lambda y, m: "%d-%02d-15" % (y + (m + 1) // 12, (m + 1) % 12 + 1)
+        ends = [(y, m) for y in range(2019, 2024) for m in (3, 6, 9, 12)]
+        for i, (y, m) in enumerate(ends):
+            jitter = (0.1, -0.1)[y % 2] if i < len(ends) - 1 else 0.5  # good and bad years; then a big beat
+            rows.append([filed(y, m), "ACME", "%d-%02d-%s" % (y, m, "31" if m in (3, 12) else "30"), 1.0 + jitter])
+        s = signals.Signals(eps={"rows": rows})
+        e = s.eps_surprise("ACME", rows[-1][0])
+        self.assertAlmostEqual(e["change"], 0.4)       # 1.5 against 1.1 a year earlier
+        self.assertAlmostEqual(e["sue"], 2.0, places=2)  # year-on-year changes usually swing by 0.2
+
+    def test_build_uses_the_ticker_map_and_falls_back_to_basic_eps(self):
+        import urllib.error
+        calls = []
+
+        def http(url):
+            calls.append(url)
+            if url == signals.SEC_TICKERS:
+                return json.dumps({"0": {"cik_str": 1, "ticker": "ACME"}, "1": {"cik_str": 2, "ticker": "BRK-B"}})
+            if "CIK0000000001" in url and "Diluted" in url:
+                raise urllib.error.HTTPError(url, 404, "not found", None, None)
+            if "CIK0000000001" in url:
+                return json.dumps(self.doc())
+            return json.dumps({"units": {}})
+        doc = signals.build_eps(["ACME", "BRK-B", "NOPE"], "t t@example.com", log=lambda m: None, http=http, pause=0)
+        self.assertEqual(len(doc["rows"]), 5)
+        self.assertEqual((doc["stats"]["tickers"], doc["stats"]["no_eps"], doc["stats"]["no_cik"]), (1, 1, 1))
+        self.assertTrue(any("EarningsPerShareBasic" in c for c in calls))
+
+
 class Congress(unittest.TestCase):
     def test_buys_need_the_filing_to_be_public_and_net_buying(self):
         doc = {"rows": [

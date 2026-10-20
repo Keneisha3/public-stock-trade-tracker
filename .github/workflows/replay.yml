@@ -10,11 +10,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "replay (one as-of date), walk-forward (five periods 2019-2026, needs a label) or build-signals (Congress + insider data)"
+        description: "replay (one as-of date), walk-forward (five periods 2019-2026, needs a label), build-signals (SEC + Congress data), long-history (2000-2017 fund test)"
         required: false
         default: "replay"
         type: choice
-        options: ["replay", "walk-forward", "build-signals", "discover", "forward"]
+        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -65,7 +65,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
       - name: Replay $100 in every strategy
@@ -194,7 +194,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
           ls -la signals
@@ -237,7 +237,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
       - name: Rolling windows inside the training years
@@ -287,6 +287,42 @@ jobs:
           cp "$RUNNER_TEMP"/out/stats.md "research/$LABEL/" 2>/dev/null || true
           git add "research/$LABEL"
           git commit -qm "Walk-forward research: $LABEL" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- long-history
+  # The fund strategies from 2000 to 2017, before any period anything was chosen on (older
+  # Treasury funds and FRED exchange rates stitched in), saved to research/<label>/.
+
+  long-history:
+    if: ${{ inputs.mode == 'long-history' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Replay 2000-2017
+        env:
+          LABEL: ${{ inputs.label || 'long-history' }}
+        run: |
+          [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
+          python .claude/skills/trader-replay/replay.py --long out > /dev/null
+          python scripts/stats.py out/long-stats.md out/long.json > /dev/null
+          cat out/long.md out/long-stats.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        env:
+          LABEL: ${{ inputs.label || 'long-history' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out" && cp out/* "$RUNNER_TEMP/out/"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p "research/$LABEL"
+          cp "$RUNNER_TEMP"/out/long.md "$RUNNER_TEMP"/out/long.json "$RUNNER_TEMP"/out/long-stats.md "research/$LABEL/"
+          git add "research/$LABEL"
+          git commit -qm "Long history: $LABEL" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
 
   # ---------------------------------------------------------------- build-signals
@@ -358,8 +394,30 @@ jobs:
           name: sig-events
           path: out/events.json.gz
 
+  sig-eps:
+    # quarterly diluted EPS (first filed in a 10-Q or 10-K) for every S&P 500 member since 2014
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'eps')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SEC XBRL earnings per share
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          python .claude/skills/trader-replay/signals.py eps --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-eps
+          path: out/eps.json.gz
+
   sig-save:
-    needs: [sig-congress, sig-insiders, sig-events]
+    needs: [sig-congress, sig-insiders, sig-events, sig-eps]
     if: ${{ always() && ((github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals') }}
     runs-on: ubuntu-latest
     steps:
@@ -380,7 +438,7 @@ jobs:
           mkdir -p signals
           cp "$RUNNER_TEMP"/out/*.json.gz signals/ 2>/dev/null || true
           git add signals
-          git commit -qm "Dated signals: Congress trades and insider purchases" || echo "no change"
+          git commit -qm "Dated signals: Congress trades, insider purchases, 8-K news, EPS" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
 
   # ---------------------------------------------------------------- discover

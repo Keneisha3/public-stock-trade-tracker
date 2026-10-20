@@ -173,8 +173,9 @@ class Portfolio:
     one in Canadian dollars, with no conversion. A conversion (and its fee) happens only when
     a buy needs a currency the account has run out of. Values are reported in CAD."""
 
-    def __init__(self, data, cash=100.0, account_type="TFSA", split=None, start=None):
+    def __init__(self, data, cash=100.0, account_type="TFSA", split=None, start=None, fx_fee=None):
         self.data, self.pos = data, {}
+        self.fx_fee = COSTS["fx_fee_pct"] if fx_fee is None else fx_fee  # % per conversion: 1.5 bank, ~0.1 Norbert's gambit
         self.cash_by = {"CAD": 0.0, "USD": 0.0}
         split = split or {"CAD": 1.0}
         tot = sum(split.values()) or 1.0
@@ -203,7 +204,7 @@ class Portfolio:
         short = amount - self.cash_by[ccy]
         other = "CAD" if ccy == "USD" else "USD"
         if short > 1e-9 and self.cash_by[other] > 1e-9:
-            fee, rate = COSTS["fx_fee_pct"] / 100.0, self.data.fx(day)
+            fee, rate = self.fx_fee / 100.0, self.data.fx(day)
             per = (rate if ccy == "USD" else 1.0 / rate) * (1 + fee)  # other-currency cost of 1 unit of ccy
             got = min(short, self.cash_by[other] / per)
             self.cash_by[other] -= got * per
@@ -440,11 +441,11 @@ def run_account(data, strategy, watch, start, asof, cash, account_type, override
     return out
 
 
-def run_targets(data, start, asof, cash, choose, every=28, split=None):
+def run_targets(data, start, asof, cash, choose, every=28, split=None, fx_fee=None):
     """Equal weight in whatever choose(day) returns (a name listed twice gets two shares), or the
     weights it returns as {ticker: weight}; rebalanced every `every` days. choose sees only data
     up to that day's close; trades fill at the next open."""
-    pf, pending = Portfolio(data, cash, split=split or {"USD": 1.0}, start=start), []
+    pf, pending = Portfolio(data, cash, split=split or {"USD": 1.0}, start=start, fx_fee=fx_fee), []
     days = [d for d in data.days if start <= d <= asof]
     reviews = _review_days(days, start, asof, every)
     picks_log = []
@@ -517,7 +518,8 @@ def run_momentum(data, uni, start, asof, cash, **opts):
 
 DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY",  # best 1 fund: won the walk-forward
                 "pool": "all", "vol_target": None, "trend": False, "core": None, "core_weight": 0.5,
-                "core_trend": False, "lookbacks": None, "skip": 0, "margin": 0.0, "every": 28}
+                "core_trend": False, "lookbacks": None, "skip": 0, "margin": 0.0, "every": 28,
+                "tranches": 1, "start_ccy": "USD", "fx_fee": None}
 DUAL_POOL = ("us_broad", "us_sector", "us_factor", "world", "commodities")
 DUAL_POOLS = {"all": DUAL_POOL, "growth": ("us_broad", "us_sector", "us_factor")}
 
@@ -530,15 +532,31 @@ def run_dual(data, start, asof, cash, **opts):
     Safety options: pool "growth" (US broad, sector and factor funds only); trend (a fund
     must also be above its 200-day average); vol_target (hold target/volatility of a fund,
     at most all of it, the rest in IEF: less in wild markets); core ("QQQ"): that fund takes
-    core_weight of the money, dual momentum the rest, rebalanced together every month."""
+    core_weight of the money, dual momentum the rest, rebalanced together every month.
+
+    tranches: split the money into n slices, each re-chosen every `every` days but on different
+    weeks (a review every every/n days updates one slice), so one unlucky rebalance date cannot
+    decide the result. start_ccy / fx_fee: the money starts in that currency and pays that
+    conversion fee (%) when it buys US funds (1.5 at a bank rate, about 0.1 with Norbert's gambit)."""
     o = dict(DUAL_DEFAULT, **opts)
-    held = []
+    n = max(1, int(o["tranches"]))
+    held, parts, turn = [None] * n, [], [0]
 
     def choose(d):
-        w = dual_weights(data, d, prev=held[0] if held else None, **opts)
-        held[:] = [f for f in w if f not in (o["core"], o["safe"])][:1]
-        return w
-    return run_targets(data, start, asof, cash, choose, o["every"])
+        i = turn[0] % n
+        turn[0] += 1
+        w = dual_weights(data, d, prev=held[i], **opts)
+        held[i] = next((f for f in w if f not in (o["core"], o["safe"])), None)
+        if not parts:
+            parts.extend([w] * n)  # at the start every slice holds today's choice
+        parts[i] = w
+        out = {}
+        for p in parts:
+            for f, x in p.items():
+                out[f] = out.get(f, 0.0) + x / n
+        return out
+    return run_targets(data, start, asof, cash, choose, max(1, o["every"] // n), split={o["start_ccy"]: 1.0},
+                       fx_fee=o["fx_fee"])
 
 
 def dual_weights(data, d, prev=None, **opts):
@@ -825,13 +843,17 @@ def run_model(data, uni, sig, start, asof, cash, **opts):
     return out
 
 
-PEAD_DEFAULT = {"n": 20, "days": 60, "min_move": 3.0, "every": 7}
+PEAD_DEFAULT = {"n": 20, "days": 60, "min_move": 3.0, "every": 7, "eps": None}
 
 
-def pead_pick(data, uni, sig, d, n=20, days=60, min_move=3.0):
+def pead_pick(data, uni, sig, d, n=20, days=60, min_move=3.0, eps=None):
     """Earnings drift: S&P 500 members (that day) whose earnings 8-K in the last `days` was met by
     a jump of at least `min_move` points beyond the S&P 500 on the first day the market could
-    react. Strongest reactions first. Known by the close of `d`."""
+    react. Strongest reactions first. Known by the close of `d`.
+
+    eps "up": only if the quarter's diluted EPS (from the 10-Q or 10-K, once FILED, usually a few
+    weeks after the 8-K) beat the same quarter a year earlier. eps "sue": the same, ranked by the
+    size of that beat against the company's usual swings instead of by the price jump."""
     out = []
     for t, effs in sig.news(d, days, item="2.02").items():
         if t not in uni.members_on(d) or t not in data.charts:
@@ -847,8 +869,17 @@ def pead_pick(data, uni, sig, d, n=20, days=60, min_move=3.0):
         if r is None or not sp0:
             continue
         x = 100.0 * (r - (sp1 / sp0 - 1))
-        if x >= min_move:
-            out.append((x, t))
+        if x < min_move:
+            continue
+        if eps:
+            e = sig.eps_surprise(t, d)
+            if not e or e["change"] <= 0 or _gap(e["end"], eff) > 100:  # not this 8-K's quarter (yet)
+                continue
+            if eps == "sue":
+                if e["sue"] is None:
+                    continue
+                x = e["sue"]
+        out.append((x, t))
     return [t for _, t in sorted(out, reverse=True)[:n]]
 
 
@@ -857,7 +888,7 @@ def run_events(data, uni, sig, start, asof, cash, **opts):
     o = dict(PEAD_DEFAULT, **opts)
 
     def choose(d):
-        picks = pead_pick(data, uni, sig, d, o["n"], o["days"], o["min_move"])
+        picks = pead_pick(data, uni, sig, d, o["n"], o["days"], o["min_move"], o["eps"])
         return picks + ["SPY"] * (o["n"] - len(picks)) if "SPY" in data.charts else picks
     return run_targets(data, start, asof, cash, choose, o["every"])
 
@@ -886,7 +917,7 @@ def run_plan(data, uni, sig, start, asof, cash, **opts):
                         if q and q["above200"]]
                 picks = [t for _, t in sorted(rows, reverse=True)[:o["n"]]]
             else:
-                picks = pead_pick(data, uni, sig, d, o["n"]) if sig else []
+                picks = pead_pick(data, uni, sig, d, o["n"], eps=o.get("eps")) if sig else []
             if not picks:
                 w["SPY"] = w.get("SPY", 0.0) + part
             for t in picks:
@@ -1465,13 +1496,23 @@ PEAD_VARIANTS = [
     ("Earnings drift: top 20 jumps of 3+ pts, held about 60 days (default)", {}),
     ("Earnings drift: jumps of 5+ pts", {"min_move": 5.0}),
     ("Earnings drift: held about 30 days", {"days": 30}),
+    ("Earnings drift: only if EPS beat the same quarter a year ago", {"eps": "up"}),
+    ("Earnings drift: ranked by earnings surprise (EPS vs a year ago)", {"eps": "sue"}),
 ]
-PLAN_VARIANTS = [  # the five adjustments to 70% Nasdaq 100 + 30% dual momentum
+PLAN_VARIANTS = [  # adjustments to 70% Nasdaq 100 + 30% dual momentum
     ("Plan A: dual momentum on 12-1 months", {"core": "QQQ", "core_weight": 0.7, "skip": 1}),
     ("Plan B: rebalanced every 2 weeks (default)", {"core": "QQQ", "core_weight": 0.7, "every": 14}),
     ("Plan C: satellite half dual momentum, half earnings drift", {"plan": True, "sleeves": {"dual": 0.5, "drift": 0.5}}),
     ("Plan D: satellite = top 20 momentum stocks", {"plan": True, "sleeves": {"momentum": 1.0}}),
     ("Plan E: switch funds only for a 5-point lead", {"core": "QQQ", "core_weight": 0.7, "margin": 5.0}),
+    ("Plan F: 4 slices, one re-chosen each week (each monthly)", {"core": "QQQ", "core_weight": 0.7, "tranches": 4}),
+    ("Plan G: 2 slices, one re-chosen every 2 weeks (each monthly)", {"core": "QQQ", "core_weight": 0.7, "tranches": 2}),
+    ("Plan H: satellite half dual momentum, half earnings drift with EPS up",
+     {"plan": True, "sleeves": {"dual": 0.5, "drift": 0.5}, "eps": "up"}),
+    ("Plan, money starts in CAD: bank conversion 1.5%", {"core": "QQQ", "core_weight": 0.7, "every": 14,
+                                                          "start_ccy": "CAD", "fx_fee": 1.5}),
+    ("Plan, money starts in CAD: Norbert's gambit about 0.1%", {"core": "QQQ", "core_weight": 0.7, "every": 14,
+                                                                 "start_ccy": "CAD", "fx_fee": 0.1}),
 ]
 MODEL_VARIANTS = [
     ("Learned score: top 20 (default)", {}),
@@ -1520,12 +1561,14 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
         sig = ctx.get("signals")
         if sig and sig.events:
             for name, over in PEAD_VARIANTS:
+                if over.get("eps") and not sig.eps:
+                    continue
                 add("news", name, over, lambda st, o=over: run_events(data, ctx["uni"], sig, st, asof, cash, **o))
             add("news", "News shock: stock bot trades only breakouts with an 8-K that week", {"news": "8-K"},
                 lambda st: run_stockbot(data, ctx["universe"], st, asof, cash, uni=ctx["uni"], news=sig))
         if "QQQ" in data.charts:
             for name, over in PLAN_VARIANTS:
-                if "drift" in over.get("sleeves", {}) and not (sig and sig.events):
+                if "drift" in over.get("sleeves", {}) and not (sig and sig.events and (sig.eps or not over.get("eps"))):
                     continue
                 if "plan" in over:
                     add("core + dual", name, over, lambda st, o=over: run_plan(
@@ -2171,6 +2214,174 @@ def render(out):
 
 # ---------------------------------------------------------------- forward paper record
 
+# ---------------------------------------------------------------- long history (2000-2017)
+
+LONG_PROXIES = {"IEF": "VFITX", "SHY": "VFISX"}  # Vanguard Treasury funds (1991) before the ETFs (2002)
+FRED_USDCAD = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXCAUS"  # US dollar in CAD, daily since 1971
+LONG_STRATS = [
+    ("70% Nasdaq 100 + 30% dual momentum, every 2 weeks (chosen)", {"core": "QQQ", "core_weight": 0.7, "every": 14}),
+    ("70/30, rebalanced monthly (previous plan)", {"core": "QQQ", "core_weight": 0.7}),
+    ("70/30, 4 slices re-chosen on different weeks", {"core": "QQQ", "core_weight": 0.7, "tranches": 4}),
+    ("Dual momentum alone (single strongest fund)", {}),
+]
+LONG_BENCH = [("Nasdaq 100 (QQQ)", "QQQ"), ("S&P 500 (SPY)", "SPY")]
+
+
+def splice(chart, proxy, name=None):
+    """`chart` extended back in time with `proxy`'s moves before its first day: prices and
+    dividends scaled so the two meet on that day (total return carries over)."""
+    if not chart or not proxy or not chart["bars"]:
+        return chart
+    first = chart["bars"][0]["d"]
+    meet = [b for b in proxy["bars"] if b["d"] <= first]
+    if not meet or not meet[-1]["c"]:
+        return chart
+    k = chart["bars"][0]["c"] / meet[-1]["c"]
+    old = [dict(b, o=b["o"] * k, h=b["h"] * k, l=b["l"] * k, c=b["c"] * k) for b in proxy["bars"] if b["d"] < first]
+    divs = [(d, a * k) for d, a in proxy["dividends"] if d < first]
+    return dict(chart, bars=old + chart["bars"], dividends=divs + list(chart["dividends"]),
+                spliced={"proxy": name or proxy.get("symbol"), "until": first})
+
+
+def daily(chart):
+    """True when the bars are daily (the typical gap is under 5 days), not weekly or monthly."""
+    ds = [_date(b["d"]) for b in chart["bars"]]
+    gaps = sorted((b - a).days for a, b in zip(ds, ds[1:]))
+    return bool(gaps) and gaps[len(gaps) // 2] < 5
+
+
+def fred_chart(text, symbol="USDCAD=X"):
+    """FRED's CSV (DATE,VALUE, '.' for holidays) as a chart of daily bars."""
+    bars = []
+    for line in text.splitlines()[1:]:
+        d, _, v = line.partition(",")
+        try:
+            x = float(v)
+        except ValueError:
+            continue
+        bars.append({"d": d.strip(), "o": x, "h": x, "l": x, "c": x, "v": 0})
+    return {"symbol": symbol, "name": "FRED DEXCAUS", "currency": "CAD", "price": bars[-1]["c"] if bars else None,
+            "time": bars[-1]["d"] if bars else None, "bars": bars, "dividends": []}
+
+
+def long_charts(offline=None, save=None, log=print):
+    """Every fund the long run needs, as far back as Yahoo goes, with proxies spliced in."""
+    syms = {"SPY", "QQQ", "IEF", "SHY", "USDCAD=X"} | set(LONG_PROXIES.values()) \
+        | {x for g in DUAL_POOL for x in univ.ETFS[g] if not x.endswith(".TO")}
+    charts, notes = {}, {}
+    for sym in sorted(syms):
+        try:
+            charts[sym] = mk.get_chart(sym, offline=offline, range_="max", save=save)
+        except mk.MarketError as e:
+            log("long: %s" % e)
+    for etf, fund in LONG_PROXIES.items():
+        if etf in charts and fund in charts:
+            charts[etf] = splice(charts[etf], charts.pop(fund), fund)
+            notes[etf] = "%s before %s" % (fund, charts[etf]["spliced"]["until"])
+    path = os.path.join(offline or "", "fred-DEXCAUS.csv")
+    try:
+        if offline:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        else:
+            text = mk.fetch(FRED_USDCAD)
+            if save:
+                with open(os.path.join(save, "fred-DEXCAUS.csv"), "w", encoding="utf-8") as fh:
+                    fh.write(text)
+        fred = fred_chart(text)
+        charts["USDCAD=X"] = splice(charts.get("USDCAD=X"), fred, "FRED DEXCAUS") if "USDCAD=X" in charts else fred
+        notes["USDCAD=X"] = "FRED daily rate before %s" % ((charts["USDCAD=X"].get("spliced") or {}).get("until") or "-")
+    except (OSError, mk.MarketError) as e:
+        notes["USDCAD=X"] = "no rate before Yahoo's (%s): a flat 1.35 is used, which hits every strategy alike" % e
+    return charts, notes
+
+
+def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91, cash=100.0,
+             period_ends=("2002-10-18", "2004-10-15", "2006-10-20", "2008-10-17", "2010-10-15", "2012-10-19",
+                          "2014-10-17", "2016-10-14"), notes=None):
+    """The chosen plan and its rivals before anything was chosen: rolling `horizon`-day windows
+    from `first`, every `step` days, ending by `until` (where the training periods begin), and
+    24-month periods ending each `period_ends`. Point in time like every replay."""
+    def runs(start, end):
+        out = {}
+        for name, opts in LONG_STRATS:
+            out[name] = run_dual(data, start, end, cash, **opts)
+        for name, sym in LONG_BENCH:
+            if sym in data.charts:
+                out[name] = run_hold(data, {sym: 1.0}, start, end, cash)
+        return out
+    table, d0 = {}, _date(first)
+    while (d0 + datetime.timedelta(days=horizon)).isoformat() <= until:
+        start = data.trading_day_on_or_before(d0.isoformat())
+        end = data.trading_day_on_or_before((d0 + datetime.timedelta(days=horizon)).isoformat())
+        for name, r in runs(start, end).items():
+            table.setdefault(name, {"runs": []})["runs"].append(
+                {"start": start, "end": end, "return_pct": r["return_pct"], "trades": r["trades"],
+                 "max_dd_pct": (risk_stats(r["curve"]) or {}).get("max_dd_pct")})
+        d0 += datetime.timedelta(days=step)
+    periods = []
+    for e in period_ends:
+        end = data.trading_day_on_or_before(e)
+        start = data.trading_day_on_or_before((_date(end) - datetime.timedelta(days=730)).isoformat())
+        periods.append({"start": start, "end": end, "results": {
+            name: {"return_pct": r["return_pct"], "max_dd_pct": (risk_stats(r["curve"]) or {}).get("max_dd_pct"),
+                   "trades": r["trades"], "fees": r["fees"],
+                   "switches": [p for i, p in enumerate(r.get("picks") or []) if not i or p[1] != r["picks"][i - 1][1]]}
+            for name, r in runs(start, end).items()}})
+    count = len(next(iter(table.values()))["runs"]) if table else 0
+    return {"asof": until, "first": first, "rolling": {"table": table, "horizon_days": horizon, "step_days": step,
+                                                       "count": count},
+            "periods": periods, "names": [n for n, _ in LONG_STRATS] + [n for n, _ in LONG_BENCH], "notes": notes or {}}
+
+
+def render_long(out):
+    spy = "S&P 500 (SPY)"
+    L = ["# Long history: %s to %s, before anything was chosen" % (out["first"], out["asof"]), "",
+         "Every setting here was chosen on 2017-2026 data, so these years are a fresh test. The 2000-2002 "
+         "dot-com crash and the 2008 crisis are included. Fund strategies only (the S&P 500 stock lists and "
+         "company filings do not go back this far). Point in time: decisions at each close, fills at the next "
+         "open. The dual momentum list is today's funds (each counts once it has a year of history), a mild "
+         "hindsight.", ""]
+    if out.get("notes"):
+        L += ["Data stitched in: " + "; ".join("%s: %s" % kv for kv in sorted(out["notes"].items())) + ".", ""]
+    L += ["## 24-month periods (gap to the S&P 500 in brackets, worst drop after the slash)", "",
+          "| strategy | " + " | ".join(p["end"] for p in out["periods"]) + " | beat S&P 500 | average gap |",
+          "| --- |" + " ---: |" * (len(out["periods"]) + 2)]
+    for name in out["names"]:
+        cells, gaps = [], []
+        for p in out["periods"]:
+            r, b = p["results"].get(name), p["results"].get(spy)
+            if not r:
+                cells.append("n/a")
+                continue
+            gap = None if name == spy or not b else r["return_pct"] - b["return_pct"]
+            if gap is not None:
+                gaps.append(gap)
+            cells.append("%+.0f%%%s / %s" % (r["return_pct"], "" if gap is None else " (%+.0f)" % gap,
+                                             "n/a" if r["max_dd_pct"] is None else "%.0f%%" % r["max_dd_pct"]))
+        L.append("| %s | %s | %s | %s |" % (name, " | ".join(cells), "-" if name == spy else "%d of %d" % (
+            sum(g > 0 for g in gaps), len(gaps)), "-" if not gaps else "%+.1f pts" % (sum(gaps) / len(gaps))))
+    t = out["rolling"]["table"]
+    L += ["", "## %d rolling %d-day windows, a new one every %d days" % (
+        out["rolling"]["count"], out["rolling"]["horizon_days"], out["rolling"]["step_days"]), "",
+          "| strategy | average return | average gap to the S&P 500 | beat it | average worst drop | worst window |",
+          "| --- | ---: | ---: | ---: | ---: | ---: |"]
+    base = [x["return_pct"] for x in t.get(spy, {}).get("runs", [])]
+    for name in out["names"]:
+        rs = t.get(name, {}).get("runs", [])
+        if not rs:
+            continue
+        ret = [x["return_pct"] for x in rs]
+        gaps = [a - b for a, b in zip(ret, base)] if len(base) == len(ret) and name != spy else []
+        dds = [x["max_dd_pct"] for x in rs if x["max_dd_pct"] is not None]
+        L.append("| %s | %+.1f%% | %s | %s | %s | %+.1f%% |" % (
+            name, sum(ret) / len(ret), "%+.1f pts" % (sum(gaps) / len(gaps)) if gaps else "-",
+            "%d of %d" % (sum(g > 0 for g in gaps), len(gaps)) if gaps else "-",
+            "%.1f%%" % (sum(dds) / len(dds)) if dds else "n/a", min(ret)))
+    L += ["", "_Simulated; past results do not promise future ones. Not financial advice._"]
+    return "\n".join(L) + "\n"
+
+
 FORWARD_PLAN = os.path.join(HERE, "forward_plan.json")
 
 
@@ -2277,10 +2488,29 @@ def main(argv=None):
     ap.add_argument("--signals", metavar="DIR", help="congress.json.gz / insiders.json.gz from signals.py")
     ap.add_argument("--forward", metavar="RECORD", help="update the live paper record in RECORD (JSON) from "
                     "forward_plan.json, then stop")
+    ap.add_argument("--long", metavar="OUTDIR", help="the fund strategies from 2000 to 2017 (before anything "
+                    "was chosen), with older funds stitched in; writes OUTDIR/long.json and long.md, then stop")
     ap.add_argument("--strict", action="store_true", help="exit 3 if any self-check fails")
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
+    if a.long:
+        charts, notes = long_charts(a.offline, a.save_data, log=lambda m: print(m, file=sys.stderr))
+        if "SPY" not in charts:
+            print("replay: no SPY prices", file=sys.stderr)
+            return 2
+        if not daily(charts["SPY"]):
+            print("replay: SPY prices are not daily bars, so the run would be wrong", file=sys.stderr)
+            return 2
+        out = long_run(Data(charts, {}), notes=notes)
+        os.makedirs(a.long, exist_ok=True)
+        with open(os.path.join(a.long, "long.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, indent=1)
+        text = render_long(out)
+        with open(os.path.join(a.long, "long.md"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        print(text)
+        return 0
     if a.forward:
         with open(FORWARD_PLAN, encoding="utf-8") as fh:
             plan = json.load(fh)

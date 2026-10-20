@@ -35,6 +35,8 @@ import urllib.request
 UA = "Mozilla/5.0 (compatible; public-stock-trade-tracker/1.0)"
 PAUSE = 0.4  # seconds between requests
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/%s?range=%s&interval=1d&events=div"
+# range=max quietly returns MONTHLY bars; dates give daily bars as far back as Yahoo has them
+CHART_SINCE = "https://query1.finance.yahoo.com/v8/finance/chart/%s?period1=%d&period2=%d&interval=1d&events=div"
 
 # exchange (or MIC) -> Yahoo suffix
 SUFFIX = {
@@ -191,7 +193,10 @@ def get_chart(symbol, offline=None, range_="5y", save=None):
             raise MarketError("no offline chart file %s" % path)
         with open(path, encoding="utf-8") as fh:
             return parse_chart(fh.read(), symbol)
-    text = fetch(CHART % (urllib.parse.quote(symbol.upper()), range_))
+    if range_ == "max":  # every daily bar since 1990
+        text = fetch(CHART_SINCE % (urllib.parse.quote(symbol.upper()), 631152000, int(time.time())))
+    else:
+        text = fetch(CHART % (urllib.parse.quote(symbol.upper()), range_))
     chart = parse_chart(text, symbol)
     if save:
         os.makedirs(save, exist_ok=True)

@@ -61,6 +61,13 @@ Clerk, plus `pdftotext` for the Pelosi filings.
 - `--history 10y` loads ten years; `--save-data DIR` then `--offline DIR`
   reuses the download. The workflow's `walk-forward` mode replays five
   periods (2019-2026) and combines them with `scripts/walkforward.py`.
+- `--long DIR` replays the fund strategies from 2000 to 2017, before anything
+  was chosen (the dot-com crash and 2008 included), with Vanguard Treasury funds
+  and FRED exchange rates stitched in before the ETFs existed. The workflow's
+  `long-history` mode runs it and adds the confidence ranges.
+- Plan options: `tranches` (slices re-chosen on different weeks, less luck from
+  the rebalance date) and `start_ccy` / `fx_fee` (money starting in CAD: 1.5%
+  at a bank rate, about 0.1% with Norbert's gambit).
 - Say plainly: companies Yahoo has no prices for (mostly delisted) cannot be
   chosen, so some survivorship bias remains; the Canadian list is today's.
 
