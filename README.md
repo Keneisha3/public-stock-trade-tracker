@@ -316,6 +316,20 @@ C4, the screener and Pelosi (+12.6 to +14.8 pts) did not beat the plan. A
 test also confirms no agent can see the future: prices cut at the as-of date
 and later prices plus later filings give identical results.
 
+**C4 from 2000 to 2017, before anything was chosen** (`research/long-history-c4/`).
+The copycat's plain-text 13Fs from 1999 to mid 2013 were parsed (a CUSIP
+counts only with the right check digit) and C4 replayed with the fund
+strategies. Only 5 of the 23 investors filed electronically in 2000 and 11
+by 2005, so before about 2004 C4 rarely had three investors agreeing and
+mostly sat in the S&P 500. Over 68 one-year windows C4 beat the S&P 500 by
++5.2 pts a year on average (90 % range +1.5 to +8.6, 44 of 68 windows) with
+an average worst drop of -17.3 % and a worst year of -26.7 % (Nasdaq 100:
++0.5 pts, worst year -66 %; the plan: +3.1 pts, worst year -60 %). In the
+24-month periods it beat the S&P 500 in 5 of 8. Caveats: only 999 of 3,623
+old holdings could be matched to a ticker, and 3-33 % of its picks around
+2002 had no prices (companies that vanished), which flatters it; the 23
+investors are still famous today (the rule-based list tests that).
+
 **Following the best Congress members** (`research/pit-v15-leaders/`).
 Each month, members were ranked by how their past disclosed buys did
 against the S&P 500 (only outcomes known by then), and the leaders' buys
