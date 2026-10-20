@@ -5,6 +5,8 @@
              disclosures-clerk.house.gov), parsed with trader-pelosi's ptr.py
   insiders   company insiders' open-market purchases (Form 4, code P) from the SEC's
              quarterly "Insider Transactions Data Sets" (bulk TSV files since 2006)
+  events     every 8-K (company news) from data.sec.gov submissions
+  eps        quarterly diluted EPS from each company's 10-Q and 10-K (SEC XBRL), dated by filing
 
     python3 signals.py congress --years 2015-2026 --out DIR      # needs pdftotext
     python3 signals.py insiders --quarters 2015q1-2026q3 --out DIR
@@ -37,6 +39,8 @@ SEC_DAILY = "https://www.sec.gov/Archives/edgar/daily-index/%d/QTR%d/form.%s.idx
 SEC_DOC = "https://www.sec.gov/Archives/%s"
 SEC_TICKERS = "https://www.sec.gov/files/company_tickers.json"
 SEC_SUBMISSIONS = "https://data.sec.gov/submissions/%s"
+SEC_CONCEPT = "https://data.sec.gov/api/xbrl/companyconcept/%s/us-gaap/%s.json"
+EPS_CONCEPTS = ("EarningsPerShareDiluted", "EarningsPerShareBasic")
 EVENT_ITEMS = {"1.01": "material agreement", "1.03": "bankruptcy", "2.01": "acquisition or sale done",
                "2.02": "earnings results", "2.05": "restructuring costs", "2.06": "impairment",
                "4.02": "restatement", "5.02": "executive or director change", "7.01": "investor update",
@@ -333,6 +337,79 @@ def build_events(tickers, ua, since="2015-01-01", log=print, http=None, pause=0.
             "columns": ["effective", "ticker", "items", "filed"], "rows": rows, "stats": stats}
 
 
+# ---------------------------------------------------------------- EPS (SEC XBRL)
+
+def _days(a, b):
+    return (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days
+
+
+def parse_concept(doc, ticker):
+    """One companyconcept JSON (EPS) -> rows [filed, ticker, quarter end, eps], each quarter at the
+    date it was FIRST filed in a 10-Q or 10-K. The fourth quarter, which 10-Ks report only as a
+    full year, is the year minus the three quarters already filed (known from the 10-K's date)."""
+    facts = [f for unit, fs in (doc.get("units") or {}).items() if unit.startswith("USD") for f in fs]
+    q, years = {}, []
+    for f in facts:
+        if f.get("form") not in ("10-Q", "10-K") or not f.get("start") or not f.get("end") or f.get("val") is None:
+            continue
+        dur = _days(f["start"], f["end"])
+        row = (f["filed"], float(f["val"]))
+        if 75 <= dur <= 105:
+            if f["end"] not in q or row[0] < q[f["end"]][0]:
+                q[f["end"]] = row
+        elif 340 <= dur <= 380:
+            years.append((f["filed"], f["start"], f["end"], float(f["val"])))
+    for filed, start, end, val in sorted(years):
+        if end in q:
+            continue
+        parts = [v for e, (fd, v) in q.items() if _days(start, e) >= 80 and _days(e, end) >= 80 and fd <= filed]
+        if len(parts) == 3:
+            q[end] = (filed, val - sum(parts))
+    return sorted([fd, ticker, e, round(v, 4)] for e, (fd, v) in q.items())
+
+
+def build_eps(tickers, ua, log=print, http=None, pause=0.12):
+    """Quarterly EPS for these tickers from SEC XBRL (one small request per company)."""
+    def get(url):
+        req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "identity"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.read().decode("utf-8", "replace")
+    http = http or get
+    cik = {}
+    for v in json.loads(http(SEC_TICKERS)).values():
+        t = yahoo(v.get("ticker"))
+        if t and t not in cik:
+            cik[t] = "CIK%010d" % int(v["cik_str"])
+    rows, stats = [], {"tickers": 0, "no_cik": 0, "no_eps": 0, "errors": []}
+    for i, t in enumerate(sorted(set(tickers))):
+        if t not in cik:
+            stats["no_cik"] += 1
+            continue
+        got = None
+        for concept in EPS_CONCEPTS:
+            try:
+                got = parse_concept(json.loads(http(SEC_CONCEPT % (cik[t], concept))), t)
+            except urllib.error.HTTPError as e:
+                if e.code != 404:
+                    stats["errors"].append("%s: %s" % (t, e))
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                stats["errors"].append("%s: %s" % (t, e))
+            time.sleep(pause)  # the SEC asks for at most 10 requests a second
+            if got:
+                break
+        if got:
+            rows += got
+            stats["tickers"] += 1
+        else:
+            stats["no_eps"] += 1
+        if i % 100 == 99:
+            log("  %d tickers, %d quarters" % (i + 1, len(rows)))
+    rows.sort()
+    stats["errors"] = stats["errors"][:50]
+    return {"source": "SEC XBRL companyconcept (diluted EPS, first filed)", "built": _now(),
+            "columns": ["filed", "ticker", "quarter_end", "eps"], "rows": rows, "stats": stats}
+
+
 # ---------------------------------------------------------------- Congress (House PTRs)
 
 def build_congress(years, pdf_dir, log=print, workers=4):
@@ -406,13 +483,16 @@ def _now():
 class Signals:
     """Queries that only see rows filed on or before the day asked about."""
 
-    def __init__(self, congress=None, insiders=None, events=None):
+    def __init__(self, congress=None, insiders=None, events=None, eps=None):
         self.congress = sorted((congress or {}).get("rows") or [], key=lambda r: r[0])  # the queries bisect by date
         self.insiders = sorted((insiders or {}).get("rows") or [], key=lambda r: r[0])
         self.events = sorted((events or {}).get("rows") or [], key=lambda r: r[0])
         self._cd = [r[0] for r in self.congress]
         self._id = [r[0] for r in self.insiders]
         self._ed = [r[0] for r in self.events]
+        self.eps = {}  # ticker -> [(filed, quarter end, eps)] by filing date
+        for filed, t, end, v in sorted((eps or {}).get("rows") or []):
+            self.eps.setdefault(t, []).append((filed, end, v))
 
     @classmethod
     def load(cls, folder):
@@ -426,10 +506,39 @@ class Signals:
             last = max((r[0] for r in (ins or {}).get("rows", [])), default="")
             rows = list((ins or {}).get("rows", [])) + [r for r in recent["rows"] if r[0] > last and tuple(r) not in have]
             ins = {"rows": sorted(rows)}
-        return cls(opt("congress.json.gz"), ins, opt("events.json.gz"))
+        return cls(opt("congress.json.gz"), ins, opt("events.json.gz"), opt("eps.json.gz"))
 
     def __bool__(self):
-        return bool(self.congress or self.insiders or self.events)
+        return bool(self.congress or self.insiders or self.events or self.eps)
+
+    def eps_surprise(self, ticker, day, max_age=135):
+        """The latest quarter filed by `day` against the same quarter a year earlier:
+        {"end", "eps", "prior", "change", "sue"}. sue: the change divided by the spread of the last
+        8 year-on-year changes (standardized unexpected earnings; None with fewer than 4). None if
+        nothing was filed, the latest quarter ended more than `max_age` days ago, or no year-ago."""
+        rows = self.eps.get(ticker)
+        if not rows:
+            return None
+        known = {}
+        for filed, end, v in rows[:bisect.bisect_right(rows, (day, "9999", float("inf")))]:
+            known.setdefault(end, v)  # the first number filed for a quarter, not later restatements
+        ends = sorted(known)
+        if not ends or _days(ends[-1], day) > max_age:
+            return None
+
+        def change(e):
+            prev = [x for x in ends if 345 <= _days(x, e) <= 385]
+            return known[e] - known[prev[-1]] if prev else None
+        cur = change(ends[-1])
+        if cur is None:
+            return None
+        hist = [c for c in (change(e) for e in ends[-9:-1]) if c is not None]
+        sd = None
+        if len(hist) >= 4:
+            m = sum(hist) / len(hist)
+            sd = max(0.01, (sum((c - m) ** 2 for c in hist) / len(hist)) ** 0.5)  # a cent: no dividing by ~0
+        return {"end": ends[-1], "eps": known[ends[-1]], "prior": known[ends[-1]] - cur, "change": round(cur, 4),
+                "sue": round(cur / sd, 3) if sd else None}
 
     def news(self, day, days=3, item=None):
         """{ticker: [items...]} for 8-Ks the market could act on in (day-days, day]. item: e.g.
@@ -487,6 +596,7 @@ def info(folder):
                                                                len({r[2 if name == "congress" else 1] for r in rows})))
         else:
             print("%s: none" % name)
+    print("eps: %d companies, %d quarters" % (len(s.eps), sum(len(v) for v in s.eps.values())))
 
 
 def main(argv=None):
@@ -511,19 +621,23 @@ def main(argv=None):
     ev.add_argument("--out", required=True)
     ev.add_argument("--since", default="2015-01-01")
     ev.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
+    ep = sub.add_parser("eps")
+    ep.add_argument("--out", required=True)
+    ep.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
     n = sub.add_parser("info")
     n.add_argument("dir")
     a = ap.parse_args(argv)
     if a.cmd == "info":
         info(a.dir)
         return 0
-    if a.cmd == "events":
+    if a.cmd in ("events", "eps"):
         if not a.user_agent:
             print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
             return 2
         import universe
-        doc = build_events(list(universe.Universe().spans), a.user_agent, a.since)
-        write(os.path.join(a.out, "events.json.gz"), doc)
+        tickers = list(universe.Universe().spans)
+        doc = build_events(tickers, a.user_agent, a.since) if a.cmd == "events" else build_eps(tickers, a.user_agent)
+        write(os.path.join(a.out, a.cmd + ".json.gz"), doc)
         print(json.dumps(doc["stats"])[:1500])
         print("%d rows" % len(doc["rows"]))
         return 0 if doc["rows"] else 3

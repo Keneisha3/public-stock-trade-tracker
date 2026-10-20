@@ -726,6 +726,56 @@ class NewsAndPlan(unittest.TestCase):
         b = replay.run_dual(data, days[440], days[480], 100, core="QQQ", core_weight=0.7, every=14)
         self.assertGreater(len(b["picks"]), 2)                  # reviewed every 2 weeks
 
+    def test_slices_spread_the_rebalance_dates(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        one = replay.run_dual(data, days[440], days[515], 100, core="QQQ", core_weight=0.7)
+        same = replay.run_dual(data, days[440], days[515], 100, core="QQQ", core_weight=0.7, tranches=1)
+        self.assertEqual(one["curve"], same["curve"])           # one slice is the plain plan
+        four = replay.run_dual(data, days[440], days[515], 100, core="QQQ", core_weight=0.7, tranches=4)
+        self.assertGreaterEqual(len(four["picks"]), 3 * len(one["picks"]))  # a slice re-chosen every week
+        for _, held in four["picks"]:
+            self.assertIn("QQQ", held)                          # the core stays in every slice
+
+    def test_conversion_fee_when_money_starts_in_cad(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        opts = {"core": "QQQ", "core_weight": 0.7, "start_ccy": "CAD"}
+        bank = replay.run_dual(data, days[440], days[515], 100, fx_fee=1.5, **opts)
+        norbert = replay.run_dual(data, days[440], days[515], 100, fx_fee=0.1, **opts)
+        usd = replay.run_dual(data, days[440], days[515], 100, core="QQQ", core_weight=0.7)
+        self.assertGreater(bank["fx_fees"], 1.0)                # about 1.5% of the $100, once
+        self.assertLess(norbert["fx_fees"], 0.2)
+        self.assertEqual(usd["fx_fees"], 0.0)                   # already in US dollars
+        self.assertGreater(norbert["value"], bank["value"])
+
+    def test_earnings_drift_can_wait_for_the_eps(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        end = (replay._date(days[450]) - replay.datetime.timedelta(days=30)).isoformat()
+        year_ago = (replay._date(end) - replay.datetime.timedelta(days=364)).isoformat()
+
+        def with_eps(now):
+            return replay.sigs.Signals(events={"rows": sig.events}, eps={"rows": [
+                [year_ago, "ERN", year_ago, 1.0], [days[460], "ERN", end, now]]})
+        up, down = with_eps(1.3), with_eps(0.8)
+        self.assertEqual(replay.pead_pick(data, uni, up, days[455], eps="up"), [])       # 10-Q not filed yet
+        self.assertEqual(replay.pead_pick(data, uni, up, days[460], eps="up"), ["ERN"])  # filed: EPS beat
+        self.assertEqual(replay.pead_pick(data, uni, down, days[460], eps="up"), [])     # EPS fell: skip
+        self.assertEqual(replay.pead_pick(data, uni, down, days[460]), ["ERN"])          # no filter: the jump alone
+
 
 class Statistics(unittest.TestCase):
     def load(self):
@@ -936,3 +986,56 @@ class Crypto(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LongHistory(unittest.TestCase):
+    def test_splice_keeps_the_newer_prices_and_carries_the_older_moves(self):
+        d = tempfile.mkdtemp()
+        try:
+            _synth.write(d, "IEF", _synth.chart("IEF", p0=100, growth=0.05, n=300))
+            _synth.write(d, "VFITX", _synth.chart("VFITX", p0=10, growth=0.2, n=800,
+                                                  divs=_synth.quarterly("2023-01-15", "2025-01-15", 0.1)))
+            ief, fund = (replay.mk.get_chart(s, offline=d) for s in ("IEF", "VFITX"))
+        finally:
+            shutil.rmtree(d)
+        s = replay.splice(ief, fund, "VFITX")
+        self.assertEqual(len(s["bars"]), 800)
+        self.assertEqual(s["bars"][500:], ief["bars"])                     # the ETF's own prices untouched
+        k = ief["bars"][0]["c"] / fund["bars"][500]["c"]
+        self.assertAlmostEqual(s["bars"][499]["c"], fund["bars"][499]["c"] * k)  # older moves, rescaled
+        self.assertAlmostEqual(s["dividends"][0][1], 0.1 * k)
+        self.assertEqual(s["spliced"]["until"], ief["bars"][0]["d"])
+        self.assertIs(replay.splice(ief, None), ief)
+
+    def test_fred_rates_skip_holidays(self):
+        c = replay.fred_chart("DATE,DEXCAUS\n2001-01-02,1.5\n2001-01-03,.\n2001-01-04,1.51\n")
+        self.assertEqual([b["d"] for b in c["bars"]], ["2001-01-02", "2001-01-04"])
+        self.assertEqual(c["price"], 1.51)
+
+    def test_long_run_offline(self):
+        d = tempfile.mkdtemp()
+        try:
+            off = os.path.join(d, "off")
+            for sym, n, g in (("SPY", 900, 0.3), ("QQQ", 900, 0.5), ("XLK", 900, 0.6), ("XLU", 900, 0.1),
+                              ("VFITX", 900, 0.05), ("VFISX", 900, 0.02), ("IEF", 400, 0.03), ("SHY", 400, 0.01)):
+                _synth.write(off, sym, _synth.chart(sym, p0=50, growth=g, wiggle=0.005, n=n))
+            days = [x.isoformat() for x in _synth.trading_days(900)]
+            with open(os.path.join(off, "fred-DEXCAUS.csv"), "w") as fh:
+                fh.write("DATE,DEXCAUS\n" + "".join("%s,1.4\n" % x for x in days))
+            charts, notes = replay.long_charts(off, log=lambda m: None)
+            out = replay.long_run(replay.Data(charts, {}), first=days[300], until=days[-1], horizon=120, step=60,
+                                  period_ends=(days[-1],), notes=notes)
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual(len(charts["IEF"]["bars"]), 900)                  # stitched back with VFITX
+        self.assertIn("VFITX", notes["IEF"])
+        self.assertIn("FRED", notes["USDCAD=X"])
+        self.assertNotIn("VFITX", charts)
+        t = out["rolling"]["table"]
+        self.assertEqual(set(t), set(out["names"]))
+        self.assertGreater(out["rolling"]["count"], 3)
+        self.assertTrue(all(len(v["runs"]) == out["rolling"]["count"] for v in t.values()))
+        self.assertEqual(len(out["periods"]), 1)
+        text = replay.render_long(out)
+        self.assertIn("before anything was chosen", text)
+        self.assertIn("70% Nasdaq 100 + 30% dual momentum, every 2 weeks (chosen)", text)
