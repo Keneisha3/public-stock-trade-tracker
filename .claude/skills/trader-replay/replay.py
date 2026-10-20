@@ -2309,7 +2309,7 @@ def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91,
         end = data.trading_day_on_or_before((d0 + datetime.timedelta(days=horizon)).isoformat())
         for name, r in runs(start, end).items():
             table.setdefault(name, {"runs": []})["runs"].append(
-                {"start": start, "end": end, "return_pct": r["return_pct"],
+                {"start": start, "end": end, "return_pct": r["return_pct"], "trades": r["trades"],
                  "max_dd_pct": (risk_stats(r["curve"]) or {}).get("max_dd_pct")})
         d0 += datetime.timedelta(days=step)
     periods = []
@@ -2317,7 +2317,9 @@ def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91,
         end = data.trading_day_on_or_before(e)
         start = data.trading_day_on_or_before((_date(end) - datetime.timedelta(days=730)).isoformat())
         periods.append({"start": start, "end": end, "results": {
-            name: {"return_pct": r["return_pct"], "max_dd_pct": (risk_stats(r["curve"]) or {}).get("max_dd_pct")}
+            name: {"return_pct": r["return_pct"], "max_dd_pct": (risk_stats(r["curve"]) or {}).get("max_dd_pct"),
+                   "trades": r["trades"], "fees": r["fees"],
+                   "switches": [p for i, p in enumerate(r.get("picks") or []) if not i or p[1] != r["picks"][i - 1][1]]}
             for name, r in runs(start, end).items()}})
     count = len(next(iter(table.values()))["runs"]) if table else 0
     return {"asof": until, "first": first, "rolling": {"table": table, "horizon_days": horizon, "step_days": step,
