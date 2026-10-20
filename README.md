@@ -201,7 +201,7 @@ that week). Yahoo headlines are only archived going forward
 (`discover/` on `replay-results`): free sources have no headline history, so
 they cannot be backtested honestly yet.
 
-**What the walk-forward found** (`research/pit-v11-news/` on the
+**What the walk-forward found** (`research/pit-v12-improve/` on the
 `replay-results` branch). Settings were chosen on the training periods only
 (24-month windows ending 2019, 2020, 2022 and 2024) by a rule written before
 the results; the last 12 months were held out and only used to check.
@@ -210,7 +210,7 @@ with 90 % confidence ranges.
 
 | agent | training: beat the S&P 500 | training: average gap | 28 windows: average gap (90 % range) | test, last 12 months |
 | --- | ---: | ---: | --- | ---: |
-| **70 % Nasdaq 100 + 30 % dual momentum, every 2 weeks (chosen)** | – | +16.9 pts | – | +17.3 % |
+| **70 % Nasdaq 100 + 30 % dual momentum, every 2 weeks (chosen)** | – | +16.9 pts | +5.8 (+2.4 to +11.7), 20 of 28 | +17.3 % |
 | 70 % Nasdaq 100 + 30 % dual momentum, monthly (previous plan) | 4 of 4 | +14.9 pts | +6.3 (+2.6 to +11.9), 21 of 28 | +27.1 % |
 | Dual momentum alone (single strongest fund) | 3 of 4 | +11.8 pts | +5.1 (-4.2 to +16.6) | +35.8 % |
 | Just holding the Nasdaq 100 | 3 of 4 | +14.0 pts | +6.0 (+0.3 to +12.5) | +20.3 % |
@@ -221,18 +221,42 @@ with 90 % confidence ranges.
 | Reviewers, stock bot, momentum, learned score, VIX agent | 0 to 2 of 4 | below zero | ranges include zero | |
 | S&P 500 | | | | +17.9 % |
 
-The five adjustments to the plan, in training (test year in brackets):
-rebalancing every 2 weeks +16.9 pts (-0.6), half the satellite in earnings
-drift +11.1 (+2.8), switching funds only for a 5-point lead +9.0 (+11.7), top
-20 momentum stocks as the satellite +7.7 (+11.9), and 12-1 month momentum +5.5
-(-6.3), against +14.9 (+9.2) for the monthly plan. The rule picked the
-2-week rebalance. Its edge over the monthly plan is 2 points in training, and
-it did worse in the held-out year. That is a small, uncertain difference, so
-the live record runs both. The 28-window reality check says even the best
-plan's edge over the S&P 500 could be luck (49 %). News on its own (earnings
-drift, news-shock trades) did not beat the index in training. The live paper
-record (`forward/record.json`, from 2026-10-20; the first record, from
-2026-10-19, is kept under `earlier`) is the test that matters next.
+Adjustments to the plan, in training (test year in brackets): rebalancing
+every 2 weeks +16.9 pts (-0.6, the chosen plan), half the satellite in earnings
+drift +11.1 (+2.8), the same with EPS above a year ago +11.0 (+1.8), switching
+funds only for a 5-point lead +9.0 (+11.7), top 20 momentum stocks as the
+satellite +7.7 (+11.9), 12-1 month momentum +5.5 (-6.3), against +14.9 (+9.2)
+for the monthly plan. The live record runs the 2-week and the monthly plans
+side by side.
+
+**Four checks on the plan** (`research/pit-v12-improve/` and
+`research/long-history-3/`; rules written before the results):
+
+- **Luck from the rebalance date.** Splitting the satellite into 2 or 4 slices
+  re-chosen on different weeks gave +12.8 and +10.6 pts in training. That is
+  less than the single-date plans (+14.9 to +16.9), so part of their lead came
+  from lucky dates. A fair training edge is about +11 to +13 pts, close to just
+  holding the Nasdaq 100 (+14.0). The rule kept the 2-week plan.
+- **Currency.** The replay starts the plan in US dollars. Starting in CAD at a
+  bank's 1.5 % conversion cost 2.5 pts over 24 months; Norbert's gambit (about
+  0.1 %: buy DLR in CAD, journal it to DLR.U, sell in USD) cost 0.5. That
+  saving is the one sure improvement.
+- **Earnings surprise.** Earnings drift that waits for the 10-Q and needs EPS
+  above the same quarter a year earlier (or ranks by the surprise) still
+  trailed the S&P 500 in training (-10.9 and -6.4 pts).
+- **2000 to 2017, before anything was chosen** (68 rolling years, 8 two-year
+  periods, daily data). The 2-week plan beat the S&P 500 by +3.1 pts a year on
+  average (44 of 68 years; 90 % range -0.0 to +7.6) and in 7 of 8 two-year
+  periods, with -18.9 % average worst drops against -14.3 % for the S&P 500.
+  In the dot-com crash it lost 54 % (S&P 500 -31 %, Nasdaq 100 -70 %).
+  Dual momentum alone did best (+8.0 pts a year, range +0.8 to +18.1) with
+  deeper drops (-28 %). The Nasdaq 100 alone: +0.5 pts.
+
+The 28-window reality check still says the edge could be luck (53 %). The
+live paper record (`forward/record.json`, from 2026-10-20; the first record,
+from 2026-10-19, is kept under `earlier`) is the test that matters next.
+(`research/long-history/` and `long-history-2/` used monthly bars by mistake;
+ignore them.)
 
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the
