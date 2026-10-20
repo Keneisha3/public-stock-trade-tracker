@@ -1038,6 +1038,14 @@ class LongHistory(unittest.TestCase):
         self.assertEqual(len(out["periods"]), 1)
         text = replay.render_long(out)
         self.assertIn("before anything was chosen", text)
+        f13 = {"managers": {"A": "a", "B": "b", "C": "c"}, "rows": [
+            [days[290], m, days[260], days[290], 0, [["XLK", 9, 1], ["XLU", 5, 1], ["GONE", 7, 1]]] for m in "ABC"]}
+        sig = replay.sigs.Signals(f13=f13)
+        with_c4 = replay.long_run(replay.Data(charts, {}), first=days[300], until=days[-1], horizon=120, step=60,
+                                  period_ends=(days[-1],), notes=notes, sig=sig)
+        self.assertIn("Copycat consensus (C4)", with_c4["rolling"]["table"])
+        self.assertEqual(with_c4["periods"][0]["c4_coverage"], 66.7)   # GONE has no prices
+        self.assertIn("C4's would-be picks that had prices", replay.render_long(with_c4))
         self.assertIn("70% Nasdaq 100 + 30% dual momentum, every 2 weeks (chosen)", text)
 
     def test_daily_bars_are_required_and_max_asks_for_dates(self):
@@ -1106,6 +1114,21 @@ class UpstreamAgents(unittest.TestCase):
         r = replay.run_copycat(data, sig, days[290], days[330], 100)
         self.assertTrue(all(f["day"] > days[300] for f in r["fills"] if f["ticker"] == "AAA"))
 
+    def test_rule_based_list_uses_only_the_list_public_that_day(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        rows = [[days[300], m, days[260], days[300], 0, [["AAA", 9, 1], ["BBB", 5, 1]]] for m in "XYZ"]
+        lists = [{"year": 1, "usable_from": days[305], "ciks": ["X", "Y", "Z"]}]
+        b = replay.sigs.Signals(f13_broad={"rows": rows, "lists": lists})
+        cw = lambda day, **o: replay.copycat_weights(data, b, day, **dict(replay.COPY_DEFAULT, broad=True, **o))  # noqa
+        self.assertEqual(cw(days[302], mode="consensus", n=10), {"SPY": 1.0})     # list not public yet
+        self.assertEqual(set(cw(days[306], mode="consensus", n=10)), {"AAA", "BBB"})
+        self.assertEqual(set(cw(days[306], mode="consensus", n=10, min_count=4)), {"SPY"})
+
     def test_screener_and_pelosi(self):
         d = tempfile.mkdtemp()
         try:
@@ -1131,6 +1154,21 @@ class UpstreamAgents(unittest.TestCase):
         with self.assertRaises(replay.ReplayError):
             replay.upstream_version("Z9")
 
+    def test_congress_leaders_are_ranked_on_known_outcomes_only(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        lw = lambda day, **o: replay.leader_weights(data, sig, day, **dict(replay.LEADERS_DEFAULT, **o))  # noqa: E731
+        self.assertEqual(lw(days[320], k=1, min_trades=1), {"SPY": 1.0})          # no outcome known yet
+        self.assertEqual(set(lw(days[400], k=1, min_trades=1)), {"AAA", "BBB"})    # her buys did better
+        self.assertEqual(set(lw(days[400], everyone=True)), {"AAA", "BBB", "MMM"})
+        self.assertEqual(lw(days[400], k=1, min_trades=1, min_edge=1000.0), {"SPY": 1.0})
+        r = replay.run_leaders(data, sig, days[300], days[420], 100, k=1, min_trades=1)
+        self.assertTrue(all(f["day"] > days[363] for f in r["fills"] if f["ticker"] in ("AAA", "BBB")))
+
     def test_live_record_can_copy_pelosi(self):
         d = tempfile.mkdtemp()
         try:
@@ -1138,17 +1176,19 @@ class UpstreamAgents(unittest.TestCase):
             days = data.days
             plan = {"start": days[290], "cash": 100.0, "strategies": {
                 "P2": {"kind": "pelosi", "opts": {"mode": "hold"}}, "SPY": {"kind": "hold", "weights": {"SPY": 1.0}},
-                "C4": {"kind": "copycat", "opts": {"mode": "consensus", "n": 10, "min_count": 2}}}}
+                "C4": {"kind": "copycat", "opts": {"mode": "consensus", "n": 10, "min_count": 2}},
+                "L6": {"kind": "leaders", "opts": {"k": 1, "min_trades": 1}}}}
             rec = replay.forward(plan, None, offline=off, today=days[330], log=lambda m: None, signals=sig)
         finally:
             shutil.rmtree(d)
         self.assertEqual(set(rec["targets"]["P2"]), {"AAA", "BBB"})
         self.assertEqual(set(rec["targets"]["C4"]), {"AAA", "MMM"})   # in the top 10 of 2+ investors
         self.assertIsNotNone(rec["days"][days[330]]["C4"])
+        self.assertIsNotNone(rec["days"][days[330]]["L6"])
         self.assertIsNotNone(rec["days"][days[330]]["P2"])
         with open(replay.FORWARD_PLAN) as fh:
             kinds = {st["kind"] for st in json.load(fh)["strategies"].values()}
-        self.assertLessEqual(kinds, {"dual", "hold", "pelosi", "copycat"})
+        self.assertLessEqual(kinds, {"dual", "hold", "pelosi", "copycat", "leaders"})
         merged = replay.sigs.merge_rows({"rows": [["2026-01-02", "x"], ["2026-01-01", "y"]]},
                                         {"rows": [["2026-01-02", "x"], ["2026-01-03", "z"]], "source": "s"})
         self.assertEqual(merged["rows"], [["2026-01-01", "y"], ["2026-01-02", "x"], ["2026-01-03", "z"]])
@@ -1196,6 +1236,7 @@ class NoLookaheadUpstream(unittest.TestCase):
             (copy_day, lambda dt, s, a, st: replay.run_copycat(dt, s, st, a, 100, mode="new")),
             (copy_day, lambda dt, s, a, st: replay.run_pelosi_signals(dt, s, st, a, 100, mode="hold")),
             (copy_day, lambda dt, s, a, st: replay.leagues(dt, s, st, a, 100, min_buys=1)),
+            (copy_day, lambda dt, s, a, st: replay.run_leaders(dt, s, st, a, 100, k=1, min_trades=1)),
             (screen_day, lambda dt, s, a, st: replay.run_screen(dt, uni, s, st, a, 100, pe=1e9)),
             (screen_day, lambda dt, s, a, st: replay.run_plan(dt, uni, s, st, a, 100,
                                                               sleeves={"C4": 0.5, "S1": 0.25, "P2": 0.25})),

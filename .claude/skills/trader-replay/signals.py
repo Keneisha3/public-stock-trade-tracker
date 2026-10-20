@@ -24,6 +24,7 @@ import gzip
 import io
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -515,6 +516,164 @@ def build_13f(ua, since="2013-07-01", filers=None, log=print, fetcher=None, figi
             "columns": ["effective", "cik", "period", "filed", "total", "positions"], "rows": out, "stats": stats}
 
 
+# ---------------------------------------------------------------- a rule-based investor list
+
+SEC_FULL_INDEX = "https://www.sec.gov/Archives/edgar/full-index/%d/QTR%d/form.idx"
+IDX_LINE = re.compile(r"^(13F-HR)\s+(.+?)\s+(\d{1,10})\s+(\d{4}-\d{2}-\d{2})\s+(edgar/data/\S+\.txt)\s*$")
+
+
+def parse_form_idx(text):
+    """EDGAR full-index form.idx -> [(company, cik10, filed, accession)] for original 13F-HRs."""
+    out = []
+    for line in text.splitlines():
+        m = IDX_LINE.match(line)
+        if m:
+            out.append((m.group(2).strip(), e13.cik10(m.group(3)), m.group(4),
+                        m.group(5).rsplit("/", 1)[-1][:-4]))
+    return out
+
+
+def build_13f_list(ua, year, top=50, min_entries=10, max_entries=100, log=print, fetcher=None):
+    """The rule that replaces "famous today": every 13F-HR filed in February-March of `year` (the
+    reports for the December quarter), ranked by reported value; keep the `top` largest that hold
+    between min_entries and max_entries stocks (big and concentrated: active managers, not index
+    giants). The list is usable from April 1 of `year`, once all of them were public."""
+    f = fetcher or e13.Fetcher(ua)
+    rows = [r for r in parse_form_idx(f.get(SEC_FULL_INDEX % (year, 1)).decode("latin-1"))
+            if "%d-02-01" % year <= r[2] <= "%d-03-31" % year]
+    seen, cands, stats = set(), [], {"filings": len(rows), "read": 0, "errors": 0}
+    for i, (company, cik, filed, accn) in enumerate(rows):
+        if cik in seen:
+            continue
+        seen.add(cik)
+        try:
+            cover = e13.parse_cover(f.get(e13.archive_url(cik, accn) + "primary_doc.xml"))
+            value, entries = float(cover.get("tableValueTotal") or 0), int(cover.get("tableEntryTotal") or 0)
+            stats["read"] += 1
+        except (e13.EdgarError, ValueError):
+            stats["errors"] += 1
+            continue
+        if min_entries <= entries <= max_entries:
+            cands.append({"cik": cik, "name": company, "value": value, "entries": entries, "filed": filed})
+        if i % 500 == 499:
+            log("  %d of %d filings" % (i + 1, len(rows)))
+    cands.sort(key=lambda x: -x["value"])
+    return {"year": year, "usable_from": "%d-04-01" % year, "rule": {"top": top, "min_entries": min_entries,
+                                                                      "max_entries": max_entries},
+            "managers": cands[:top], "stats": stats, "built": _now()}
+
+
+# ---------------------------------------------------------------- 13F before mid 2013 (plain text)
+
+CUSIP_LINE = re.compile(r"(?P<cusip>\b[0-9A-Z]{6}\s?[0-9A-Z]{2}\s?[0-9]\b)\s+\$?\s*(?P<value>[\d,]+)\s+(?P<shares>[\d,]+)")
+
+
+def cusip_ok(c):
+    """True when the 9th character is the right check digit for the first 8 (weeds out stray text)."""
+    if len(c) != 9 or not c[8].isdigit():
+        return False
+    total = 0
+    for i, ch in enumerate(c[:8]):
+        v = int(ch) if ch.isdigit() else ord(ch) - 55 if ch.isalpha() else None
+        if v is None:
+            return False
+        if i % 2:
+            v *= 2
+        total += v // 10 + v % 10
+    return (10 - total % 10) % 10 == int(c[8])
+
+
+def parse_13f_text(text):
+    """Holdings from a plain-text 13F (before XML tables, mid 2013): [(cusip, issuer, value $1000s,
+    shares)] summed per CUSIP. A line counts when it has a valid CUSIP followed by a value and a share
+    count; option lines (PUT/CALL) are skipped."""
+    out = {}
+    for line in text.splitlines():
+        if re.search(r"\b(PUT|CALL)\b", line.upper()):
+            continue
+        m = CUSIP_LINE.search(line.upper())
+        if not m:
+            continue
+        c = re.sub(r"\s", "", m.group("cusip"))
+        if not cusip_ok(c):
+            continue
+        try:
+            v, sh = float(m.group("value").replace(",", "")), float(m.group("shares").replace(",", ""))
+        except ValueError:
+            continue
+        issuer = line[:m.start()].strip(" |\t")
+        o = out.setdefault(c, [c, issuer, 0.0, 0.0])
+        o[2] += v
+        o[3] += sh
+    return [tuple(x) for x in out.values()]
+
+
+def build_13f_old(ua, since="1999-01-01", until="2013-07-01", filers=None, log=print, fetcher=None, figi=True):
+    """The same rows as build_13f, from the plain-text 13F-HRs filed before XML tables (mid 2013).
+    Values were reported in $1000s. Companies that later disappeared may have no ticker or no
+    price today: the replay reports how much of each pick it could price."""
+    f = fetcher or e13.Fetcher(ua)
+    filers = filers if filers is not None else e13.load_filers()
+    found, stats = [], {"filers": 0, "filings": 0, "unreadable": 0, "errors": []}
+    for fl in filers:
+        cik = e13.cik10(fl["cik"])
+        try:
+            sub = f.get_json(e13.SUBMISSIONS % cik)
+            listed = parse_13f_filings(sub)
+            for extra in (sub.get("filings") or {}).get("files", []):
+                if (extra.get("filingFrom") or "") < until:
+                    listed += parse_13f_filings(f.get_json(SEC_SUBMISSIONS % extra["name"]))
+        except (e13.EdgarError, ValueError) as e:
+            stats["errors"].append("%s: %s" % (fl["name"], e))
+            continue
+        stats["filers"] += 1
+        for filed, acc, accn, period in sorted(set(listed)):
+            if not since <= filed < until:
+                continue
+            try:
+                text = f.get(SEC_DOC % ("edgar/data/%d/%s.txt" % (int(cik), accn))).decode("utf-8", "replace")
+            except e13.EdgarError as e:
+                stats["errors"].append("%s %s: %s" % (fl["name"], accn, e))
+                continue
+            rows = sorted(parse_13f_text(text), key=lambda r: -r[2])
+            if not rows:
+                stats["unreadable"] += 1
+                continue
+            total = sum(r[2] for r in rows) * 1000
+            found.append((effective_day(filed, acc), cik, period, filed, total,
+                          [(c, issuer, "", v * 1000, sh) for c, issuer, v, sh in rows[:F13_KEEP]]))
+        log("%s: %d old filings so far" % (fl["name"], len(found)))
+    names = {}
+    for x in found:
+        for c, issuer, title, v, sh in x[5]:
+            names.setdefault(c, (issuer, title))
+    cusips = sorted(names)
+    index = e13.TickerIndex(e13.load_company_tickers(f.get_json(e13.TICKERS_URL)))
+    by_figi = figi_tickers(f, cusips, log) if figi else {}
+    tick = {}
+    for c in cusips:
+        p = e13.resolve_tickers([{"cusip": c, "issuer": names[c][0], "title": ""}], index, None, by_figi)[0]
+        if p.get("ticker"):
+            tick[c] = yahoo(p["ticker"])
+    out = []
+    for eff, cik, period, filed, total, positions in sorted(found):
+        merged, unmapped = {}, 0.0
+        for c, issuer, title, v, sh in positions:
+            if c not in tick:
+                unmapped += v
+                continue
+            m = merged.setdefault(tick[c], [tick[c], 0.0, 0.0])
+            m[1] += v
+            m[2] += sh
+        out.append([eff, cik, period, filed, round(total), [[t, round(v), round(sh)] for t, v, sh in merged.values()],
+                    round(unmapped)])
+    stats.update(filings=len(out), cusips=len(cusips), mapped=len(tick), errors=stats["errors"][:50])
+    return {"source": "SEC EDGAR plain-text 13F-HR (before XML information tables)", "built": _now(),
+            "managers": {e13.cik10(x["cik"]): x.get("person") or x["name"] for x in filers},
+            "columns": ["effective", "cik", "period", "filed", "total", "positions", "unmapped $"], "rows": out,
+            "stats": stats}
+
+
 # ---------------------------------------------------------------- fundamentals (upstream analyst)
 
 FUND_KEYS = ("revenue", "operating_income", "net_income", "eps_diluted")
@@ -646,7 +805,7 @@ def _now():
 class Signals:
     """Queries that only see rows filed on or before the day asked about."""
 
-    def __init__(self, congress=None, insiders=None, events=None, eps=None, f13=None, fundamentals=None):
+    def __init__(self, congress=None, insiders=None, events=None, eps=None, f13=None, fundamentals=None, f13_broad=None):
         self.congress = sorted((congress or {}).get("rows") or [], key=lambda r: r[0])  # the queries bisect by date
         self.insiders = sorted((insiders or {}).get("rows") or [], key=lambda r: r[0])
         self.events = sorted((events or {}).get("rows") or [], key=lambda r: r[0])
@@ -658,8 +817,14 @@ class Signals:
             self.eps.setdefault(t, []).append((filed, end, v))
         self.managers = dict((f13 or {}).get("managers") or {})
         self.f13 = {}  # manager cik -> [(effective, period, {ticker: (value, shares)})] by date
-        for eff, cik, period, filed, total, positions in sorted((f13 or {}).get("rows") or []):
+        for row in sorted((f13 or {}).get("rows") or [], key=lambda r: r[:4]):
+            eff, cik, period, filed, total, positions = row[:6]
             self.f13.setdefault(cik, []).append((eff, period, {t: (v, sh) for t, v, sh in positions}))
+        self.f13b = {}  # the rule-based list's holdings, same shape as f13
+        for row in sorted((f13_broad or {}).get("rows") or [], key=lambda r: r[:4]):
+            eff, cik, period, filed, total, positions = row[:6]
+            self.f13b.setdefault(cik, []).append((eff, period, {t: (v, sh) for t, v, sh in positions}))
+        self.lists = sorted((x["usable_from"], frozenset(x["ciks"])) for x in (f13_broad or {}).get("lists", []))
         self.fund = {}  # ticker -> key -> [(filed, quarter end, value)] by filing date
         for filed, t, end, key, v in sorted((fundamentals or {}).get("rows") or []):
             self.fund.setdefault(t, {}).setdefault(key, []).append((filed, end, v))
@@ -676,17 +841,28 @@ class Signals:
             last = max((r[0] for r in (ins or {}).get("rows", [])), default="")
             rows = list((ins or {}).get("rows", [])) + [r for r in recent["rows"] if r[0] > last and tuple(r) not in have]
             ins = {"rows": sorted(rows)}
-        return cls(opt("congress.json.gz"), ins, opt("events.json.gz"), opt("eps.json.gz"), opt("f13.json.gz"),
-                   opt("fundamentals.json.gz"))
+        f13, old = opt("f13.json.gz"), opt("f13_old.json.gz")
+        if old:  # the plain-text 13Fs before mid 2013, then the XML ones
+            first = min((r[3] for r in (f13 or {}).get("rows", [])), default="9999")
+            f13 = {"managers": dict(old.get("managers") or {}, **((f13 or {}).get("managers") or {})),
+                   "rows": [r for r in old["rows"] if r[3] < first] + list((f13 or {}).get("rows") or [])}
+        return cls(opt("congress.json.gz"), ins, opt("events.json.gz"), opt("eps.json.gz"), f13,
+                   opt("fundamentals.json.gz"), opt("f13_broad.json.gz"))
 
     def __bool__(self):
-        return bool(self.congress or self.insiders or self.events or self.eps or self.f13 or self.fund)
+        return bool(self.congress or self.insiders or self.events or self.eps or self.f13 or self.fund or self.f13b)
 
-    def holdings_13f(self, cik, day, back=0, max_age=200):
+    def broad_list(self, day):
+        """The managers on the rule-based list that was public by `day` (None before the first)."""
+        got = [ciks for since, ciks in self.lists if since <= day]
+        return got[-1] if got else None
+
+    def holdings_13f(self, cik, day, back=0, max_age=200, broad=False):
         """A manager's reported holdings {ticker: (value $, shares)} from the latest 13F the market
         could act on by `day` (back=1: the one before it). None if nothing was filed yet or the
-        latest report is for a quarter that ended more than `max_age` days ago (stopped filing)."""
-        rows = self.f13.get(cik) or []
+        latest report is for a quarter that ended more than `max_age` days ago (stopped filing).
+        broad: from the rule-based list's holdings instead of the famous 23."""
+        rows = (self.f13b if broad else self.f13).get(cik) or []
         i = bisect.bisect_right([r[0] for r in rows], day) - 1 - back
         if i < 0 or _days(rows[i + back][1], day) > max_age:
             return None
@@ -836,7 +1012,15 @@ def main(argv=None):
     ep = sub.add_parser("eps")
     ep.add_argument("--out", required=True)
     ep.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
-    for name in ("13f", "fundamentals"):
+    lp = sub.add_parser("13f-list")
+    lp.add_argument("--year", type=int, required=True)
+    lp.add_argument("--out", required=True)
+    lp.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
+    bp = sub.add_parser("13f-broad")
+    bp.add_argument("--lists", required=True, help="folder with f13_list-YEAR.json.gz files")
+    bp.add_argument("--out", required=True)
+    bp.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
+    for name in ("13f", "13f-old", "fundamentals"):
         x = sub.add_parser(name)
         x.add_argument("--out", required=True)
         x.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
@@ -846,12 +1030,35 @@ def main(argv=None):
     if a.cmd == "info":
         info(a.dir)
         return 0
-    if a.cmd in ("13f", "fundamentals"):
+    if a.cmd in ("13f-list", "13f-broad"):
+        if not a.user_agent:
+            print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
+            return 2
+        if a.cmd == "13f-list":
+            doc = build_13f_list(a.user_agent, a.year)
+            write(os.path.join(a.out, "f13_list-%d.json.gz" % a.year), doc)
+            print(json.dumps(doc["stats"]), "%d managers" % len(doc["managers"]))
+            return 0 if doc["managers"] else 3
+        lists = [read(os.path.join(a.lists, n)) for n in sorted(os.listdir(a.lists)) if n.startswith("f13_list-")]
+        union = {}
+        for doc in lists:
+            for m in doc["managers"]:
+                union.setdefault(m["cik"], {"cik": m["cik"], "name": m["name"]})
+        doc = build_13f(a.user_agent, filers=list(union.values()))
+        doc["lists"] = [{"year": x["year"], "usable_from": x["usable_from"], "rule": x["rule"],
+                         "ciks": [m["cik"] for m in x["managers"]]} for x in lists]
+        write(os.path.join(a.out, "f13_broad.json.gz"), doc)
+        print(json.dumps(doc["stats"])[:1500])
+        print("%d rows, %d managers" % (len(doc["rows"]), len(union)))
+        return 0 if doc["rows"] else 3
+    if a.cmd in ("13f", "13f-old", "fundamentals"):
         if not a.user_agent:
             print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
             return 2
         if a.cmd == "13f":
             doc, name = build_13f(a.user_agent), "f13.json.gz"
+        elif a.cmd == "13f-old":
+            doc, name = build_13f_old(a.user_agent), "f13_old.json.gz"
         else:
             import universe
             doc, name = build_fundamentals(list(universe.Universe().spans), a.user_agent), "fundamentals.json.gz"

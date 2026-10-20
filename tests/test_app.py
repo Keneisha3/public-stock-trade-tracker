@@ -137,6 +137,28 @@ class TestedPlan(unittest.TestCase):
         self.assertEqual(p[0]["outside_plan"], 700.0)
         self.assertEqual(daily.tested_plan(review, None), [])
 
+    def test_copycat_consensus_section_and_change_alert(self):
+        review = {"accounts": [{"name": "Questrade", "strategy": "growth", "total": 1000.0,
+                                "positions": [{"ticker": "AMZN", "value_base": 500.0}]}]}
+        rec = {"updated": "2026-11-16", "plan": {"strategies": {"Copycat consensus (C4, upstream agent)": {}}},
+               "targets": {"Copycat consensus (C4, upstream agent)": {"AMZN": 0.5, "GOOGL": 0.5}}}
+        c4 = daily.tested_plan(review, rec, "(C4")
+        self.assertEqual([r["ticker"] for r in c4[0]["rows"]], ["AMZN", "GOOGL"])
+        self.assertIn("13F", c4[0]["note"])
+        d = tempfile.mkdtemp()
+        try:
+            state = os.path.join(d, "c4.json")
+            self.assertIsNone(daily.picks_change(state, rec))                 # first briefing: nothing to compare
+            self.assertIsNone(daily.picks_change(state, rec))                 # same picks: quiet
+            rec["targets"]["Copycat consensus (C4, upstream agent)"] = {"AMZN": 0.5, "NVDA": 0.5}
+            ch = daily.picks_change(state, rec)
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual((ch["added"], ch["removed"]), (["NVDA"], ["GOOGL"]))
+        text = daily.render({"date": "2026-11-16", "steps": {}, "c4_change": ch, "c4": c4})
+        self.assertIn("Copycat consensus (C4) changed", text)
+        self.assertIn("Copycat consensus (C4, upstream agent) for Questrade", text)
+
 
 class DailyOffline(unittest.TestCase):
     def test_daily_run_writes_the_briefing(self):

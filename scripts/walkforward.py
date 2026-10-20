@@ -21,7 +21,7 @@ import sys
 
 KEYS = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
         "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)",
-        "copycat consensus (C4)", "mix M2", "VIX agent"]
+        "copycat consensus (C4)", "Nasdaq 100 + C4 (K4)", "congress leaders (L1)", "rule-based consensus (B1)", "VIX agent"]
 BENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)"]
 NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "Dividend (Wealthsimple)",
          "stock bot": "Stock bot", "VIX agent": "VIX agent", "momentum": "Momentum (top 20 S&P 500)",
@@ -30,7 +30,9 @@ NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "D
          "model": "Learned score (top 20)", "earnings drift": "Earnings drift (8-K news)",
          "copycat": "Copycat: investors' top 3 (13F)", "screener": "Screener: example rules",
          "pelosi (since 2015)": "Pelosi: her buys, mirrored",
-         "copycat consensus (C4)": "Copycat consensus (C4)", "mix M2": "Mix M2: 70% Nasdaq 100 + C4 + screener"}
+         "copycat consensus (C4)": "Copycat consensus (C4)", "Nasdaq 100 + C4 (K4)": "70% Nasdaq 100 + 30% C4 (K4)",
+         "congress leaders (L1)": "Congress leaders: 5 best past records (L1)",
+         "rule-based consensus (B1)": "Rule-based list consensus (B1)"}
 TEST_WINDOWS = ["12 months", "6 months", "1 month"]
 HOLDOUT_DAYS = 365
 
@@ -130,13 +132,37 @@ def league(reports, win):
             "n/a" if med(igaps) is None else "%+.1f pts" % med(igaps)))
     if not rows:
         return []
+    gaps = {}
+    for r in sorted(reports, key=lambda r: r["asof"]):
+        lg = (r["results"].get(win) or {}).get("leagues")
+        if lg:
+            gaps[r["asof"]] = {x["name"]: x["return_pct"] - lg["spy"] for x in lg["congress"]}
+    keys = sorted(gaps)
+    pers = []
+    for a in keys:  # the next period that does not overlap this one (24-month windows a year apart overlap)
+        later = [b for b in keys if (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days >= 700]
+        if not later:
+            continue
+        b = later[0]
+        both = [m for m in gaps[a] if m in gaps[b]]
+        if len(both) < 8:
+            continue
+        top = sorted(both, key=lambda m: -gaps[a][m])[:max(3, len(both) // 4)]
+        rest = [m for m in both if m not in top]
+        avg = lambda ms: sum(gaps[b][m] for m in ms) / len(ms)  # noqa: E731
+        pers.append("| %s -> %s | %d | %+.1f pts | %+.1f pts | %d of %d |" % (
+            a, b, len(both), avg(top), avg(rest), sum(gaps[b][m] > 0 for m in top), len(top)))
+    extra = ["", "Do past winners keep winning? The top quarter of members in one period, in the next period "
+             "that does not overlap it:", "",
+             "| periods | members in both | top quarter next | everyone else next | top quarter beat the S&P 500 |",
+             "| --- | ---: | ---: | ---: | ---: |"] + pers if pers else []
     return ["", "## Hindsight check: everyone copied the same way (%s windows)" % win, "",
             "Pelosi and the 23 investors are famous today, partly because they did well: choosing them is "
             "hindsight. So every House member with 10+ disclosed buys is copied like Pelosi (each buy kept a "
             "year) and every investor's top 3 like the copycat. If most of them beat the S&P 500, the "
             "method works; if only the famous one does, it was hindsight.", "",
             "| period ending | members who beat the S&P 500 | median member | Pelosi's rank | investors who "
-            "beat it | median investor |", "| --- | ---: | ---: | ---: | ---: | ---: |"] + rows
+            "beat it | median investor |", "| --- | ---: | ---: | ---: | ---: | ---: |"] + rows + extra
 
 
 def scenarios(train, last, win):

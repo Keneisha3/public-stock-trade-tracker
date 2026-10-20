@@ -31,6 +31,13 @@
     "mode": "hold"
    }
   },
+  "Congress leaders: buys of the 3 members with the best 2-year records (L6)": {
+   "kind": "leaders",
+   "opts": {
+    "k": 3,
+    "years": 2
+   }
+  },
   "Dual momentum (single strongest fund)": {
    "kind": "dual",
    "opts": {}
@@ -48,5 +55,5 @@
    }
   }
  },
- "chosen_by": "walk-forward pit-v11-news, decision rule v4 written before the results: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods, kept only if it beats the Nasdaq 100's gap (+14.0 pts). Rebalancing every 2 weeks: +16.9 pts, worst drop -22.4%. Held-out last 12 months: -0.6 pts (the monthly plan: +9.2 pts), so both stay on the record. Rule v8 (walk-forward pit-v14-hindsight): every House member with 10+ buys copied like Pelosi beat the S&P 500 in half or more of cases in only 2 of 4 training periods, and her rank swung from 1st to 51st, so her result is called hindsight-driven: she stays as a watch line, not a recommendation. Every one of the 23 investors copied alone beat the S&P 500 in half or more of cases in 3 of 4 periods, so copying them is a method, not one star; copycat consensus (C4) beat the Nasdaq 100's (+14.0) and the plan's (+16.9) training gap with +20.5 pts, worst drop -23.7%, and joins the record. Held-out last 12 months: C4 -2.9 pts, Pelosi -10.1 pts."
+ "chosen_by": "walk-forward pit-v11-news, decision rule v4 written before the results: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods, kept only if it beats the Nasdaq 100's gap (+14.0 pts). Rebalancing every 2 weeks: +16.9 pts, worst drop -22.4%. Held-out last 12 months: -0.6 pts (the monthly plan: +9.2 pts), so both stay on the record. Rule v8 (walk-forward pit-v14-hindsight): every House member with 10+ buys copied like Pelosi beat the S&P 500 in half or more of cases in only 2 of 4 training periods, and her rank swung from 1st to 51st, so her result is called hindsight-driven: she stays as a watch line, not a recommendation. Every one of the 23 investors copied alone beat the S&P 500 in half or more of cases in 3 of 4 periods, so copying them is a method, not one star; copycat consensus (C4) beat the Nasdaq 100's (+14.0) and the plan's (+16.9) training gap with +20.5 pts, worst drop -23.7%, and joins the record. Held-out last 12 months: C4 -2.9 pts, Pelosi -10.1 pts. Rule v10 (walk-forward pit-v15-leaders): ranking House members each month by how their past disclosed buys did (outcomes known by then) and copying the 3 best on 2-year records (L6) beat the Nasdaq 100's training gap, the plan's and copying every member (+17.2 pts, worst drop -22.8%; held-out year +1.5 pts); only 1 of 6 ranking versions passed, so it is weak evidence and joins the record to be watched."
 }

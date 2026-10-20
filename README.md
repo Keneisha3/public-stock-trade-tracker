@@ -316,6 +316,18 @@ C4, the screener and Pelosi (+12.6 to +14.8 pts) did not beat the plan. A
 test also confirms no agent can see the future: prices cut at the as-of date
 and later prices plus later filings give identical results.
 
+**Following the best Congress members** (`research/pit-v15-leaders/`).
+Each month, members were ranked by how their past disclosed buys did
+against the S&P 500 (only outcomes known by then), and the leaders' buys
+were copied. Past winners kept winning only about half the time (top
+quarter vs the rest in the next period: +11.4 vs +2.4, -4.0 vs +10.6,
+-7.9 vs +9.2, -3.1 vs -12.2 pts). Of six ranking versions, one passed the
+rule written beforehand: the 3 members with the best 2-year records (L6),
++17.2 pts in training (copying every member: -29.6), worst drop -22.8 %,
+held-out year +1.5 pts. One pass out of six is weak evidence, so L6 joins
+the live record to be watched. Putting C4 next to the Nasdaq 100 (70/30,
+50/50) gave +13.3 to +14.6 pts, less than C4 alone (+20.5) or the plan.
+
 **Overseas sessions, day-traded** (`sessions.py`, `research/sessions-v1/`).
 Tokyo and Hong Kong (closed) and London and Frankfurt (half way) are read
 from hourly bars that had closed by 9:15 a.m. New York time; SPY, QQQ or
