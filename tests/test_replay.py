@@ -663,6 +663,65 @@ class CongressRecords(unittest.TestCase):
         self.assertTrue(any("AAA" in p for _, p in r["picks"]))
 
 
+class NewsAndPlan(unittest.TestCase):
+    def world(self, d):
+        base, off = write_world(d)
+        _synth.write(off, "ERN", _synth.chart("ERN", p0=50, growth=0.1, wiggle=0.003, n=520, gaps={450: 9}))
+        for sym, g in (("XLK", 0.6), ("IEF", 0.03), ("SHY", 0.02), ("QQQ", 0.4)):
+            _synth.write(off, sym, _synth.chart(sym, p0=50, growth=g, wiggle=0.005, n=520))
+        data = load_data(off)
+        members = {t: [["2014-01-01", None]] for t in ("AAA", "BBB", "MMM", "BE", "ERN")}
+        uni = replay.univ.Universe({"licence": "t", "last_snapshot": data.days[-1], "members": members})
+        days = data.days
+        sig = replay.sigs.Signals(events={"rows": [[days[450], "ERN", "2.02,9.01", days[449]],
+                                                   [days[300], "BBB", "5.02", days[300]]]})
+        return base, off, data, uni, sig
+
+    def test_earnings_drift_waits_for_the_reaction(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        self.assertEqual(replay.pead_pick(data, uni, sig, days[449]), [])   # filed after the close: not yet
+        self.assertEqual(replay.pead_pick(data, uni, sig, days[450]), ["ERN"])  # the jump is known at this close
+        self.assertEqual(replay.pead_pick(data, uni, sig, days[450], min_move=20.0), [])
+        self.assertEqual(replay.pead_pick(data, uni, sig, days[515]), [])   # more than 60 days later
+        r = replay.run_events(data, uni, sig, days[440], days[480], 100, n=2)
+        self.assertTrue(any(f["ticker"] == "ERN" and f["day"] > days[450] for f in r["fills"] if f["side"] == "buy"))
+
+    def test_news_shock_bot_needs_a_filing(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        r = replay.run_stockbot(data, [], days[400], days[519], 100, {"idle": None}, uni=uni, news=sig)
+        self.assertTrue(all(c["ticker"] in ("ERN",) for c in r["contrib"]), r["contrib"])  # only names with news
+
+    def test_plan_variants(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        w = replay.dual_weights(data, days[500], skip=1)
+        self.assertAlmostEqual(sum(w.values()), 1.0, places=6)
+        kept = replay.dual_weights(data, days[500], prev="SPY", margin=500.0)  # a huge margin: keep what is held
+        self.assertIn("SPY", kept)
+        r = replay.run_plan(data, uni, sig, days[440], days[480], 100, sleeves={"dual": 0.5, "drift": 0.5})
+        last = dict(r["picks"])[max(dict(r["picks"]))]
+        self.assertIn("QQQ", last)
+        self.assertIn("ERN", last)                               # the drift sleeve
+        m = replay.run_plan(data, uni, None, days[440], days[480], 100, sleeves={"momentum": 1.0}, n=2)
+        self.assertTrue(set(m["picks"][-1][1]) - {"QQQ"} <= {"AAA", "BBB", "MMM", "BE", "ERN"})
+        b = replay.run_dual(data, days[440], days[480], 100, core="QQQ", core_weight=0.7, every=14)
+        self.assertGreater(len(b["picks"]), 2)                  # reviewed every 2 weeks
+
+
 class Statistics(unittest.TestCase):
     def load(self):
         import importlib.util

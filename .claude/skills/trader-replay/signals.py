@@ -407,9 +407,9 @@ class Signals:
     """Queries that only see rows filed on or before the day asked about."""
 
     def __init__(self, congress=None, insiders=None, events=None):
-        self.congress = (congress or {}).get("rows") or []
-        self.insiders = (insiders or {}).get("rows") or []
-        self.events = (events or {}).get("rows") or []
+        self.congress = sorted((congress or {}).get("rows") or [], key=lambda r: r[0])  # the queries bisect by date
+        self.insiders = sorted((insiders or {}).get("rows") or [], key=lambda r: r[0])
+        self.events = sorted((events or {}).get("rows") or [], key=lambda r: r[0])
         self._cd = [r[0] for r in self.congress]
         self._id = [r[0] for r in self.insiders]
         self._ed = [r[0] for r in self.events]

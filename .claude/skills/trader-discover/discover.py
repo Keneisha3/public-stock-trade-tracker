@@ -56,6 +56,7 @@ URLS = {
     "google_news": "https://news.google.com/rss/search?q=%s&hl=en-US&gl=US&ceid=US:en",
     "fool": ["https://www.fool.com/investing-news/", "https://www.fool.com/"],
     "apewisdom": "https://apewisdom.io/api/v1.0/filter/all-stocks/page/%d",
+    "yahoo_headlines": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%s&region=US&lang=en-US",
 }
 ISHARES = {"IWM": ("239710", "ishares-russell-2000-etf"), "IJH": ("239763", "ishares-core-sp-midcap-etf"),
            "IJR": ("239774", "ishares-core-sp-smallcap-etf")}
@@ -64,6 +65,7 @@ SCREENS = ["most_actives", "day_gainers", "day_losers", "undervalued_growth_stoc
 NEWS_QUERIES = ["stock market", "stocks to buy", "earnings beat", "analyst upgrade"]
 MARKET = ("listed_us", "listed_tsx", "sec", "index_funds")          # the whole market
 IDEAS = ("trending", "screens", "news", "fool", "reddit")          # idea lists
+ARCHIVE_ONLY = ("headlines",)  # saved for later backtests, not ranked as ideas
 
 
 class DiscoverError(Exception):
@@ -197,6 +199,44 @@ def fool_tickers(html):
     return out + tickers_in(re.sub(r"<[^>]+>", " ", html or ""))
 
 
+POSITIVE = set("""beat beats beating surge surges surged soar soars soared jump jumps jumped rally rallies rallied
+record upgrade upgrades upgraded raise raises raised strong stronger growth profit profits outperform bullish gain
+gains gained top tops topped exceed exceeds exceeded approval approved win wins won expand expands expanded boost
+boosts boosted rebound rebounds rebounded buyback dividend hike breakthrough""".split())
+NEGATIVE = set("""miss misses missed plunge plunges plunged fall falls fell drop drops dropped downgrade downgrades
+downgraded cut cuts weak weaker loss losses lawsuit sue sued probe investigation recall bearish slump slumps slumped
+warn warns warning fraud bankruptcy layoffs layoff decline declines declined sink sinks sank tumble tumbles tumbled
+halt halted delay delayed resign resigns resigned subpoena default""".split())
+
+
+def headline_score(text):
+    """-1 to +1 from a small finance word list: (positive - negative) / words that matched.
+    Crude on purpose: it is saved with every headline so better scoring can be tried later."""
+    words = re.findall(r"[a-z]+", (text or "").lower())
+    p = sum(1 for w in words if w in POSITIVE)
+    n = sum(1 for w in words if w in NEGATIVE)
+    return round((p - n) / (p + n), 2) if p + n else 0.0
+
+
+def headline_items(xml_bytes, since=None):
+    """[(published day, title)] from an RSS feed, newest first; only items published on or after `since`."""
+    import email.utils
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return []
+    out = []
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        try:
+            day = email.utils.parsedate_to_datetime(item.findtext("pubDate") or "").date().isoformat()
+        except (TypeError, ValueError):
+            day = None
+        if title and day and (not since or day >= since):
+            out.append((day, title))
+    return sorted(out, reverse=True)
+
+
 def parse_apewisdom(doc):
     return [{"symbol": r["ticker"].upper(), "mentions": int(r.get("mentions") or 0), "rank": r.get("rank")}
             for r in (doc or {}).get("results", []) if r.get("ticker")]
@@ -295,8 +335,29 @@ def gather(only=None, sec_ua=None, http=None, log=print):
         return {"symbols": list(dict.fromkeys(r["symbol"] for r in rows)),
                 "detail": {"mentions": {r["symbol"]: r["mentions"] for r in rows}}}
 
+    def headlines():
+        """Each S&P 500 company's own Yahoo headlines from the last two days, scored, so that
+        headline-driven trading can be backtested once the archive is long enough."""
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "trader-replay"))
+        import universe
+        today = datetime.date.today()
+        since = (today - datetime.timedelta(days=2)).isoformat()
+        out = {}
+        for t in sorted(universe.Universe().members_on(today.isoformat())):
+            try:
+                items = headline_items(get(URLS["yahoo_headlines"] % t), since)
+            except DiscoverError:
+                continue
+            if items:
+                out[t] = [[day, headline_score(title), title[:200]] for day, title in items[:15]]
+            time.sleep(0.15)
+        if not out:
+            raise DiscoverError("no company headlines came back")
+        return {"symbols": sorted(out), "detail": {"headlines": out}}
+
     for name, fn in (("listed_us", listed_us), ("listed_tsx", listed_tsx), ("sec", sec), ("index_funds", index_funds),
-                     ("trending", trending), ("screens", screens), ("news", news), ("fool", fool), ("reddit", reddit)):
+                     ("trending", trending), ("screens", screens), ("news", news), ("fool", fool), ("reddit", reddit),
+                     ("headlines", headlines)):
         run(name, fn)
     return out
 

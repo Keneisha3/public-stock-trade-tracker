@@ -54,6 +54,18 @@ class Parsers(unittest.TestCase):
         self.assertEqual(discover.parse_ishares(csv), ["SMCI"])
 
 
+class Headlines(unittest.TestCase):
+    def test_scored_and_dated(self):
+        self.assertEqual(discover.headline_score("Acme beats estimates, raises guidance"), 1.0)
+        self.assertEqual(discover.headline_score("Acme misses, shares plunge after downgrade"), -1.0)
+        self.assertEqual(discover.headline_score("Acme beats on sales but warns on margins"), 0.0)
+        self.assertEqual(discover.headline_score("Acme to present at a conference"), 0.0)
+        rss = (b"<rss><channel><item><title>Acme beats</title><pubDate>Mon, 19 Oct 2026 14:00:00 +0000</pubDate></item>"
+               b"<item><title>Old news</title><pubDate>Mon, 12 Oct 2026 14:00:00 +0000</pubDate></item>"
+               b"<item><title>No date</title></item></channel></rss>")
+        self.assertEqual(discover.headline_items(rss, since="2026-10-17"), [("2026-10-19", "Acme beats")])
+
+
 class SnapshotAndFunnel(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()

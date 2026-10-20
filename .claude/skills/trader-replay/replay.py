@@ -517,7 +517,7 @@ def run_momentum(data, uni, start, asof, cash, **opts):
 
 DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY",  # best 1 fund: won the walk-forward
                 "pool": "all", "vol_target": None, "trend": False, "core": None, "core_weight": 0.5,
-                "core_trend": False, "lookbacks": None}
+                "core_trend": False, "lookbacks": None, "skip": 0, "margin": 0.0, "every": 28}
 DUAL_POOL = ("us_broad", "us_sector", "us_factor", "world", "commodities")
 DUAL_POOLS = {"all": DUAL_POOL, "growth": ("us_broad", "us_sector", "us_factor")}
 
@@ -531,18 +531,27 @@ def run_dual(data, start, asof, cash, **opts):
     must also be above its 200-day average); vol_target (hold target/volatility of a fund,
     at most all of it, the rest in IEF: less in wild markets); core ("QQQ"): that fund takes
     core_weight of the money, dual momentum the rest, rebalanced together every month."""
-    return run_targets(data, start, asof, cash, lambda d: dual_weights(data, d, **opts), 28)
+    o = dict(DUAL_DEFAULT, **opts)
+    held = []
+
+    def choose(d):
+        w = dual_weights(data, d, prev=held[0] if held else None, **opts)
+        held[:] = [f for f in w if f not in (o["core"], o["safe"])][:1]
+        return w
+    return run_targets(data, start, asof, cash, choose, o["every"])
 
 
-def dual_weights(data, d, **opts):
-    """What dual momentum (with its options) would hold after the close of `d`: {fund: weight}."""
+def dual_weights(data, d, prev=None, **opts):
+    """What dual momentum (with its options) would hold after the close of `d`: {fund: weight}.
+    skip: leave out the last months of the return (12-1). margin: keep `prev` (the fund held)
+    unless the best beats it by this many points (fewer switches for small differences)."""
     o = dict(DUAL_DEFAULT, **opts)
     pool = sorted({x for g in DUAL_POOLS[o["pool"]] for x in univ.ETFS[g] if not x.endswith(".TO")})
     looks = o["lookbacks"] or [o["months"]]
 
     def mom(sym):
         """Average return over the lookbacks (months), with the stats of the longest one."""
-        qs = [data.quick(sym, d, 21 * m) for m in looks]
+        qs = [data.quick(sym, d, 21 * m, 21 * o["skip"] if m > o["skip"] else 0) for m in looks]
         if not all(qs):
             return None
         q = dict(qs[0])  # trend and volatility do not depend on the lookback
@@ -550,8 +559,12 @@ def dual_weights(data, d, **opts):
         return q
     hurdle = (mom(o["cash_like"]) or {}).get("ret", 0.0)
     rows = [(q["ret"], f, q) for f in pool for q in [mom(f)] if q]
-    top = [(f, q) for r, f, q in sorted(rows, key=lambda x: -x[0])[:o["k"]]
-           if r > hurdle and (q["above200"] or not o["trend"])]
+    ranked = sorted(rows, key=lambda x: -x[0])
+    if o["margin"] and prev and o["k"] == 1 and ranked:
+        mine = next((x for x in ranked if x[1] == prev), None)
+        if mine and ranked[0][0] - mine[0] < o["margin"]:
+            ranked = [mine] + [x for x in ranked if x[1] != prev]
+    top = [(f, q) for r, f, q in ranked[:o["k"]] if r > hurdle and (q["above200"] or not o["trend"])]
     sat = 1.0 - (o["core_weight"] if o["core"] else 0.0)
     w = {}
     for f, q in top:
@@ -812,6 +825,76 @@ def run_model(data, uni, sig, start, asof, cash, **opts):
     return out
 
 
+PEAD_DEFAULT = {"n": 20, "days": 60, "min_move": 3.0, "every": 7}
+
+
+def pead_pick(data, uni, sig, d, n=20, days=60, min_move=3.0):
+    """Earnings drift: S&P 500 members (that day) whose earnings 8-K in the last `days` was met by
+    a jump of at least `min_move` points beyond the S&P 500 on the first day the market could
+    react. Strongest reactions first. Known by the close of `d`."""
+    out = []
+    for t, effs in sig.news(d, days, item="2.02").items():
+        if t not in uni.members_on(d) or t not in data.charts:
+            continue
+        eff = max(effs)
+        ds = data.dates[t]
+        i = bisect.bisect_left(ds, eff)  # the first trading day on or after the filing took effect
+        if i <= 0 or i >= len(ds) or ds[i] > d:
+            continue
+        before, react = ds[i - 1], ds[i]
+        r = data.close(t, react) / data.close(t, before) - 1 if data.close(t, before) else None
+        sp0, sp1 = data.close("SPY", before), data.close("SPY", react)
+        if r is None or not sp0:
+            continue
+        x = 100.0 * (r - (sp1 / sp0 - 1))
+        if x >= min_move:
+            out.append((x, t))
+    return [t for _, t in sorted(out, reverse=True)[:n]]
+
+
+def run_events(data, uni, sig, start, asof, cash, **opts):
+    """Hold the earnings-drift picks equal weight, the rest in SPY; reviewed every `every` days."""
+    o = dict(PEAD_DEFAULT, **opts)
+
+    def choose(d):
+        picks = pead_pick(data, uni, sig, d, o["n"], o["days"], o["min_move"])
+        return picks + ["SPY"] * (o["n"] - len(picks)) if "SPY" in data.charts else picks
+    return run_targets(data, start, asof, cash, choose, o["every"])
+
+
+PLAN_DEFAULT = {"core": "QQQ", "core_weight": 0.7, "sleeves": {"dual": 1.0}, "every": 28, "n": 20}
+
+
+def run_plan(data, uni, sig, start, asof, cash, **opts):
+    """The core plus a satellite split between sleeves: 'dual' (dual momentum fund), 'momentum'
+    (top n S&P 500 members by 12-1 momentum above their 200-day) and 'drift' (earnings drift)."""
+    o = dict(PLAN_DEFAULT, **opts)
+    sat = 1.0 - o["core_weight"]
+
+    def choose(d):
+        w = {}
+        if o["core"] in data.charts:
+            w[o["core"]] = o["core_weight"]
+        for sleeve, share in o["sleeves"].items():
+            part = sat * share
+            if sleeve == "dual":
+                for f, x in dual_weights(data, d).items():
+                    w[f] = w.get(f, 0.0) + part * x
+                continue
+            if sleeve == "momentum":
+                rows = [(q["ret"], t) for t in uni.members_on(d) for q in [data.quick(t, d, 252, 21)]
+                        if q and q["above200"]]
+                picks = [t for _, t in sorted(rows, reverse=True)[:o["n"]]]
+            else:
+                picks = pead_pick(data, uni, sig, d, o["n"]) if sig else []
+            if not picks:
+                w["SPY"] = w.get("SPY", 0.0) + part
+            for t in picks:
+                w[t] = w.get(t, 0.0) + part / len(picks)
+        return w
+    return run_targets(data, start, asof, cash, choose, o["every"])
+
+
 def run_hold(data, weights, start, asof, cash):
     pf = Portfolio(data, cash, split=currency_split(data, weights, start), start=start)
     orders = [{"side": "buy", "ticker": s, "cad": cash * w * 0.999, "decided": start} for s, w in weights.items()
@@ -903,7 +986,7 @@ def vix_regimes(curve, data):
     return out
 
 
-def run_stockbot(data, universe, start, asof, cash, overrides=None, uni=None):
+def run_stockbot(data, universe, start, asof, cash, overrides=None, uni=None, news=None):
     """The ATR bot with US-dollar cash: $cash CAD worth of USD at the start, valued in CAD.
     overrides: paper.PARAMS changes, e.g. {"idle": None} for the bot without its index sleeve.
     uni: trade any S&P 500 member, but only on days it was a member (instead of `universe`)."""
@@ -916,6 +999,8 @@ def run_stockbot(data, universe, start, asof, cash, overrides=None, uni=None):
     if uni is not None:
         universe = [s for s in uni.ever(start, asof) if s in data.charts]
         eligible = uni.members_on
+        if news is not None:  # news shock: only a breakout that came with company news (an 8-K) that week
+            eligible = lambda day: uni.members_on(day) & set(news.news(day, 5))  # noqa: E731
     first = (_date(start) - datetime.timedelta(days=150)).isoformat()  # enough for the ATR and the regime
     charts = {}
     for s in universe:
@@ -1376,6 +1461,18 @@ CORE_VARIANTS = [
                                                                 "lookbacks": [1, 3, 6, 12]}),
     ("Core: Nasdaq 100 only above its 200-day, else bonds", {"core": "QQQ", "core_weight": 1.0, "core_trend": True}),
 ]
+PEAD_VARIANTS = [
+    ("Earnings drift: top 20 jumps of 3+ pts, held about 60 days (default)", {}),
+    ("Earnings drift: jumps of 5+ pts", {"min_move": 5.0}),
+    ("Earnings drift: held about 30 days", {"days": 30}),
+]
+PLAN_VARIANTS = [  # the five adjustments to 70% Nasdaq 100 + 30% dual momentum
+    ("Plan A: dual momentum on 12-1 months", {"core": "QQQ", "core_weight": 0.7, "skip": 1}),
+    ("Plan B: rebalanced every 2 weeks", {"core": "QQQ", "core_weight": 0.7, "every": 14}),
+    ("Plan C: satellite half dual momentum, half earnings drift", {"plan": True, "sleeves": {"dual": 0.5, "drift": 0.5}}),
+    ("Plan D: satellite = top 20 momentum stocks", {"plan": True, "sleeves": {"momentum": 1.0}}),
+    ("Plan E: switch funds only for a 5-point lead", {"core": "QQQ", "core_weight": 0.7, "margin": 5.0}),
+]
 MODEL_VARIANTS = [
     ("Learned score: top 20 (default)", {}),
     ("Learned score: top 40", {"n": 40}),
@@ -1420,6 +1517,21 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
         if "QQQ" in data.charts:
             for name, over in CORE_VARIANTS:
                 add("core + dual", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
+        sig = ctx.get("signals")
+        if sig and sig.events:
+            for name, over in PEAD_VARIANTS:
+                add("news", name, over, lambda st, o=over: run_events(data, ctx["uni"], sig, st, asof, cash, **o))
+            add("news", "News shock: stock bot trades only breakouts with an 8-K that week", {"news": "8-K"},
+                lambda st: run_stockbot(data, ctx["universe"], st, asof, cash, uni=ctx["uni"], news=sig))
+        if "QQQ" in data.charts:
+            for name, over in PLAN_VARIANTS:
+                if "drift" in over.get("sleeves", {}) and not (sig and sig.events):
+                    continue
+                if "plan" in over:
+                    add("core + dual", name, over, lambda st, o=over: run_plan(
+                        data, ctx["uni"], sig, st, asof, cash, **{k: v for k, v in o.items() if k != "plan"}))
+                else:
+                    add("core + dual", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
         for name, over in MODEL_VARIANTS:
             add("model", name, over, lambda st, o=over: run_model(data, ctx["uni"], ctx.get("signals"), st, asof, cash, **o))
     sig = ctx.get("signals")
@@ -1624,6 +1736,8 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
             if "QQQ" in data.charts:
                 row["core + dual"] = run_dual(data, start, end, cash, **CORE_DEFAULT)
             row["model"] = run_model(data, uni, sig, start, end, cash)
+            if sig and sig.events:
+                row["earnings drift"] = run_events(data, uni, sig, start, end, cash)
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
@@ -1817,6 +1931,8 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
             if "QQQ" in data.charts:
                 row["core + dual"] = run_dual(data, start, asof, cash, **CORE_DEFAULT)
             row["model"] = run_model(data, uni, sig, start, asof, cash)
+            if sig and sig.events:
+                row["earnings drift"] = run_events(data, uni, sig, start, asof, cash)
         if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
@@ -1888,7 +2004,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
-         "blend", "core + dual", "model",
+         "blend", "core + dual", "model", "earnings drift",
          "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
@@ -1899,7 +2015,8 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)",
           "blend": "Blend: dual momentum + momentum + Congress (thirds)",
           "core + dual": "Core + satellite: 70% Nasdaq 100, 30% dual momentum",
-          "model": "Learned score (top 20, refit every January)"}
+          "model": "Learned score (top 20, refit every January)",
+          "earnings drift": "Earnings drift (8-K news: jumps on earnings, held ~60 days)"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 
