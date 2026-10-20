@@ -38,6 +38,14 @@ import team  # noqa: E402
 STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward"]
 NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward"}
 IDEA_SOURCES = "trending,screens,news,fool,reddit"
+# The live paper record is computed on GitHub every weekday (it needs the SEC and Congress data kept
+# there); the briefing reads the published copy. "record_url" in trader/config.json overrides it.
+RECORD_URL = "https://raw.githubusercontent.com/Keneisha3/public-stock-trade-tracker/replay-results/forward/record.json"
+NOTES = {"(chosen)": "An option, not an order: it beat the S&P 500 in 20 of 28 test windows, with drops like the "
+                     "Nasdaq 100's. Nothing is placed for you.",
+         "(C4": "Stocks in the top 10 of at least 3 of the copycat's 23 investors, from their latest 13F reports. It "
+                "beat the Nasdaq 100 in training and the S&P 500 in 22 of 28 windows, trailed in the held-out year, "
+                "and is concentrated in a few large companies. An option, not an order."}
 
 
 def _tool(folder, script, args, timeout=180):
@@ -56,12 +64,13 @@ def _tool(folder, script, args, timeout=180):
         return None, out[:400]
 
 
-def tested_plan(review, rec):
-    """For each growth account: what the strategy chosen by the walk-forward (marked "(chosen)" in
-    the live record's plan) would hold today, in the account's money, beside what it holds now."""
+def tested_plan(review, rec, marker="(chosen)"):
+    """For each growth account: what a strategy of the live record (the one whose name contains
+    `marker`: "(chosen)" for the plan, "(C4" for copycat consensus) would hold today, in the
+    account's money, beside what it holds now."""
     if not rec:
         return []
-    name = next((k for k in (rec.get("plan") or {}).get("strategies", {}) if "(chosen)" in k), None)
+    name = next((k for k in (rec.get("plan") or {}).get("strategies", {}) if marker in k), None)
     targets = (rec.get("targets") or {}).get(name) if name else None
     if not targets:
         return []
@@ -73,10 +82,25 @@ def tested_plan(review, rec):
         rows = [{"ticker": t, "target_pct": round(100 * w, 1), "target": round(a["total"] * w, 2),
                  "now": round(held.get(t, 0.0), 2), "change": round(a["total"] * w - held.get(t, 0.0), 2)}
                 for t, w in sorted(targets.items(), key=lambda kv: -kv[1])]
-        out.append({"account": a["name"], "plan": name, "total": a["total"], "rows": rows,
+        out.append({"account": a["name"], "plan": name, "total": a["total"], "rows": rows, "note": NOTES.get(marker, ""),
                     "outside_plan": round(sum(v for t, v in held.items() if t not in targets), 2),
                     "as_of": rec.get("updated")})
     return out
+
+
+def picks_change(state_path, rec, marker="(C4"):
+    """{"added", "removed", "as_of"} when a strategy's picks differ from the last briefing's (new 13F
+    reports change C4 a few times a year), else None. Remembers today's picks in `state_path`."""
+    name = next((k for k in ((rec or {}).get("plan") or {}).get("strategies", {}) if marker in k), None)
+    now = sorted(((rec or {}).get("targets") or {}).get(name) or {}) if name else []
+    if not now:
+        return None
+    before = acc.read_json(state_path, None)
+    acc.write_json(state_path, {"tickers": now, "as_of": rec.get("updated")})
+    if not before or before.get("tickers") == now:
+        return None
+    old = set(before.get("tickers") or [])
+    return {"added": [t for t in now if t not in old], "removed": sorted(old - set(now)), "as_of": rec.get("updated")}
 
 
 def run(base="trader", skip=(), offline=None, today=None):
@@ -169,18 +193,26 @@ def run(base="trader", skip=(), offline=None, today=None):
         brief["ideas"] = (doc or {}).get("ideas", [])
         did("discover", doc is not None, err2 or "%d ideas from %d candidates" % (len(brief["ideas"]),
                                                                               (doc or {}).get("candidates", 0)))
-    if "forward" not in skip:  # the live paper record of the strategies that passed the walk-forward
-        rec_path = os.path.join(base, "forward", "record.json")
-        p = subprocess.run([sys.executable, os.path.join(SKILLS, "trader-replay", "replay.py"), "--forward", rec_path],
-                           capture_output=True, text=True, timeout=600)
-        rec = acc.read_json(rec_path, None) if p.returncode == 0 else None
+    rec_path = os.path.join(base, "forward", "record.json")
+    if "forward" not in skip:  # the live paper record, as published by the weekday GitHub run
+        err = None
+        try:
+            rec = json.loads(acc.mk.fetch(acc.read_json(paths.config, {}).get("record_url") or RECORD_URL))
+            if not isinstance(rec, dict) or "days" not in rec:
+                raise ValueError("not a live record")
+            acc.write_json(rec_path, rec)
+        except (acc.mk.MarketError, ValueError) as e:
+            err = "could not fetch the live record (%s): using the last copy" % e
+        rec = acc.read_json(rec_path, None)
         if rec and rec.get("days"):
             last = rec["days"][max(rec["days"])]
             brief["forward"] = {"start": rec["start"], "updated": rec.get("updated"), "values": last,
                                 "days": len(rec["days"]), "cash": rec["plan"].get("cash", 100)}
-        did("forward", rec is not None, (p.stderr.strip() or p.stdout.strip())[:300] if p.returncode else
-            "%d days on the record" % len((rec or {}).get("days", {})))
-    brief["plan"] = tested_plan(review, acc.read_json(os.path.join(base, "forward", "record.json"), None))
+        did("forward", err is None, err or "%d days on the record" % len((rec or {}).get("days", {})))
+    rec = acc.read_json(rec_path, None)
+    brief["plan"] = tested_plan(review, rec)
+    brief["c4"] = tested_plan(review, rec, "(C4")
+    brief["c4_change"] = picks_change(os.path.join(base, "state", "c4.json"), rec)
     rules = os.path.join(base, "alerts.json")
     if "alerts" not in skip and os.path.exists(rules):
         doc, err = _tool("trader-alerts", "alerts.py", ["check", "--json", "--rules", rules,
@@ -208,6 +240,12 @@ def render(b):
         if p.get("mix"):
             L.append("Mix: " + ", ".join("%s %.0f%%%s" % (m["label"], m["pct"], (" of %.0f%% target" % m["target_pct"])
                                                          if m["target_pct"] is not None else "") for m in p["mix"]))
+        L.append("")
+    ch = b.get("c4_change")
+    if ch:
+        L.append("**Copycat consensus (C4) changed** (new 13F reports, as of %s): %s%s. See the C4 section below." % (
+            ch["as_of"], ("added " + ", ".join(ch["added"])) if ch["added"] else "",
+            ("; removed " + ", ".join(ch["removed"])) if ch["removed"] else ""))
         L.append("")
     v = b.get("vix")
     if v:
@@ -252,16 +290,15 @@ def render(b):
         for c in b["congress"]:
             L.append("- %s (%s) filed %s: %s" % (c["name"], c["district"], c["filed"], c["url"]))
         L.append("")
-    for p in b.get("plan") or []:
-        L.append("## The tested plan for %s (%s, targets as of %s)" % (p["account"], p["plan"], p["as_of"]))
+    for p in (b.get("plan") or []) + (b.get("c4") or []):
+        L.append("## %s for %s (targets as of %s)" % (p["plan"], p["account"], p["as_of"]))
         for r in p["rows"]:
             L.append("- %s %.0f%%: %s (now %s, %s %s)" % (r["ticker"], r["target_pct"], acc.money(r["target"]),
                                                         acc.money(r["now"]), "buy" if r["change"] > 0 else "sell",
                                                         acc.money(abs(r["change"]))))
         if p["outside_plan"]:
             L.append("- In holdings outside the plan: %s" % acc.money(p["outside_plan"]))
-        L.append("- An option, not an order: it beat the S&P 500 in 23 of 28 test windows, with drops "
-                 "like the Nasdaq 100's. Nothing is placed for you.")
+        L.append("- " + (p.get("note") or "An option, not an order. Nothing is placed for you."))
         L.append("")
     if b.get("forward"):
         f = b["forward"]
