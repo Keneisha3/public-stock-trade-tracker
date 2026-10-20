@@ -1039,3 +1039,19 @@ class LongHistory(unittest.TestCase):
         text = replay.render_long(out)
         self.assertIn("before anything was chosen", text)
         self.assertIn("70% Nasdaq 100 + 30% dual momentum, every 2 weeks (chosen)", text)
+
+    def test_daily_bars_are_required_and_max_asks_for_dates(self):
+        c = replay.mk.parse_chart(json.dumps(_synth.chart("SPY", n=300)), "SPY")
+        self.assertTrue(replay.daily(c))
+        monthly = dict(c, bars=c["bars"][::21])
+        self.assertFalse(replay.daily(monthly))
+        seen = []
+        real = replay.mk.fetch
+        replay.mk.fetch = lambda url, timeout=25: seen.append(url) or json.dumps(_synth.chart("SPY", n=30))
+        try:
+            replay.mk.get_chart("SPY", range_="max")
+            replay.mk.get_chart("SPY", range_="10y")
+        finally:
+            replay.mk.fetch = real
+        self.assertIn("period1=631152000", seen[0])                 # range=max would give monthly bars
+        self.assertIn("range=10y", seen[1])

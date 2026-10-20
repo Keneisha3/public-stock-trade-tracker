@@ -2243,6 +2243,13 @@ def splice(chart, proxy, name=None):
                 spliced={"proxy": name or proxy.get("symbol"), "until": first})
 
 
+def daily(chart):
+    """True when the bars are daily (the typical gap is under 5 days), not weekly or monthly."""
+    ds = [_date(b["d"]) for b in chart["bars"]]
+    gaps = sorted((b - a).days for a, b in zip(ds, ds[1:]))
+    return bool(gaps) and gaps[len(gaps) // 2] < 5
+
+
 def fred_chart(text, symbol="USDCAD=X"):
     """FRED's CSV (DATE,VALUE, '.' for holidays) as a chart of daily bars."""
     bars = []
@@ -2491,6 +2498,9 @@ def main(argv=None):
         charts, notes = long_charts(a.offline, a.save_data, log=lambda m: print(m, file=sys.stderr))
         if "SPY" not in charts:
             print("replay: no SPY prices", file=sys.stderr)
+            return 2
+        if not daily(charts["SPY"]):
+            print("replay: SPY prices are not daily bars, so the run would be wrong", file=sys.stderr)
             return 2
         out = long_run(Data(charts, {}), notes=notes)
         os.makedirs(a.long, exist_ok=True)
