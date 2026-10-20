@@ -24,6 +24,15 @@ class Repo(unittest.TestCase):
         found = sorted(d for d in os.listdir(ROOT) if os.path.isfile(os.path.join(ROOT, d, "SKILL.md")))
         self.assertEqual(found, sorted(UPSTREAM + OURS))
 
+    def test_workflow_copies_every_signal_file_the_replay_reads(self):
+        with open(os.path.join(ROOT, "trader-replay", "signals.py"), encoding="utf-8") as fh:
+            wanted = set(re.findall(r'opt\("([a-z_]+\.json\.gz)"\)', fh.read()))
+        with open(os.path.join(REPO, ".github", "workflows", "replay.yml"), encoding="utf-8") as fh:
+            loops = re.findall(r"for f in ([^;]+); do", fh.read())
+        self.assertTrue(wanted and loops)
+        for loop in loops:
+            self.assertEqual(set(loop.split()), wanted)
+
     def test_frontmatter_name_and_description(self):
         for s in UPSTREAM + OURS:
             fm, text = frontmatter(os.path.join(ROOT, s, "SKILL.md"))

@@ -191,29 +191,48 @@ of prices once, replays five periods ending 2019-10, 2020-10, 2022-10, 2024-10
 and 2026-10 in parallel (the 2018 sell-off, the 2020 crash and the 2022 bear
 market included), and combines them into one table (`scripts/walkforward.py`).
 
-**What the walk-forward found** (`research/pit-v8-model/` on the
+**News in the backtest.** Every 8-K filed with the SEC since 2015 by S&P 500
+members (earnings, deals, executive changes...) is dated to when the market
+could act on it: the filing day if accepted before 4 p.m. New York time,
+otherwise the next day. Two news strategies use it: **earnings drift** (buy the
+20 stocks that jumped most on an earnings 8-K, hold about 60 days) and a
+**news-shock** stock bot (trade a breakout only if the company filed an 8-K
+that week). Yahoo headlines are only archived going forward
+(`discover/` on `replay-results`): free sources have no headline history, so
+they cannot be backtested honestly yet.
+
+**What the walk-forward found** (`research/pit-v11-news/` on the
 `replay-results` branch). Settings were chosen on the training periods only
-(24-month windows ending 2019, 2020, 2022 and 2024); the last 12 months were
-held out and only used to check. `stats.md` adds 28 overlapping 12-month
-windows inside the training years, with 90 % confidence ranges.
+(24-month windows ending 2019, 2020, 2022 and 2024) by a rule written before
+the results; the last 12 months were held out and only used to check.
+`stats.md` adds 28 overlapping 12-month windows inside the training years,
+with 90 % confidence ranges.
 
 | agent | training: beat the S&P 500 | training: average gap | 28 windows: average gap (90 % range) | test, last 12 months |
 | --- | ---: | ---: | --- | ---: |
-| **70 % Nasdaq 100 + 30 % dual momentum (the chosen plan)** | 4 of 4 | +14.9 pts | +8.5 (+3.9 to +15.2), 23 of 28 | +27.1 % |
-| Dual momentum alone (single strongest fund) | 3 of 4 | +11.8 pts | +13.4 (+2.0 to +26.9) | +35.8 % |
-| Just holding the Nasdaq 100 | 3 of 4 | +14.0 pts | +5.8 (+0.1 to +12.3) | +20.3 % |
-| Congress buying | 1 of 4 | -1.7 pts | +0.1 (-2.3 to +1.9) | +32.6 % |
-| Insider buying | 1 of 4 | -8.0 pts | -1.1 (-4.4 to +3.6) | +2.8 % |
-| Learned score (ridge model, refit yearly) | 1 of 4 | -21.0 pts | -5.2 (-15.9 to +4.5) | +19.4 % |
-| Reviewers, stock bot, momentum, VIX agent | 0 to 2 of 4 | below zero | ranges include zero | |
+| **70 % Nasdaq 100 + 30 % dual momentum, every 2 weeks (chosen)** | – | +16.9 pts | – | +17.3 % |
+| 70 % Nasdaq 100 + 30 % dual momentum, monthly (previous plan) | 4 of 4 | +14.9 pts | +6.3 (+2.6 to +11.9), 21 of 28 | +27.1 % |
+| Dual momentum alone (single strongest fund) | 3 of 4 | +11.8 pts | +5.1 (-4.2 to +16.6) | +35.8 % |
+| Just holding the Nasdaq 100 | 3 of 4 | +14.0 pts | +6.0 (+0.3 to +12.5) | +20.3 % |
+| Earnings drift (8-K news) | 0 of 4 | -12.2 pts | -6.1 (-10.8 to -1.4) | +26.2 % |
+| News-shock stock bot (8-K that week) | – | +0.4 pts | – | +9.8 % |
+| Congress buying | 1 of 4 | -1.7 pts | +0.3 (-1.7 to +1.5) | +32.6 % |
+| Insider buying | 1 of 4 | -8.0 pts | -1.2 (-3.8 to +2.6) | +2.8 % |
+| Reviewers, stock bot, momentum, learned score, VIX agent | 0 to 2 of 4 | below zero | ranges include zero | |
 | S&P 500 | | | | +17.9 % |
 
-The chosen plan keeps drops like the Nasdaq 100's (average worst drop -22 %
-in training). Its edge over simply holding the Nasdaq 100 is small in
-training and larger in the test year. Insider and Congress signals, a
-learned score and member-weighted Congress trades did not beat the index
-once hindsight was removed. The live paper record (`forward/record.json`,
-from 2026-10-19) is the test that matters next.
+The five adjustments to the plan, in training (test year in brackets):
+rebalancing every 2 weeks +16.9 pts (-0.6), half the satellite in earnings
+drift +11.1 (+2.8), switching funds only for a 5-point lead +9.0 (+11.7), top
+20 momentum stocks as the satellite +7.7 (+11.9), and 12-1 month momentum +5.5
+(-6.3), against +14.9 (+9.2) for the monthly plan. The rule picked the
+2-week rebalance. Its edge over the monthly plan is 2 points in training, and
+it did worse in the held-out year. That is a small, uncertain difference, so
+the live record runs both. The 28-window reality check says even the best
+plan's edge over the S&P 500 could be luck (49 %). News on its own (earnings
+drift, news-shock trades) did not beat the index in training. The live paper
+record (`forward/record.json`, from 2026-10-20; the first record, from
+2026-10-19, is kept under `earlier`) is the test that matters next.
 
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the
