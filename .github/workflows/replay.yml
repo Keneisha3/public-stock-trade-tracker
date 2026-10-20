@@ -530,7 +530,7 @@ jobs:
 
   sig-13f-broad:
     needs: sig-13f-list
-    if: ${{ always() && inputs.mode == 'build-signals' && contains(inputs.skip, 'only-13f-broad') }}
+    if: ${{ !cancelled() && inputs.mode == 'build-signals' && contains(inputs.skip, 'only-13f-broad') }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
