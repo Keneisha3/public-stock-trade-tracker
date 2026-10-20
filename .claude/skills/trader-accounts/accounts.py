@@ -54,7 +54,7 @@ RULES = {
         "max_position_pct": 30, "trim_band_pct": 5, "cash_target_pct": 0, "cash_max_pct": 10,
         "stop_loss_pct": 25, "drawdown_review_pct": 30, "laggard_12m_pct": -10,
         "keep_score": 45, "min_trade": 100, "min_positions": 4,
-        "momentum_months": 3, "review_every_days": 7,
+        "momentum_months": 3, "review_every_days": 7, "rotate": False, "sell_score": 40, "size_top": 0,
     },
     "medium": {
         "max_position_pct": 15, "trim_band_pct": 4, "cash_target_pct": 3, "cash_max_pct": 10,
@@ -606,14 +606,37 @@ def _shares(value_native, price, fractional):
     return round(q, 4) if fractional else math.floor(q + 1e-9)
 
 
+ROTATE_CODES = ("stop", "trend_broken")
+
+
 def propose(acct, rows, cash_by, total, cash, market, base, contribute, notes, cap=None):
     """Trims of anything over the cap, then buys with spare cash (+ a contribution).
-    No buy ever takes a holding past the cap."""
+    No buy ever takes a holding past the cap. With rules["rotate"], first sell holdings whose
+    trend broke, that hit the stop, or whose score fell under sell_score, so the money moves
+    to stronger names instead of riding losers while trimming winners."""
     r, out = acct["rules"], []
     cap = r["max_position_pct"] if cap is None else cap
     frac = bool(acct.get("fractional"))
     proceeds = 0.0
+    sold = set()
+    if r.get("rotate"):
+        for x in rows:
+            codes = {f["code"] for f in x["flags"] if f["level"] == "action"}
+            weak = x["score"] is not None and x["score"] < r.get("sell_score", 0)
+            if not x["price"] or not (weak or codes & set(ROTATE_CODES)):
+                continue
+            q = float(x["shares"])
+            proceeds += q * x["price"] * x["fx"]
+            sold.add(x["ticker"])
+            why = ("stop hit" if "stop" in codes else "trend broken" if "trend_broken" in codes
+                   else "score %s under %g" % (x["score"], r["sell_score"]))
+            out.append({"side": "sell", "ticker": x["ticker"], "shares": q, "price": x["price"],
+                        "currency": x["currency"], "value": round(q * x["price"], 2),
+                        "value_base": round(q * x["price"] * x["fx"], 2),
+                        "reason": "rotate out (%s): the money goes to stronger names" % why})
     for x in rows:
+        if x["ticker"] in sold:
+            continue
         cap_value = total * cap / 100.0
         if x["weight"] > cap + r.get("trim_band_pct", 0) and x["price"]:
             sell_base = x["value_base"] - cap_value
@@ -629,7 +652,7 @@ def propose(acct, rows, cash_by, total, cash, market, base, contribute, notes, c
     spare = cash + proceeds + contribute - new_total * r["cash_target_pct"] / 100.0
     if spare < r["min_trade"]:
         return out
-    keep = _keepers(acct, rows, market, cap)
+    keep = {t: v for t, v in _keepers(acct, rows, market, cap).items() if t not in sold}
     if not keep:
         notes.append("spare cash but no holding qualifies for new money: add ideas to this account's "
                      "watchlist in accounts.json")
