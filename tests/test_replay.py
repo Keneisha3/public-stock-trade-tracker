@@ -1038,6 +1038,14 @@ class LongHistory(unittest.TestCase):
         self.assertEqual(len(out["periods"]), 1)
         text = replay.render_long(out)
         self.assertIn("before anything was chosen", text)
+        f13 = {"managers": {"A": "a", "B": "b", "C": "c"}, "rows": [
+            [days[290], m, days[260], days[290], 0, [["XLK", 9, 1], ["XLU", 5, 1], ["GONE", 7, 1]]] for m in "ABC"]}
+        sig = replay.sigs.Signals(f13=f13)
+        with_c4 = replay.long_run(replay.Data(charts, {}), first=days[300], until=days[-1], horizon=120, step=60,
+                                  period_ends=(days[-1],), notes=notes, sig=sig)
+        self.assertIn("Copycat consensus (C4)", with_c4["rolling"]["table"])
+        self.assertEqual(with_c4["periods"][0]["c4_coverage"], 66.7)   # GONE has no prices
+        self.assertIn("C4's would-be picks that had prices", replay.render_long(with_c4))
         self.assertIn("70% Nasdaq 100 + 30% dual momentum, every 2 weeks (chosen)", text)
 
     def test_daily_bars_are_required_and_max_asks_for_dates(self):

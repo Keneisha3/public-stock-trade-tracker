@@ -65,7 +65,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz fundamentals.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
       - name: Replay $100 in every strategy
@@ -194,7 +194,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz fundamentals.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
           ls -la signals
@@ -237,7 +237,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz fundamentals.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
       - name: Rolling windows inside the training years
@@ -307,7 +307,12 @@ jobs:
           LABEL: ${{ inputs.label || 'long-history' }}
         run: |
           [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
-          python .claude/skills/trader-replay/replay.py --long out > /dev/null
+          mkdir -p signals  # the copycat's 13Fs (XML since 2013, plain text before) for C4 back to 2000
+          git fetch -q origin replay-results || true
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz fundamentals.json.gz; do
+            git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
+          done
+          python .claude/skills/trader-replay/replay.py --long out --signals signals > /dev/null
           python scripts/stats.py out/long-stats.md out/long.json > /dev/null
           cat out/long.md out/long-stats.md >> "$GITHUB_STEP_SUMMARY"
       - name: Save to the replay-results branch
@@ -473,6 +478,28 @@ jobs:
           name: sig-13f
           path: out/f13.json.gz
 
+  sig-13f-old:
+    # one-off (history does not change): the plain-text 13Fs from 1999 to mid 2013
+    if: ${{ inputs.mode == 'build-signals' && contains(inputs.skip, 'only-13f-old') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SEC 13F holdings before XML tables
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          python .claude/skills/trader-replay/signals.py 13f-old --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-13f-old
+          path: out/f13_old.json.gz
+
   sig-fundamentals:
     # the upstream analyst's numbers (revenue, operating income, net income, EPS) as first filed
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'fundamentals')) }}
@@ -496,7 +523,7 @@ jobs:
           path: out/fundamentals.json.gz
 
   sig-save:
-    needs: [sig-congress, sig-insiders, sig-events, sig-eps, sig-13f, sig-fundamentals]
+    needs: [sig-congress, sig-insiders, sig-events, sig-eps, sig-13f, sig-13f-old, sig-fundamentals]
     if: ${{ always() && ((github.event_name == 'schedule' && (github.event.schedule == '23 7 3 * *' || github.event.schedule == '17 13 * * 6')) || inputs.mode == 'build-signals') }}
     runs-on: ubuntu-latest
     steps:

@@ -2551,6 +2551,27 @@ LONG_STRATS = [
     ("Dual momentum alone (single strongest fund)", {}),
 ]
 LONG_BENCH = [("Nasdaq 100 (QQQ)", "QQQ"), ("S&P 500 (SPY)", "SPY")]
+LONG_C4 = ("Copycat consensus (C4)", "70% Nasdaq 100 + 30% C4")
+
+
+def c4_coverage(data, sig, start, end, step=91):
+    """The share of C4's would-be picks (top 10 of 3+ investors) that had prices, checked quarterly."""
+    if not sig or not sig.f13:
+        return None
+    got = want = 0
+    d = _date(start)
+    while d.isoformat() <= end:
+        day = data.trading_day_on_or_before(d.isoformat())
+        count = {}
+        for cik in sig.f13:
+            h = _merge_names(sig.holdings_13f(cik, day))
+            for t, _ in sorted((h or {}).items(), key=lambda kv: -kv[1][0])[:10]:
+                count[t] = count.get(t, 0) + 1
+        names = [t for t, c in count.items() if c >= 3]
+        want += len(names)
+        got += sum(1 for t in names if t in data.charts and data.close(t, day))
+        d += datetime.timedelta(days=step)
+    return round(100.0 * got / want, 1) if want else None
 
 
 def splice(chart, proxy, name=None):
@@ -2590,10 +2611,11 @@ def fred_chart(text, symbol="USDCAD=X"):
             "time": bars[-1]["d"] if bars else None, "bars": bars, "dividends": []}
 
 
-def long_charts(offline=None, save=None, log=print):
-    """Every fund the long run needs, as far back as Yahoo goes, with proxies spliced in."""
+def long_charts(offline=None, save=None, log=print, extra=()):
+    """Every fund the long run needs, as far back as Yahoo goes, with proxies spliced in.
+    extra: more symbols (the copycat's stocks)."""
     syms = {"SPY", "QQQ", "IEF", "SHY", "USDCAD=X"} | set(LONG_PROXIES.values()) \
-        | {x for g in DUAL_POOL for x in univ.ETFS[g] if not x.endswith(".TO")}
+        | {x for g in DUAL_POOL for x in univ.ETFS[g] if not x.endswith(".TO")} | set(extra)
     charts, notes = {}, {}
     for sym in sorted(syms):
         try:
@@ -2624,14 +2646,19 @@ def long_charts(offline=None, save=None, log=print):
 
 def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91, cash=100.0,
              period_ends=("2002-10-18", "2004-10-15", "2006-10-20", "2008-10-17", "2010-10-15", "2012-10-19",
-                          "2014-10-17", "2016-10-14"), notes=None):
+                          "2014-10-17", "2016-10-14"), notes=None, sig=None):
     """The chosen plan and its rivals before anything was chosen: rolling `horizon`-day windows
     from `first`, every `step` days, ending by `until` (where the training periods begin), and
-    24-month periods ending each `period_ends`. Point in time like every replay."""
+    24-month periods ending each `period_ends`. Point in time like every replay. With `sig` (13Fs),
+    the copycat consensus (C4) and 70% Nasdaq 100 + 30% C4 run too, and each period records how much
+    of C4's picks had prices (companies that later vanished may have none: survivorship)."""
     def runs(start, end):
         out = {}
         for name, opts in LONG_STRATS:
             out[name] = run_dual(data, start, end, cash, **opts)
+        if sig and sig.f13:
+            out[LONG_C4[0]] = run_copycat(data, sig, start, end, cash, mode="consensus", n=10)
+            out[LONG_C4[1]] = run_plan(data, None, sig, start, end, cash, sleeves={"C4": 1.0})
         for name, sym in LONG_BENCH:
             if sym in data.charts:
                 out[name] = run_hold(data, {sym: 1.0}, start, end, cash)
@@ -2653,11 +2680,12 @@ def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91,
             name: {"return_pct": r["return_pct"], "max_dd_pct": (risk_stats(r["curve"]) or {}).get("max_dd_pct"),
                    "trades": r["trades"], "fees": r["fees"],
                    "switches": [p for i, p in enumerate(r.get("picks") or []) if not i or p[1] != r["picks"][i - 1][1]]}
-            for name, r in runs(start, end).items()}})
+            for name, r in runs(start, end).items()}, "c4_coverage": c4_coverage(data, sig, start, end)})
     count = len(next(iter(table.values()))["runs"]) if table else 0
     return {"asof": until, "first": first, "rolling": {"table": table, "horizon_days": horizon, "step_days": step,
                                                        "count": count},
-            "periods": periods, "names": [n for n, _ in LONG_STRATS] + [n for n, _ in LONG_BENCH], "notes": notes or {}}
+            "periods": periods, "notes": notes or {},
+            "names": [n for n, _ in LONG_STRATS] + (list(LONG_C4) if sig and sig.f13 else []) + [n for n, _ in LONG_BENCH]}
 
 
 def render_long(out):
@@ -2687,6 +2715,11 @@ def render_long(out):
                                              "n/a" if r["max_dd_pct"] is None else "%.0f%%" % r["max_dd_pct"]))
         L.append("| %s | %s | %s | %s |" % (name, " | ".join(cells), "-" if name == spy else "%d of %d" % (
             sum(g > 0 for g in gaps), len(gaps)), "-" if not gaps else "%+.1f pts" % (sum(gaps) / len(gaps))))
+    cov = [(p["end"], p.get("c4_coverage")) for p in out["periods"] if p.get("c4_coverage") is not None]
+    if cov:
+        L += ["", "C4's would-be picks that had prices (the rest are companies Yahoo no longer has, mostly ones "
+              "that failed or were bought; their absence flatters C4): " +
+              ", ".join("%s %.0f%%" % (e, c) for e, c in cov) + "."]
     t = out["rolling"]["table"]
     L += ["", "## %d rolling %d-day windows, a new one every %d days" % (
         out["rolling"]["count"], out["rolling"]["horizon_days"], out["rolling"]["step_days"]), "",
@@ -2870,14 +2903,21 @@ def main(argv=None):
               "Not financial advice.")
         return 0
     if a.long:
-        charts, notes = long_charts(a.offline, a.save_data, log=lambda m: print(m, file=sys.stderr))
+        sig = sigs.Signals.load(a.signals) if a.signals else None
+        extra = {same_company(t) for rows in sig.f13.values() for e, _, h in rows if e < "2018" for t in h} \
+            if sig and sig.f13 else set()
+        charts, notes = long_charts(a.offline, a.save_data, log=lambda m: print(m, file=sys.stderr), extra=extra)
+        old = os.path.join(a.signals or "", "f13_old.json.gz")
+        if sig and os.path.exists(old):
+            st = sigs.read(old).get("stats") or {}
+            notes["13F before mid 2013"] = "%s of %s holdings matched to a ticker" % (st.get("mapped"), st.get("cusips"))
         if "SPY" not in charts:
             print("replay: no SPY prices", file=sys.stderr)
             return 2
         if not daily(charts["SPY"]):
             print("replay: SPY prices are not daily bars, so the run would be wrong", file=sys.stderr)
             return 2
-        out = long_run(Data(charts, {}), notes=notes)
+        out = long_run(Data(charts, {}), notes=notes, sig=sig)
         os.makedirs(a.long, exist_ok=True)
         with open(os.path.join(a.long, "long.json"), "w", encoding="utf-8") as fh:
             json.dump(out, fh, indent=1)

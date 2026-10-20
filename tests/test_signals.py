@@ -344,3 +344,45 @@ class Congress(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+OLD_13F = """<DOCUMENT>
+<TYPE>13F-HR
+FORM 13F INFORMATION TABLE
+NAME OF ISSUER          TITLE OF CLASS   CUSIP      VALUE (x$1000)  SHARES   SH/PRN
+AMERICAN EXPRESS CO     COM              025816109  1,000           20,000   SH  SOLE
+APPLE COMPUTER INC      COM              037833 10 0  500             5,000    SH  SOLE
+APPLE COMPUTER INC      COM              037833100  250             2,500    SH  OTHER
+APPLE COMPUTER INC      CALL             037833100  999             9,999    SH
+NOT A HOLDING           COM              037833101  700             7,000    SH
+TOTAL 1,750
+</DOCUMENT>"""
+
+
+class Old13F(unittest.TestCase):
+    def test_check_digits(self):
+        self.assertTrue(signals.cusip_ok("037833100"))   # Apple
+        self.assertTrue(signals.cusip_ok("025816109"))   # American Express
+        self.assertFalse(signals.cusip_ok("037833101"))
+        self.assertFalse(signals.cusip_ok("ABC"))
+
+    def test_text_table_rows_summed_options_and_noise_skipped(self):
+        rows = {c: (v, sh) for c, issuer, v, sh in signals.parse_13f_text(OLD_13F)}
+        self.assertEqual(rows, {"025816109": (1000.0, 20000.0), "037833100": (750.0, 7500.0)})
+
+    def test_old_reports_come_before_the_xml_ones(self):
+        d = tempfile.mkdtemp()
+        try:
+            new = {"managers": {"0000000001": "New"}, "rows": [["2013-08-14", "0000000001", "2013-06-30", "2013-08-14", 0,
+                                                                [["AAPL", 5, 1]]]]}
+            old = {"managers": {"0000000001": "Old"}, "rows": [
+                ["2013-05-15", "0000000001", "2013-03-31", "2013-05-15", 0, [["AXP", 9, 1]], 0],
+                ["2013-08-15", "0000000001", "2013-06-30", "2013-08-15", 0, [["XXX", 9, 1]], 0]]}  # overlap: dropped
+            signals.write(os.path.join(d, "f13.json.gz"), new)
+            signals.write(os.path.join(d, "f13_old.json.gz"), old)
+            s = signals.Signals.load(d)
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual(s.holdings_13f("0000000001", "2013-06-01"), {"AXP": (9, 1)})
+        self.assertEqual(s.holdings_13f("0000000001", "2013-09-01"), {"AAPL": (5, 1)})
+        self.assertEqual(s.managers["0000000001"], "New")
