@@ -563,9 +563,21 @@ def build_fundamentals(tickers, ua, log=print, fetcher=None):
 
 # ---------------------------------------------------------------- Congress (House PTRs)
 
-def build_congress(years, pdf_dir, log=print, workers=4):
+def merge_rows(base, doc):
+    """`doc` with the rows of `base` it lacks (an older, bigger build), sorted, no duplicates."""
+    seen, rows = set(), []
+    for r in (base or {}).get("rows", []) + doc["rows"]:
+        k = json.dumps(r)
+        if k not in seen:
+            seen.add(k)
+            rows.append(r)
+    return dict(doc, rows=sorted(rows, key=lambda r: (r[0], json.dumps(r))))
+
+
+def build_congress(years, pdf_dir, log=print, workers=4, members=None):
     """Every House PTR in those years -> [[filed, member, ticker, side, low, high, traded, owner], ...].
-    side: 'buy' (purchase, or call options bought) or 'sell' (sale, or puts bought)."""
+    side: 'buy' (purchase, or call options bought) or 'sell' (sale, or puts bought).
+    members: only these members' filings (e.g. ["pelosi"]), for a quick daily refresh."""
     from concurrent.futures import ThreadPoolExecutor
     filings, stats = [], {"filings": 0, "read": 0, "unreadable": 0, "errors": []}
     for y in years:
@@ -574,7 +586,7 @@ def build_congress(years, pdf_dir, log=print, workers=4):
         except ptr.PtrError as e:
             stats["errors"].append("index %d: %s" % (y, e))
             continue
-        got = ptr.select(idx, None, "P")
+        got = ptr.select(idx, members, "P")
         filings += got
         log("%d: %d PTR filings" % (y, len(got)))
     stats["filings"] = len(filings)
@@ -804,6 +816,8 @@ def main(argv=None):
     c.add_argument("--years", default="2015-%d" % datetime.date.today().year)
     c.add_argument("--out", required=True)
     c.add_argument("--pdf-dir", default=None)
+    c.add_argument("--member", action="append", help="only this member's filings (repeatable), e.g. Pelosi")
+    c.add_argument("--merge", metavar="FILE", help="keep the rows of this earlier congress.json.gz too")
     i = sub.add_parser("insiders")
     i.add_argument("--quarters", required=True, help="e.g. 2015q1-2026q3")
     i.add_argument("--out", required=True)
@@ -871,7 +885,10 @@ def main(argv=None):
         return 0
     if a.cmd == "congress":
         lo, _, hi = a.years.partition("-")
-        doc = build_congress(range(int(lo), int(hi or lo) + 1), a.pdf_dir or os.path.join(a.out, "ptr-pdfs"))
+        doc = build_congress(range(int(lo), int(hi or lo) + 1), a.pdf_dir or os.path.join(a.out, "ptr-pdfs"),
+                             members=a.member)
+        if a.merge and os.path.exists(a.merge):
+            doc = merge_rows(read(a.merge), doc)
         write(os.path.join(a.out, "congress.json.gz"), doc)
     else:
         if not a.user_agent:

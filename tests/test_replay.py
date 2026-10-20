@@ -1129,3 +1129,23 @@ class UpstreamAgents(unittest.TestCase):
         self.assertIn("P2", doc["source"])
         with self.assertRaises(replay.ReplayError):
             replay.upstream_version("Z9")
+
+    def test_live_record_can_copy_pelosi(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+            days = data.days
+            plan = {"start": days[290], "cash": 100.0, "strategies": {
+                "P2": {"kind": "pelosi", "opts": {"mode": "hold"}}, "SPY": {"kind": "hold", "weights": {"SPY": 1.0}}}}
+            rec = replay.forward(plan, None, offline=off, today=days[330], log=lambda m: None, signals=sig)
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual(set(rec["targets"]["P2"]), {"AAA", "BBB"})
+        self.assertIsNotNone(rec["days"][days[330]]["P2"])
+        with open(replay.FORWARD_PLAN) as fh:
+            kinds = {st["kind"] for st in json.load(fh)["strategies"].values()}
+        self.assertLessEqual(kinds, {"dual", "hold", "pelosi"})
+        merged = replay.sigs.merge_rows({"rows": [["2026-01-02", "x"], ["2026-01-01", "y"]]},
+                                        {"rows": [["2026-01-02", "x"], ["2026-01-03", "z"]], "source": "s"})
+        self.assertEqual(merged["rows"], [["2026-01-01", "y"], ["2026-01-02", "x"], ["2026-01-03", "z"]])
+        self.assertEqual(merged["source"], "s")

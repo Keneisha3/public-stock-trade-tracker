@@ -546,7 +546,14 @@ jobs:
           mkdir -p forward
           git fetch -q origin replay-results || true
           git show origin/replay-results:forward/record.json > forward/record.json 2>/dev/null || rm -f forward/record.json
-          python .claude/skills/trader-replay/replay.py --forward forward/record.json | tee -a "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RUNNER_TEMP/signals"  # the Pelosi copy reads the dated Congress filings
+          git show origin/replay-results:signals/congress.json.gz > "$RUNNER_TEMP/signals/congress.json.gz"
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null  # her latest filings
+          python .claude/skills/trader-replay/signals.py congress --years "$(date -u +%Y)" --member Pelosi \
+            --merge "$RUNNER_TEMP/signals/congress.json.gz" --out "$RUNNER_TEMP/signals" > /dev/null \
+            || echo "::warning::could not refresh Pelosi's filings; using the monthly build"
+          python .claude/skills/trader-replay/replay.py --forward forward/record.json --signals "$RUNNER_TEMP/signals" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Save to the replay-results branch
         run: |
           cp forward/record.json "$RUNNER_TEMP/record.json"

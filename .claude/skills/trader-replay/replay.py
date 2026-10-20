@@ -2589,15 +2589,18 @@ def render_long(out):
 FORWARD_PLAN = os.path.join(HERE, "forward_plan.json")
 
 
-def forward(plan, record=None, offline=None, today=None, log=print):
+def forward(plan, record=None, offline=None, today=None, log=print, signals=None):
     """The live paper record: every strategy in the frozen plan, run from the plan's start date
     to the latest close with only what was known each day. Values for days already in `record`
-    are kept as they were (append-only): only new days are added."""
+    are kept as they were (append-only): only new days are added. Kind "pelosi" needs
+    `signals` (a Signals with the Congress filings)."""
     start = plan["start"]
     syms = {"SPY", "QQQ", "IEF", "SHY", "USDCAD=X"}
     for st in plan["strategies"].values():
         if st["kind"] == "hold":
             syms |= set(st["weights"])
+        elif st["kind"] == "pelosi":
+            syms |= {r[2] for r in (signals.congress if signals else []) if "pelosi" in (r[1] or "").lower() and r[2]}
         elif st["kind"] == "dual":
             pool = DUAL_POOLS[dict(DUAL_DEFAULT, **st.get("opts", {}))["pool"]]
             syms |= {x for g in pool for x in univ.ETFS[g] if not x.endswith(".TO")}
@@ -2618,6 +2621,8 @@ def forward(plan, record=None, offline=None, today=None, log=print):
     for name, st in plan["strategies"].items():
         if st["kind"] == "hold":
             r = run_hold(data, st["weights"], first, last, plan.get("cash", 100.0))
+        elif st["kind"] == "pelosi":
+            r = run_pelosi_signals(data, signals, first, last, plan.get("cash", 100.0), **st.get("opts", {}))
         else:
             r = run_dual(data, first, last, plan.get("cash", 100.0), **st.get("opts", {}))
         out[name] = {d: v for d, v in r["curve"]}
@@ -2628,8 +2633,14 @@ def forward(plan, record=None, offline=None, today=None, log=print):
             continue  # never rewrite a day that is already on the record
         rec["days"][d] = {name: v.get(d) for name, v in out.items()}
     rec["holdings"] = {name: v["_holdings"] for name, v in out.items()}
-    rec["targets"] = {name: {k: round(x, 4) for k, x in (dual_weights(data, last, **st.get("opts", {}))
-                                                      if st["kind"] == "dual" else st["weights"]).items()}
+
+    def today_weights(st):
+        if st["kind"] == "dual":
+            return dual_weights(data, last, **st.get("opts", {}))
+        if st["kind"] == "pelosi":
+            return pelosi_weights(data, signals, last, **dict(PELOSI_DEFAULT, **st.get("opts", {})))
+        return st["weights"]
+    rec["targets"] = {name: {k: round(x, 4) for k, x in today_weights(st).items()}
                       for name, st in plan["strategies"].items()}
     rec["updated"] = last
     return rec
@@ -2751,7 +2762,12 @@ def main(argv=None):
         if os.path.exists(a.forward):
             with open(a.forward, encoding="utf-8") as fh:
                 rec = json.load(fh)
-        rec = forward(plan, rec, offline=a.offline, today=a.asof, log=lambda m: print(m, file=sys.stderr))
+        sig = sigs.Signals.load(a.signals) if a.signals else None
+        if any(st["kind"] == "pelosi" for st in plan["strategies"].values()) and not (sig and sig.congress):
+            print("replay: the plan copies Pelosi's filings: pass --signals DIR with congress.json.gz", file=sys.stderr)
+            return 2
+        rec = forward(plan, rec, offline=a.offline, today=a.asof, log=lambda m: print(m, file=sys.stderr),
+                      signals=sig)
         os.makedirs(os.path.dirname(os.path.abspath(a.forward)), exist_ok=True)
         with open(a.forward, "w", encoding="utf-8") as fh:
             json.dump(rec, fh, indent=1)
