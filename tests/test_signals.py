@@ -386,3 +386,39 @@ class Old13F(unittest.TestCase):
         self.assertEqual(s.holdings_13f("0000000001", "2013-06-01"), {"AXP": (9, 1)})
         self.assertEqual(s.holdings_13f("0000000001", "2013-09-01"), {"AAPL": (5, 1)})
         self.assertEqual(s.managers["0000000001"], "New")
+
+
+FORM_IDX = """Form Type   Company Name                CIK         Date Filed  File Name
+---------------------------------------------------------------------------------------
+13F-HR      BIG CONCENTRATED LP         111         2024-02-14  edgar/data/111/0000000111-24-000001.txt
+13F-HR      INDEX GIANT                 222         2024-02-13  edgar/data/222/0000000222-24-000001.txt
+13F-HR      SMALL SHOP                  333         2024-02-12  edgar/data/333/0000000333-24-000001.txt
+13F-HR      LATE FILER                  444         2024-05-15  edgar/data/444/0000000444-24-000001.txt
+13F-HR/A    BIG CONCENTRATED LP         111         2024-02-20  edgar/data/111/0000000111-24-000002.txt
+4           SOMEONE                     555         2024-02-14  edgar/data/555/0000000555-24-000001.txt
+"""
+
+
+class RuleBasedList(unittest.TestCase):
+    def test_largest_concentrated_managers_by_rule(self):
+        covers = {"111": (5000, 40), "222": (90000, 3000), "333": (100, 20)}
+
+        class F(object):
+            offline = None
+
+            def get(self, url, sec=True):
+                if url.endswith("form.idx"):
+                    return FORM_IDX.encode()
+                cik = url.split("/data/")[1].split("/")[0]
+                v, n = covers[cik]
+                return ("<edgarSubmission><tableValueTotal>%d</tableValueTotal><tableEntryTotal>%d"
+                        "</tableEntryTotal></edgarSubmission>" % (v, n)).encode()
+        rows = signals.parse_form_idx(FORM_IDX)
+        self.assertEqual([r[1] for r in rows], ["0000000111", "0000000222", "0000000333", "0000000444"])
+        doc = signals.build_13f_list("t t@example.com", 2024, top=2, log=lambda m: None, fetcher=F())
+        self.assertEqual([m["cik"] for m in doc["managers"]], ["0000000111", "0000000333"])  # not the index giant
+        self.assertEqual(doc["usable_from"], "2024-04-01")
+        s = signals.Signals(f13_broad={"rows": [], "lists": [{"year": 2024, "usable_from": "2024-04-01",
+                                                               "ciks": ["0000000111"]}]})
+        self.assertIsNone(s.broad_list("2024-03-31"))                   # not public yet
+        self.assertEqual(s.broad_list("2024-04-01"), frozenset(["0000000111"]))

@@ -947,7 +947,7 @@ def _equal(picks):
     return {t: 1.0 / len(picks) for t in picks} if picks else {"SPY": 1.0}
 
 
-COPY_DEFAULT = {"mode": "top", "n": 3, "who": None, "min_count": 3, "trend": False}
+COPY_DEFAULT = {"mode": "top", "n": 3, "who": None, "min_count": 3, "trend": False, "broad": False}
 COPY_VERSIONS = [
     ("C1", "Copycat: Berkshire's whole portfolio (what the upstream skill does)", {"mode": "book", "who": ["0001067983"]}),
     ("C2", "Copycat: all 23 investors' portfolios, an equal share each", {"mode": "book"}),
@@ -955,26 +955,36 @@ COPY_VERSIONS = [
     ("C4", "Copycat: consensus, in the top 10 of 3+ investors", {"mode": "consensus", "n": 10}),
     ("C5", "Copycat: new buys and big adds, top 3 per investor", {"mode": "new"}),
     ("C6", "Copycat: top 3 ideas, only while above the 200-day", {"trend": True}),
+    # the same rules on a list chosen by a rule, not by fame: the 50 largest concentrated managers each year
+    ("B1", "Rule-based list: consensus, in the top 10 of 5+ of the 50 managers", {"mode": "consensus", "n": 10,
+                                                                                  "min_count": 5, "broad": True}),
+    ("B2", "Rule-based list: consensus, in the top 10 of 3+ managers", {"mode": "consensus", "n": 10, "broad": True}),
+    ("B3", "Rule-based list: each manager's top 3 ideas", {"broad": True}),
 ]
 
 
-def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False):
+def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False, broad=False):
     """What the upstream copycat would hold after the close of `d`, from 13Fs the market could act
     on by then. book: each investor's reported portfolio (top 50 stocks) at its weights, an equal
     share per investor. top: each investor's n biggest positions. consensus: stocks in the top n
     of at least min_count investors. new: per investor, the n biggest positions that are new or at
-    least 1.5x the shares of the report before. Stocks we have no prices for are skipped."""
-    if not sig or not sig.f13:
+    least 1.5x the shares of the report before. Stocks we have no prices for are skipped.
+    broad: the managers on the rule-based list public by `d`, instead of the famous 23."""
+    if not sig or not (sig.f13b if broad else sig.f13):
         return {"SPY": 1.0}
+    if broad:
+        who = sorted(sig.broad_list(d) or [])
+        if not who:
+            return {"SPY": 1.0}
     books = {}
     for cik in (who or sorted(sig.f13)):
-        h = _merge_names(sig.holdings_13f(cik, d))
+        h = _merge_names(sig.holdings_13f(cik, d, broad=broad))
         if not h:
             continue
         ok = {t: v for t, v in h.items() if t in data.charts and data.close(t, d)
               and (not trend or (data.quick(t, d, 21) or {}).get("above200"))}
         if mode == "new":
-            before = _merge_names(sig.holdings_13f(cik, d, back=1)) or {}
+            before = _merge_names(sig.holdings_13f(cik, d, back=1, broad=broad)) or {}
             ok = {t: v for t, v in ok.items() if t not in before or v[1] >= 1.5 * max(before[t][1], 1)}
         if ok:
             books[cik] = sorted(ok.items(), key=lambda kv: -kv[1][0])
@@ -1194,6 +1204,9 @@ def upstream_rows(data, uni, sig, start, asof, cash):
             out["Nasdaq 100 + C4 (K4)"] = run_plan(data, uni, sig, start, asof, cash, sleeves={"C4": 1.0})
     if sig and sig.congress:
         out["congress leaders (L1)"] = run_leaders(data, sig, start, asof, cash)
+    if sig and sig.f13b:
+        out["rule-based consensus (B1)"] = run_copycat(data, sig, start, asof, cash, mode="consensus", n=10,
+                                                       min_count=5, broad=True)
     return out
 
 
@@ -1868,6 +1881,8 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
         sig = ctx.get("signals")
         if sig and sig.f13:  # the upstream agents, every version (C: copycat, S: screener, P: Pelosi, K: plans)
             for code, name, over in COPY_VERSIONS:
+                if over.get("broad") and not sig.f13b:
+                    continue
                 add("copycat", "%s. %s" % (code, name), over,
                     lambda st, o=over: run_copycat(data, sig, st, asof, cash, **o))
         if sig and sig.fund:
@@ -2225,7 +2240,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         since = (_date(end) - datetime.timedelta(days=365 * HISTORY_YEARS.get(history, 5))).isoformat()
         syms |= set(uni.ever(since, end)) | set(univ.CANADA) | {x for v in univ.ETFS.values() for x in v}
     if sig:  # what the copycat's investors and Nancy Pelosi held, so the upstream agents can be replayed
-        syms |= {same_company(t) for rows in sig.f13.values() for _, _, h in rows for t in h}
+        syms |= {same_company(t) for f in (sig.f13, sig.f13b) for rows in f.values() for _, _, h in rows for t in h}
         syms |= {same_company(r[2]) for r in sig.congress if r[2]}  # every member: the league table needs them
     syms = sorted(syms)
     charts = {}
@@ -2367,7 +2382,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
          "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)",
-         "copycat consensus (C4)", "Nasdaq 100 + C4 (K4)", "congress leaders (L1)",
+         "copycat consensus (C4)", "Nasdaq 100 + C4 (K4)", "congress leaders (L1)", "rule-based consensus (B1)",
          "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
@@ -2385,7 +2400,8 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "pelosi (since 2015)": "Pelosi (upstream): her buys of the last year, mirrored, since 2015",
           "copycat consensus (C4)": "Copycat consensus (upstream): stocks in the top 10 of 3+ famous investors",
           "Nasdaq 100 + C4 (K4)": "70% Nasdaq 100 + 30% copycat consensus",
-          "congress leaders (L1)": "Congress leaders: buys of the 5 members with the best past records"}
+          "congress leaders (L1)": "Congress leaders: buys of the 5 members with the best past records",
+          "rule-based consensus (B1)": "Copycat consensus on a rule-based list (50 largest concentrated managers)"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 

@@ -21,7 +21,7 @@ import sys
 
 KEYS = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
         "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)",
-        "copycat consensus (C4)", "Nasdaq 100 + C4 (K4)", "congress leaders (L1)", "VIX agent"]
+        "copycat consensus (C4)", "Nasdaq 100 + C4 (K4)", "congress leaders (L1)", "rule-based consensus (B1)", "VIX agent"]
 BENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)"]
 NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "Dividend (Wealthsimple)",
          "stock bot": "Stock bot", "VIX agent": "VIX agent", "momentum": "Momentum (top 20 S&P 500)",
@@ -31,7 +31,8 @@ NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "D
          "copycat": "Copycat: investors' top 3 (13F)", "screener": "Screener: example rules",
          "pelosi (since 2015)": "Pelosi: her buys, mirrored",
          "copycat consensus (C4)": "Copycat consensus (C4)", "Nasdaq 100 + C4 (K4)": "70% Nasdaq 100 + 30% C4 (K4)",
-         "congress leaders (L1)": "Congress leaders: 5 best past records (L1)"}
+         "congress leaders (L1)": "Congress leaders: 5 best past records (L1)",
+         "rule-based consensus (B1)": "Rule-based list consensus (B1)"}
 TEST_WINDOWS = ["12 months", "6 months", "1 month"]
 HOLDOUT_DAYS = 365
 

@@ -65,7 +65,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz fundamentals.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz f13_broad.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
       - name: Replay $100 in every strategy
@@ -194,7 +194,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz fundamentals.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz f13_broad.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
           ls -la signals
@@ -237,7 +237,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz fundamentals.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz f13_broad.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
       - name: Rolling windows inside the training years
@@ -309,7 +309,7 @@ jobs:
           [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
           mkdir -p signals  # the copycat's 13Fs (XML since 2013, plain text before) for C4 back to 2000
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz fundamentals.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz f13_broad.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
           python .claude/skills/trader-replay/replay.py --long out --signals signals > /dev/null
@@ -500,6 +500,61 @@ jobs:
           name: sig-13f-old
           path: out/f13_old.json.gz
 
+  sig-13f-list:
+    # one-off: each year's rule-based investor list (50 largest concentrated 13F filers in February)
+    if: ${{ inputs.mode == 'build-signals' && contains(inputs.skip, 'only-13f-broad') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4  # different machines, but the SEC asks everyone to go easy
+      matrix:
+        year: [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Rule-based list for ${{ matrix.year }}
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          python .claude/skills/trader-replay/signals.py 13f-list --year ${{ matrix.year }} --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: list-${{ matrix.year }}
+          path: out/f13_list-${{ matrix.year }}.json.gz
+
+  sig-13f-broad:
+    needs: sig-13f-list
+    if: ${{ always() && inputs.mode == 'build-signals' && contains(inputs.skip, 'only-13f-broad') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: list-*
+          path: lists
+          merge-multiple: true
+      - name: 13F holdings of every manager on any year's list
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          ls lists
+          python .claude/skills/trader-replay/signals.py 13f-broad --lists lists --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-13f-broad
+          path: out/f13_broad.json.gz
+
   sig-fundamentals:
     # the upstream analyst's numbers (revenue, operating income, net income, EPS) as first filed
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'fundamentals')) }}
@@ -523,7 +578,7 @@ jobs:
           path: out/fundamentals.json.gz
 
   sig-save:
-    needs: [sig-congress, sig-insiders, sig-events, sig-eps, sig-13f, sig-13f-old, sig-fundamentals]
+    needs: [sig-congress, sig-insiders, sig-events, sig-eps, sig-13f, sig-13f-old, sig-13f-broad, sig-fundamentals]
     if: ${{ always() && ((github.event_name == 'schedule' && (github.event.schedule == '23 7 3 * *' || github.event.schedule == '17 13 * * 6')) || inputs.mode == 'build-signals') }}
     runs-on: ubuntu-latest
     steps:

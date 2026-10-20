@@ -1114,6 +1114,21 @@ class UpstreamAgents(unittest.TestCase):
         r = replay.run_copycat(data, sig, days[290], days[330], 100)
         self.assertTrue(all(f["day"] > days[300] for f in r["fills"] if f["ticker"] == "AAA"))
 
+    def test_rule_based_list_uses_only_the_list_public_that_day(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        rows = [[days[300], m, days[260], days[300], 0, [["AAA", 9, 1], ["BBB", 5, 1]]] for m in "XYZ"]
+        lists = [{"year": 1, "usable_from": days[305], "ciks": ["X", "Y", "Z"]}]
+        b = replay.sigs.Signals(f13_broad={"rows": rows, "lists": lists})
+        cw = lambda day, **o: replay.copycat_weights(data, b, day, **dict(replay.COPY_DEFAULT, broad=True, **o))  # noqa
+        self.assertEqual(cw(days[302], mode="consensus", n=10), {"SPY": 1.0})     # list not public yet
+        self.assertEqual(set(cw(days[306], mode="consensus", n=10)), {"AAA", "BBB"})
+        self.assertEqual(set(cw(days[306], mode="consensus", n=10, min_count=4)), {"SPY"})
+
     def test_screener_and_pelosi(self):
         d = tempfile.mkdtemp()
         try:
