@@ -516,7 +516,8 @@ def run_momentum(data, uni, start, asof, cash, **opts):
 
 
 DUAL_DEFAULT = {"k": 1, "months": 12, "safe": "IEF", "cash_like": "SHY",  # best 1 fund: won the walk-forward
-                "pool": "all", "vol_target": None, "trend": False, "core": None, "core_weight": 0.5}
+                "pool": "all", "vol_target": None, "trend": False, "core": None, "core_weight": 0.5,
+                "core_trend": False, "lookbacks": None}
 DUAL_POOL = ("us_broad", "us_sector", "us_factor", "world", "commodities")
 DUAL_POOLS = {"all": DUAL_POOL, "growth": ("us_broad", "us_sector", "us_factor")}
 
@@ -537,8 +538,18 @@ def dual_weights(data, d, **opts):
     """What dual momentum (with its options) would hold after the close of `d`: {fund: weight}."""
     o = dict(DUAL_DEFAULT, **opts)
     pool = sorted({x for g in DUAL_POOLS[o["pool"]] for x in univ.ETFS[g] if not x.endswith(".TO")})
-    hurdle = (data.quick(o["cash_like"], d, 21 * o["months"]) or {}).get("ret", 0.0)
-    rows = [(q["ret"], f, q) for f in pool for q in [data.quick(f, d, 21 * o["months"])] if q]
+    looks = o["lookbacks"] or [o["months"]]
+
+    def mom(sym):
+        """Average return over the lookbacks (months), with the stats of the longest one."""
+        qs = [data.quick(sym, d, 21 * m) for m in looks]
+        if not all(qs):
+            return None
+        q = dict(qs[0])  # trend and volatility do not depend on the lookback
+        q["ret"] = sum(x["ret"] for x in qs) / len(qs)
+        return q
+    hurdle = (mom(o["cash_like"]) or {}).get("ret", 0.0)
+    rows = [(q["ret"], f, q) for f in pool for q in [mom(f)] if q]
     top = [(f, q) for r, f, q in sorted(rows, key=lambda x: -x[0])[:o["k"]]
            if r > hurdle and (q["above200"] or not o["trend"])]
     sat = 1.0 - (o["core_weight"] if o["core"] else 0.0)
@@ -547,7 +558,9 @@ def dual_weights(data, d, **opts):
         scale = min(1.0, o["vol_target"] / max(q["vol"], 1.0)) if o["vol_target"] else 1.0
         w[f] = w.get(f, 0.0) + sat / o["k"] * scale
     if o["core"] and o["core"] in data.charts:
-        w[o["core"]] = w.get(o["core"], 0.0) + o["core_weight"]
+        cq = data.quick(o["core"], d, 21)
+        if not o["core_trend"] or (cq and cq["above200"]):  # core_trend: bonds while the core is under its 200-day
+            w[o["core"]] = w.get(o["core"], 0.0) + o["core_weight"]
     rest = 1.0 - sum(w.values())
     if rest > 1e-6 and o["safe"] in data.charts:
         w[o["safe"]] = w.get(o["safe"], 0.0) + rest
@@ -1353,6 +1366,15 @@ CORE_VARIANTS = [
                                                                          "vol_target": 15}),
     ("Core: half Nasdaq 100, half dual momentum (best 2, growth funds)", {"core": "QQQ", "core_weight": 0.5, "k": 2,
                                                                         "pool": "growth"}),
+    ("Core: 70/30, Nasdaq 100 only above its 200-day (else bonds)", {"core": "QQQ", "core_weight": 0.7,
+                                                                       "core_trend": True}),
+    ("Core: 70/30, dual momentum on 1/3/6/12-month average", {"core": "QQQ", "core_weight": 0.7,
+                                                                "lookbacks": [1, 3, 6, 12]}),
+    ("Core: 70/30, both (trend switch + blended lookbacks)", {"core": "QQQ", "core_weight": 0.7, "core_trend": True,
+                                                                "lookbacks": [1, 3, 6, 12]}),
+    ("Core: 50/50, both (trend switch + blended lookbacks)", {"core": "QQQ", "core_weight": 0.5, "core_trend": True,
+                                                                "lookbacks": [1, 3, 6, 12]}),
+    ("Core: Nasdaq 100 only above its 200-day, else bonds", {"core": "QQQ", "core_weight": 1.0, "core_trend": True}),
 ]
 MODEL_VARIANTS = [
     ("Learned score: top 20 (default)", {}),
