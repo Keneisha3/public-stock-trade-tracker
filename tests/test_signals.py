@@ -236,6 +236,95 @@ class Eps(unittest.TestCase):
         self.assertTrue(any("EarningsPerShareBasic" in c for c in calls))
 
 
+INFO_TABLE = """<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+<infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>037833100</cusip>
+<value>%d</value><shrsOrPrnAmt><sshPrnamt>%d</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>
+<infoTable><nameOfIssuer>BANK AMER CORP</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>060505104</cusip>
+<value>500</value><shrsOrPrnAmt><sshPrnamt>50</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>
+<infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>CALL</titleOfClass><cusip>037833100</cusip>
+<value>999</value><shrsOrPrnAmt><sshPrnamt>9</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+<putCall>Call</putCall></infoTable>
+</informationTable>"""
+
+
+class FakeSec(object):
+    offline = None
+
+    def __init__(self):
+        self.calls = []
+
+    def get_json(self, url, sec=True):
+        self.calls.append(url)
+        if url.endswith("company_tickers.json"):
+            return {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."},
+                    "1": {"cik_str": 70858, "ticker": "BAC", "title": "BANK OF AMERICA CORP /DE/"}}
+        if "submissions" in url:
+            return {"filings": {"recent": {
+                "form": ["13F-HR", "13F-HR/A", "13F-HR", "4"],
+                "filingDate": ["2024-05-15", "2024-05-20", "2024-02-14", "2024-01-02"],
+                "acceptanceDateTime": ["2024-05-15T17:05:00.000Z", "", "2024-02-14T10:00:00.000Z", ""],
+                "accessionNumber": ["0001-24-000002", "0001-24-000003", "0001-24-000001", "x"],
+                "reportDate": ["2024-03-31", "2024-03-31", "2023-12-31", ""]}, "files": []}}
+        return {"directory": {"item": [{"name": "primary_doc.xml"}, {"name": "infotable.xml"}]}}
+
+    def get(self, url, sec=True):
+        self.calls.append(url)
+        first = "000124000001" in url
+        return (INFO_TABLE % ((1000, 100) if first else (3000, 200))).encode()
+
+    def post_json(self, url, payload, headers=None):
+        return [{"data": [{"ticker": "AAPL", "marketSector": "Equity"}]} if j["idValue"] == "037833100" else {}
+                for j in payload]
+
+
+class Thirteenf(unittest.TestCase):
+    def test_builds_dated_holdings_without_options_or_amendments(self):
+        doc = signals.build_13f("t t@example.com", filers=[{"cik": "1067983", "name": "Berkshire", "person": "Buffett"}],
+                                log=lambda m: None, fetcher=FakeSec())
+        self.assertEqual([r[0] for r in doc["rows"]], ["2024-02-14", "2024-05-16"])  # after 4 p.m.: next day
+        first = doc["rows"][0]
+        self.assertEqual(first[1:4], ["0001067983", "2023-12-31", "2024-02-14"])
+        self.assertEqual(sorted(first[5]), [["AAPL", 1000, 100], ["BAC", 500, 50]])  # no option rows
+        self.assertEqual(doc["managers"], {"0001067983": "Buffett"})
+        self.assertEqual(doc["stats"]["mapped"], 2)                 # OpenFIGI for Apple, SEC names for BofA
+        s = signals.Signals(f13=doc)
+        self.assertIsNone(s.holdings_13f("0001067983", "2024-02-13"))
+        self.assertEqual(s.holdings_13f("0001067983", "2024-05-15")["AAPL"], (1000, 100))
+        self.assertEqual(s.holdings_13f("0001067983", "2024-05-16")["AAPL"], (3000, 200))
+        self.assertEqual(s.holdings_13f("0001067983", "2024-05-16", back=1)["AAPL"], (1000, 100))
+        self.assertIsNone(s.holdings_13f("0001067983", "2025-01-30"))  # stopped filing: stale
+
+
+def cf(key, rows):
+    return {key: {"units": {("USD/shares" if key.startswith("Earnings") else "USD"): [
+        {"start": a, "end": b, "val": v, "filed": f, "form": "10-Q"} for a, b, v, f in rows]}}}
+
+
+class Fundamentals(unittest.TestCase):
+    def doc(self):
+        qs = [("2023-01-01", "2023-03-31", "2023-05-01"), ("2023-04-01", "2023-06-30", "2023-08-01"),
+              ("2023-07-01", "2023-09-30", "2023-11-01"), ("2023-10-01", "2023-12-31", "2024-02-01"),
+              ("2024-01-01", "2024-03-31", "2024-05-01")]
+        g = {}
+        g.update(cf("Revenues", [(a, b, 100.0 + 10 * i, f) for i, (a, b, f) in enumerate(qs)]))
+        g.update(cf("OperatingIncomeLoss", [(a, b, 30.0, f) for a, b, f in qs]))
+        g.update(cf("EarningsPerShareDiluted", [(a, b, 1.0, f) for a, b, f in qs]))
+        return {"facts": {"us-gaap": g}}
+
+    def test_what_the_analyst_knew_on_a_day(self):
+        rows = signals.parse_fundamentals(self.doc(), "ACME")
+        self.assertIn(["2024-05-01", "ACME", "2024-03-31", "revenue", 140.0], rows)
+        s = signals.Signals(fundamentals={"rows": rows})
+        self.assertIsNone(s.fundamentals("ACME", "2023-04-30"))
+        f = s.fundamentals("ACME", "2024-05-01")
+        self.assertAlmostEqual(f["rev_growth"], 40.0)              # 140 against 100 a year earlier
+        self.assertAlmostEqual(f["op_margin"], 100.0 * 120 / 500)  # last 4 quarters
+        self.assertEqual(f["eps_ttm"], 4.0)
+        before = s.fundamentals("ACME", "2024-04-30")               # the Q1 2024 10-Q not filed yet
+        self.assertIsNone(before["rev_growth"])
+        self.assertEqual(before["end"], "2023-12-31")
+
+
 class Congress(unittest.TestCase):
     def test_buys_need_the_filing_to_be_public_and_net_buying(self):
         doc = {"rows": [

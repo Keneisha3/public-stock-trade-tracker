@@ -26,7 +26,7 @@ class Repo(unittest.TestCase):
 
     def test_workflow_copies_every_signal_file_the_replay_reads(self):
         with open(os.path.join(ROOT, "trader-replay", "signals.py"), encoding="utf-8") as fh:
-            wanted = set(re.findall(r'opt\("([a-z_]+\.json\.gz)"\)', fh.read()))
+            wanted = set(re.findall(r'opt\("([a-z0-9_]+\.json\.gz)"\)', fh.read()))
         with open(os.path.join(REPO, ".github", "workflows", "replay.yml"), encoding="utf-8") as fh:
             loops = re.findall(r"for f in ([^;]+); do", fh.read())
         self.assertTrue(wanted and loops)
@@ -102,7 +102,8 @@ class Repo(unittest.TestCase):
         allowed = {"argparse", "copy", "csv", "datetime", "io", "json", "math", "os", "re", "statistics", "sys",
                    "time", "urllib", "subprocess", "threading", "traceback", "webbrowser", "http", "contextlib",
                    "bisect", "market", "accounts", "paper", "daily", "init", "team", "analyst", "candles",
-                   "executor", "risk_manager", "scanner", "trade_log", "ptr", "replay", "vix", "universe", "signals", "gzip", "zipfile", "concurrent", "xml"}
+                   "executor", "risk_manager", "scanner", "trade_log", "ptr", "replay", "vix", "universe", "signals", "gzip", "zipfile", "concurrent", "xml",
+                   "edgar13f", "facts"}
         for path in [os.path.join(ROOT, s, f) for s in OURS for f in os.listdir(os.path.join(ROOT, s))
                      if f.endswith(".py")] + [os.path.join(REPO, "app", "server.py")]:
             with open(path, encoding="utf-8") as fh:

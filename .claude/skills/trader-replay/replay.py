@@ -908,8 +908,12 @@ def run_plan(data, uni, sig, start, asof, cash, **opts):
             w[o["core"]] = o["core_weight"]
         for sleeve, share in o["sleeves"].items():
             part = sat * share
-            if sleeve == "dual":
-                for f, x in dual_weights(data, d).items():
+            if sleeve in ("dual", "copycat", "screen", "pelosi"):
+                got = (dual_weights(data, d) if sleeve == "dual" else
+                       copycat_weights(data, sig, d, **COPY_DEFAULT) if sleeve == "copycat" else
+                       screen_weights(data, uni, sig, d, **SCREEN_DEFAULT) if sleeve == "screen" else
+                       pelosi_weights(data, sig, d, **PELOSI_DEFAULT))
+                for f, x in got.items():
                     w[f] = w.get(f, 0.0) + part * x
                 continue
             if sleeve == "momentum":
@@ -924,6 +928,179 @@ def run_plan(data, uni, sig, start, asof, cash, **opts):
                 w[t] = w.get(t, 0.0) + part / len(picks)
         return w
     return run_targets(data, start, asof, cash, choose, o["every"])
+
+
+# ---------------------------------------------------------------- the upstream agents, point in time
+
+def _equal(picks):
+    picks = list(dict.fromkeys(picks))
+    return {t: 1.0 / len(picks) for t in picks} if picks else {"SPY": 1.0}
+
+
+COPY_DEFAULT = {"mode": "top", "n": 3, "who": None, "min_count": 3, "trend": False}
+COPY_VERSIONS = [
+    ("C1", "Copycat: Berkshire's whole portfolio (what the upstream skill does)", {"mode": "book", "who": ["0001067983"]}),
+    ("C2", "Copycat: all 23 investors' portfolios, an equal share each", {"mode": "book"}),
+    ("C3", "Copycat: each investor's top 3 ideas (default)", {}),
+    ("C4", "Copycat: consensus, in the top 10 of 3+ investors", {"mode": "consensus", "n": 10}),
+    ("C5", "Copycat: new buys and big adds, top 3 per investor", {"mode": "new"}),
+    ("C6", "Copycat: top 3 ideas, only while above the 200-day", {"trend": True}),
+]
+
+
+def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False):
+    """What the upstream copycat would hold after the close of `d`, from 13Fs the market could act
+    on by then. book: each investor's reported portfolio (top 50 stocks) at its weights, an equal
+    share per investor. top: each investor's n biggest positions. consensus: stocks in the top n
+    of at least min_count investors. new: per investor, the n biggest positions that are new or at
+    least 1.5x the shares of the report before. Stocks we have no prices for are skipped."""
+    if not sig or not sig.f13:
+        return {"SPY": 1.0}
+    books = {}
+    for cik in (who or sorted(sig.f13)):
+        h = sig.holdings_13f(cik, d)
+        if not h:
+            continue
+        ok = {t: v for t, v in h.items() if t in data.charts and data.close(t, d)
+              and (not trend or (data.quick(t, d, 21) or {}).get("above200"))}
+        if mode == "new":
+            before = sig.holdings_13f(cik, d, back=1) or {}
+            ok = {t: v for t, v in ok.items() if t not in before or v[1] >= 1.5 * max(before[t][1], 1)}
+        if ok:
+            books[cik] = sorted(ok.items(), key=lambda kv: -kv[1][0])
+    w = {}
+    if mode == "consensus":
+        count = {}
+        for rows in books.values():
+            for t, _ in rows[:n]:
+                count[t] = count.get(t, 0) + 1
+        return _equal(sorted(t for t, c in count.items() if c >= min_count))
+    for rows in books.values():
+        rows = rows if mode == "book" else rows[:n]
+        tot = sum(v[0] for _, v in rows) if mode == "book" else len(rows)
+        for t, v in rows:
+            share = (v[0] if mode == "book" else 1.0) / tot / len(books)
+            w[t] = w.get(t, 0.0) + share
+    return w or {"SPY": 1.0}
+
+
+def run_copycat(data, sig, start, asof, cash, **opts):
+    """The copycat's picks, checked weekly so a new 13F is acted on within days of being filed."""
+    o = dict(COPY_DEFAULT, **opts)
+    return run_targets(data, start, asof, cash, lambda d: copycat_weights(data, sig, d, **o), 7)
+
+
+SCREEN_DEFAULT = {"top": 10, "growth": 10.0, "margin": 25.0, "pe": 35.0, "rank": "upstream"}
+SCREEN_VERSIONS = [
+    ("S1", "Screener: its own example rules, top 10 (default)", {}),
+    ("S2", "Screener: the example rules, top 20", {"top": 20}),
+    ("S3", "Screener: the example rules, then the 20 with the best 12-1 momentum", {"top": 20, "rank": "momentum"}),
+    ("S4", "Screener: looser rules (growth 5%+, margin 15%+, P/E up to 50), top 20", {"top": 20, "growth": 5.0,
+                                                                                       "margin": 15.0, "pe": 50.0}),
+]
+
+
+def screen_weights(data, uni, sig, d, top=10, growth=10.0, margin=25.0, pe=35.0, rank="upstream"):
+    """The upstream screener's example ('Growing, profitable, not priced for perfection': revenue
+    growth >= 10% a year, operating margin >= 25%, EPS > 0, P/E <= 35) run on what each S&P 500
+    member that day had filed by then, with that day's price. rank "upstream": its own ranking
+    (revenue growth twice, then low P/E and high margin); "momentum": best 12-1 month return."""
+    if not sig or not sig.fund or uni is None:
+        return {"SPY": 1.0}
+    rows = []
+    for t in uni.members_on(d):
+        f = sig.fundamentals(t, d)
+        px = data.close(t, d)
+        if not f or not px or f["eps_ttm"] is None or f["eps_ttm"] <= 0 or f["rev_growth"] is None \
+                or f["op_margin"] is None:
+            continue
+        p_e = px / f["eps_ttm"]
+        if f["rev_growth"] >= growth and f["op_margin"] >= margin and p_e <= pe:
+            mom = (data.quick(t, d, 252, 21) or {}).get("ret")
+            rows.append({"t": t, "g": f["rev_growth"], "m": f["op_margin"], "pe": p_e, "mom": mom})
+    if rank == "momentum":
+        rows = sorted([r for r in rows if r["mom"] is not None], key=lambda r: -r["mom"])
+    else:
+        pos = {}
+        for key, sign, weight in (("g", -1, 2), ("pe", 1, 1), ("m", -1, 1)):
+            for i, r in enumerate(sorted(rows, key=lambda r: sign * r[key])):
+                pos[r["t"]] = pos.get(r["t"], 0) + weight * i
+        rows = sorted(rows, key=lambda r: (pos[r["t"]], r["t"]))
+    return _equal([r["t"] for r in rows[:top]])
+
+
+def run_screen(data, uni, sig, start, asof, cash, **opts):
+    """The screener's picks, equal weight, re-screened monthly."""
+    o = dict(SCREEN_DEFAULT, **opts)
+    return run_targets(data, start, asof, cash, lambda d: screen_weights(data, uni, sig, d, **o), 28)
+
+
+PELOSI_DEFAULT = {"mode": "mirror", "days": 365, "min_low": 0}
+PELOSI_VERSIONS = [
+    ("P1", "Pelosi: what she bought in the last year, sold when she sells (default)", {}),
+    ("P2", "Pelosi: every buy kept a year, her sales ignored", {"mode": "hold"}),
+    ("P3", "Pelosi: only trades of $1M or more, mirrored", {"min_low": 1000001}),
+]
+
+
+def pelosi_weights(data, sig, d, mode="mirror", days=365, min_low=0):
+    """Nancy Pelosi's disclosed trades since 2015 (House PTRs, from the day each was filed): equal
+    weight in what she bought in the last `days`. mirror: a later sale drops it."""
+    if not sig or not sig.congress:
+        return {"SPY": 1.0}
+    rows = sorted(r for r in sig.congress_rows(d, days, "buy") + sig.congress_rows(d, days, "sell")
+                  if "pelosi" in (r[1] or "").lower() and (r[4] or 0) >= min_low)
+    held = []
+    for filed, member, t, side, low, high, traded, owner in rows:
+        if side == "buy" and t not in held:
+            held.append(t)
+        elif side == "sell" and mode == "mirror" and t in held:
+            held.remove(t)
+    return _equal([t for t in held if t in data.charts and data.close(t, d)])
+
+
+def run_pelosi_signals(data, sig, start, asof, cash, **opts):
+    o = dict(PELOSI_DEFAULT, **opts)
+    return run_targets(data, start, asof, cash, lambda d: pelosi_weights(data, sig, d, **o), 7)
+
+
+def upstream_version(code):
+    """('copycat' | 'screener' | 'pelosi', name, options) for a version code like C3, S1 or P2."""
+    for fam, rows in (("copycat", COPY_VERSIONS), ("screener", SCREEN_VERSIONS), ("pelosi", PELOSI_VERSIONS)):
+        for c, name, over in rows:
+            if c == code.upper():
+                return fam, name, over
+    raise ReplayError("no version %s (copycat C1-C6, screener S1-S4, Pelosi P1-P3)" % code)
+
+
+def upstream_picks(code, data, uni, sig, day):
+    """Today's weights for one version, as the upstream budget skill reads them (trader/targets.json)."""
+    fam, name, over = upstream_version(code)
+    w = (copycat_weights(data, sig, day, **dict(COPY_DEFAULT, **over)) if fam == "copycat" else
+         screen_weights(data, uni, sig, day, **dict(SCREEN_DEFAULT, **over)) if fam == "screener" else
+         pelosi_weights(data, sig, day, **dict(PELOSI_DEFAULT, **over)))
+    return {"source": "%s %s, from filings public by %s (trader-replay --picks)" % (code.upper(), name, day),
+            "as_of": day, "weights": [{"ticker": t, "weight": round(100.0 * x, 2)}
+                                      for t, x in sorted(w.items(), key=lambda kv: -kv[1])]}
+
+
+def upstream_rows(data, uni, sig, start, asof, cash):
+    """The upstream agents' default versions, where their data was loaded."""
+    out = {}
+    if sig and sig.f13:
+        out["copycat"] = run_copycat(data, sig, start, asof, cash)
+    if sig and sig.fund:
+        out["screener"] = run_screen(data, uni, sig, start, asof, cash)
+    if sig and any("pelosi" in (r[1] or "").lower() for r in sig.congress):
+        out["pelosi (since 2015)"] = run_pelosi_signals(data, sig, start, asof, cash)
+    return out
+
+
+UPSTREAM_PLANS = [
+    ("K1", "70% Nasdaq 100 + 30% copycat top-3 ideas", {"sleeves": {"copycat": 1.0}}),
+    ("K2", "70% Nasdaq 100 + 30% screener picks", {"sleeves": {"screen": 1.0}}),
+    ("K3", "70% Nasdaq 100 + 30% Pelosi's buys", {"sleeves": {"pelosi": 1.0}}),
+]
 
 
 def run_hold(data, weights, start, asof, cash):
@@ -1577,6 +1754,25 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
                     add("core + dual", name, over, lambda st, o=over: run_dual(data, st, asof, cash, **o))
         for name, over in MODEL_VARIANTS:
             add("model", name, over, lambda st, o=over: run_model(data, ctx["uni"], ctx.get("signals"), st, asof, cash, **o))
+        sig = ctx.get("signals")
+        if sig and sig.f13:  # the upstream agents, every version (C: copycat, S: screener, P: Pelosi, K: plans)
+            for code, name, over in COPY_VERSIONS:
+                add("copycat", "%s. %s" % (code, name), over,
+                    lambda st, o=over: run_copycat(data, sig, st, asof, cash, **o))
+        if sig and sig.fund:
+            for code, name, over in SCREEN_VERSIONS:
+                add("screener", "%s. %s" % (code, name), over,
+                    lambda st, o=over: run_screen(data, ctx["uni"], sig, st, asof, cash, **o))
+        if sig and sig.congress:
+            for code, name, over in PELOSI_VERSIONS:
+                add("pelosi", "%s. %s" % (code, name), over,
+                    lambda st, o=over: run_pelosi_signals(data, sig, st, asof, cash, **o))
+        if sig and "QQQ" in data.charts:
+            for code, name, over in UPSTREAM_PLANS:
+                need = {"copycat": sig.f13, "screen": sig.fund, "pelosi": sig.congress}[next(iter(over["sleeves"]))]
+                if need:
+                    add("core + upstream", "%s. %s" % (code, name), over,
+                        lambda st, o=over: run_plan(data, ctx["uni"], sig, st, asof, cash, **o))
     sig = ctx.get("signals")
     if ctx.get("uni") is not None and sig:
         for fam, name, over in SIGNAL_VARIANTS:
@@ -1781,6 +1977,7 @@ def rolling(data, watch, universe, filings, mine, asof, cash, account_type, spec
             row["model"] = run_model(data, uni, sig, start, end, cash)
             if sig and sig.events:
                 row["earnings drift"] = run_events(data, uni, sig, start, end, cash)
+            row.update(upstream_rows(data, uni, sig, start, end, cash))
         if VIX_SYM in data.charts:
             row["VIX agent"] = run_vix_agent(data, start, end, cash, VIX_RULES[0][1])
         if include_pelosi:
@@ -1912,6 +2109,9 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         end = asof or datetime.date.today().isoformat()
         since = (_date(end) - datetime.timedelta(days=365 * HISTORY_YEARS.get(history, 5))).isoformat()
         syms |= set(uni.ever(since, end)) | set(univ.CANADA) | {x for v in univ.ETFS.values() for x in v}
+    if sig:  # what the copycat's investors and Nancy Pelosi held, so the upstream agents can be replayed
+        syms |= {t for rows in sig.f13.values() for _, _, h in rows for t in h}
+        syms |= {r[2] for r in sig.congress if "pelosi" in (r[1] or "").lower() and r[2]}
     syms = sorted(syms)
     charts = {}
     if not offline and len(syms) > 100:
@@ -1976,6 +2176,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
             row["model"] = run_model(data, uni, sig, start, asof, cash)
             if sig and sig.events:
                 row["earnings drift"] = run_events(data, uni, sig, start, asof, cash)
+            row.update(upstream_rows(data, uni, sig, start, asof, cash))
         if candles and n <= crypto_max:
             c = run_crypto(candles, data, start, asof, cash, os.path.join(base, "replay", "crypto-" + label.replace(" ", "")))
             row["crypto team"] = c
@@ -2047,7 +2248,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
-         "blend", "core + dual", "model", "earnings drift",
+         "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)",
          "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
@@ -2059,7 +2260,10 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "blend": "Blend: dual momentum + momentum + Congress (thirds)",
           "core + dual": "Core + satellite: 70% Nasdaq 100, 30% dual momentum, rebalanced every 2 weeks",
           "model": "Learned score (top 20, refit every January)",
-          "earnings drift": "Earnings drift (8-K news: jumps on earnings, held ~60 days)"}
+          "earnings drift": "Earnings drift (8-K news: jumps on earnings, held ~60 days)",
+          "copycat": "Copycat (upstream): each famous investor's top 3 from their 13Fs",
+          "screener": "Screener (upstream): its example rules on filed results, top 10",
+          "pelosi (since 2015)": "Pelosi (upstream): her buys of the last year, mirrored, since 2015"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 
@@ -2490,10 +2694,39 @@ def main(argv=None):
                     "forward_plan.json, then stop")
     ap.add_argument("--long", metavar="OUTDIR", help="the fund strategies from 2000 to 2017 (before anything "
                     "was chosen), with older funds stitched in; writes OUTDIR/long.json and long.md, then stop")
+    ap.add_argument("--picks", metavar="CODE", help="write today's picks of one upstream version (C1-C6 copycat, "
+                    "S1-S4 screener, P1-P3 Pelosi; needs --signals) to DIR/targets.json for trader-budget, then stop")
     ap.add_argument("--strict", action="store_true", help="exit 3 if any self-check fails")
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
+    if a.picks:
+        try:
+            fam = upstream_version(a.picks)[0]
+            sig = sigs.Signals.load(a.signals or "signals")
+            uni = univ.load()
+            today = a.asof or datetime.date.today().isoformat()
+            syms = {"SPY"} | (set(uni.members_on(today)) if fam == "screener" else
+                              {t for rows in sig.f13.values() for _, _, h in rows[-2:] for t in h} if fam == "copycat"
+                              else {r[2] for r in sig.congress if "pelosi" in (r[1] or "").lower() and r[2]})
+            charts = {}
+            for s in sorted(syms):
+                try:
+                    charts[s] = mk.get_chart(s, offline=a.offline, range_="2y")
+                except mk.MarketError:
+                    continue
+            data = Data(charts, {})
+            doc = upstream_picks(a.picks, data, uni, sig, data.trading_day_on_or_before(today))
+        except (ReplayError, mk.MarketError) as e:
+            print("replay: %s" % e, file=sys.stderr)
+            return 2
+        acc.write_json(os.path.join(a.dir, "targets.json"), doc)
+        print("%s -> %s" % (doc["source"], os.path.join(a.dir, "targets.json")))
+        for row in doc["weights"]:
+            print("  %-8s %6.2f%%" % (row["ticker"], row["weight"]))
+        print("Next: /trader-budget sizes it, /trader-risk checks it, /trader-broker asks you per order. "
+              "Not financial advice.")
+        return 0
     if a.long:
         charts, notes = long_charts(a.offline, a.save_data, log=lambda m: print(m, file=sys.stderr))
         if "SPY" not in charts:

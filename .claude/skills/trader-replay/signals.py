@@ -31,8 +31,11 @@ import urllib.request
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "trader-pelosi"))
+for _skill in ("trader-pelosi", "trader-copycat", "trader-analyst"):
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), _skill))
 import ptr  # noqa: E402
+import edgar13f as e13  # noqa: E402  (the upstream copycat's 13F reader)
+import facts  # noqa: E402  (the upstream analyst's XBRL reader)
 
 SEC_345 = "https://www.sec.gov/files/structureddata/data/insider-transactions-data-sets/%s_form345.zip"
 SEC_DAILY = "https://www.sec.gov/Archives/edgar/daily-index/%d/QTR%d/form.%s.idx"
@@ -410,6 +413,154 @@ def build_eps(tickers, ua, log=print, http=None, pause=0.12):
             "columns": ["filed", "ticker", "quarter_end", "eps"], "rows": rows, "stats": stats}
 
 
+# ---------------------------------------------------------------- 13F (famous investors, upstream copycat)
+
+F13_KEEP = 50  # positions kept per filing, by value: the whole book for most, the top for the giants
+
+
+def parse_13f_filings(sub):
+    """Original 13F-HR filings in a submissions JSON (or one of its extra files):
+    [(filed, accepted, accession, period)]. Amendments are left out: the original is what
+    the market saw first."""
+    block = (sub.get("filings") or {}).get("recent") if "filings" in sub else sub
+    block = block or {}
+    out = []
+    for form, filed, acc, accn, period in zip(block.get("form", []), block.get("filingDate", []),
+                                              block.get("acceptanceDateTime", []), block.get("accessionNumber", []),
+                                              block.get("reportDate", [])):
+        if form == "13F-HR":
+            out.append((filed, acc, accn, period))
+    return out
+
+
+def figi_tickers(fetcher, cusips, log=print, pause=2.6):
+    """CUSIP -> ticker through OpenFIGI, 10 at a time, one retry a minute later on an error."""
+    out = {}
+    for i in range(0, len(cusips), 10):
+        chunk = cusips[i:i + 10]
+        for attempt in range(2):
+            try:
+                out.update(e13.figi_lookup(fetcher, chunk, pause=0))
+                break
+            except e13.EdgarError as e:
+                if attempt:
+                    log("openfigi: %s" % e)
+                elif not fetcher.offline:
+                    time.sleep(60)
+        if not fetcher.offline:
+            time.sleep(pause)  # 25 requests a minute without a key
+    return out
+
+
+def build_13f(ua, since="2013-07-01", filers=None, log=print, fetcher=None, figi=True):
+    """Every original 13F-HR since `since` (XML information tables began mid 2013) for the
+    upstream copycat's investors, dated to when the market could act on each. Rows:
+    [effective, manager cik, period, filed, reported total $, [[ticker, value $, shares], ...]]
+    with the top F13_KEEP stock positions by value (no options), tickers from OpenFIGI or the
+    SEC's company names."""
+    f = fetcher or e13.Fetcher(ua)
+    filers = filers if filers is not None else e13.load_filers()
+    found, stats = [], {"filers": 0, "filings": 0, "errors": []}
+    for fl in filers:
+        cik = e13.cik10(fl["cik"])
+        try:
+            sub = f.get_json(e13.SUBMISSIONS % cik)
+            listed = parse_13f_filings(sub)
+            for extra in (sub.get("filings") or {}).get("files", []):
+                if (extra.get("filingTo") or "9999") >= since:
+                    listed += parse_13f_filings(f.get_json(SEC_SUBMISSIONS % extra["name"]))
+        except (e13.EdgarError, ValueError) as e:
+            stats["errors"].append("%s: %s" % (fl["name"], e))
+            continue
+        stats["filers"] += 1
+        for filed, acc, accn, period in sorted(set(listed)):
+            if filed < since:
+                continue
+            try:
+                base = e13.archive_url(cik, accn)
+                name = e13.info_table_name(f.get_json(base + "index.json"))
+                rows = e13.parse_info_table(f.get(base + name), e13.value_multiplier(filed))
+            except (e13.EdgarError, ValueError) as e:
+                stats["errors"].append("%s %s: %s" % (fl["name"], accn, e))
+                continue
+            pos, total = e13.aggregate(rows)
+            stocks = e13.combine_classes([p for p in pos if e13.is_stock(p)], total)
+            found.append((effective_day(filed, acc), cik, period, filed, total,
+                          [(p["cusip"], p["issuer"], p["title"], p["value"], p["shares"]) for p in stocks[:F13_KEEP]]))
+        log("%s: %d filings so far" % (fl["name"], len(found)))
+    names = {}
+    for x in found:
+        for c, issuer, title, v, sh in x[5]:
+            names.setdefault(c, (issuer, title))
+    cusips = sorted(names)
+    index = e13.TickerIndex(e13.load_company_tickers(f.get_json(e13.TICKERS_URL)))
+    by_figi = figi_tickers(f, cusips, log) if figi else {}
+    tick = {}
+    for c in cusips:
+        p = e13.resolve_tickers([{"cusip": c, "issuer": names[c][0], "title": names[c][1]}], index, None, by_figi)[0]
+        if p.get("ticker"):
+            tick[c] = yahoo(p["ticker"])
+    out = []
+    for eff, cik, period, filed, total, positions in sorted(found):
+        merged = {}
+        for c, issuer, title, v, sh in positions:
+            if c in tick:
+                m = merged.setdefault(tick[c], [tick[c], 0.0, 0.0])
+                m[1] += v
+                m[2] += sh
+        out.append([eff, cik, period, filed, round(total), [[t, round(v), round(sh)] for t, v, sh in merged.values()]])
+    stats.update(filings=len(out), cusips=len(cusips), mapped=len(tick), errors=stats["errors"][:50])
+    return {"source": "SEC EDGAR 13F-HR information tables (upstream trader-copycat parser)", "built": _now(),
+            "managers": {e13.cik10(x["cik"]): x.get("person") or x["name"] for x in filers},
+            "columns": ["effective", "cik", "period", "filed", "total", "positions"], "rows": out, "stats": stats}
+
+
+# ---------------------------------------------------------------- fundamentals (upstream analyst)
+
+FUND_KEYS = ("revenue", "operating_income", "net_income", "eps_diluted")
+
+
+def parse_fundamentals(companyfacts, ticker):
+    """One companyfacts JSON -> [filed, ticker, quarter end, key, value] rows: each quarter as FIRST
+    filed in a 10-Q or 10-K, the concept list from the upstream analyst (facts.CONCEPTS)."""
+    out = []
+    for key in FUND_KEYS:
+        unit = "USD/shares" if key == "eps_diluted" else "USD"
+        merged = {}
+        for concept in facts.CONCEPTS[key]:
+            got = parse_concept({"units": {unit: facts.facts_for(companyfacts, concept, unit)}}, ticker)
+            for filed, t, end, v in got:
+                merged.setdefault(end, (filed, v))
+        out += [[fd, ticker, end, key, v] for end, (fd, v) in merged.items()]
+    return sorted(out)
+
+
+def build_fundamentals(tickers, ua, log=print, fetcher=None):
+    """Quarterly revenue, operating income, net income and diluted EPS for these tickers."""
+    f = fetcher or e13.Fetcher(ua)
+    cik = {}
+    for v in f.get_json(SEC_TICKERS).values():
+        t = yahoo(v.get("ticker"))
+        if t and t not in cik:
+            cik[t] = e13.cik10(v["cik_str"])
+    rows, stats = [], {"tickers": 0, "no_cik": 0, "errors": []}
+    for i, t in enumerate(sorted(set(tickers))):
+        if t not in cik:
+            stats["no_cik"] += 1
+            continue
+        try:
+            rows += parse_fundamentals(f.get_json(facts.FACTS_URL % cik[t]), t)
+            stats["tickers"] += 1
+        except (e13.EdgarError, ValueError) as e:
+            stats["errors"].append("%s: %s" % (t, e))
+        if i % 100 == 99:
+            log("  %d tickers, %d rows" % (i + 1, len(rows)))
+    rows.sort()
+    stats["errors"] = stats["errors"][:50]
+    return {"source": "SEC XBRL companyfacts (upstream trader-analyst concepts, first filed)", "built": _now(),
+            "columns": ["filed", "ticker", "quarter_end", "key", "value"], "rows": rows, "stats": stats}
+
+
 # ---------------------------------------------------------------- Congress (House PTRs)
 
 def build_congress(years, pdf_dir, log=print, workers=4):
@@ -483,7 +634,7 @@ def _now():
 class Signals:
     """Queries that only see rows filed on or before the day asked about."""
 
-    def __init__(self, congress=None, insiders=None, events=None, eps=None):
+    def __init__(self, congress=None, insiders=None, events=None, eps=None, f13=None, fundamentals=None):
         self.congress = sorted((congress or {}).get("rows") or [], key=lambda r: r[0])  # the queries bisect by date
         self.insiders = sorted((insiders or {}).get("rows") or [], key=lambda r: r[0])
         self.events = sorted((events or {}).get("rows") or [], key=lambda r: r[0])
@@ -493,6 +644,13 @@ class Signals:
         self.eps = {}  # ticker -> [(filed, quarter end, eps)] by filing date
         for filed, t, end, v in sorted((eps or {}).get("rows") or []):
             self.eps.setdefault(t, []).append((filed, end, v))
+        self.managers = dict((f13 or {}).get("managers") or {})
+        self.f13 = {}  # manager cik -> [(effective, period, {ticker: (value, shares)})] by date
+        for eff, cik, period, filed, total, positions in sorted((f13 or {}).get("rows") or []):
+            self.f13.setdefault(cik, []).append((eff, period, {t: (v, sh) for t, v, sh in positions}))
+        self.fund = {}  # ticker -> key -> [(filed, quarter end, value)] by filing date
+        for filed, t, end, key, v in sorted((fundamentals or {}).get("rows") or []):
+            self.fund.setdefault(t, {}).setdefault(key, []).append((filed, end, v))
 
     @classmethod
     def load(cls, folder):
@@ -506,10 +664,50 @@ class Signals:
             last = max((r[0] for r in (ins or {}).get("rows", [])), default="")
             rows = list((ins or {}).get("rows", [])) + [r for r in recent["rows"] if r[0] > last and tuple(r) not in have]
             ins = {"rows": sorted(rows)}
-        return cls(opt("congress.json.gz"), ins, opt("events.json.gz"), opt("eps.json.gz"))
+        return cls(opt("congress.json.gz"), ins, opt("events.json.gz"), opt("eps.json.gz"), opt("f13.json.gz"),
+                   opt("fundamentals.json.gz"))
 
     def __bool__(self):
-        return bool(self.congress or self.insiders or self.events or self.eps)
+        return bool(self.congress or self.insiders or self.events or self.eps or self.f13 or self.fund)
+
+    def holdings_13f(self, cik, day, back=0, max_age=200):
+        """A manager's reported holdings {ticker: (value $, shares)} from the latest 13F the market
+        could act on by `day` (back=1: the one before it). None if nothing was filed yet or the
+        latest report is for a quarter that ended more than `max_age` days ago (stopped filing)."""
+        rows = self.f13.get(cik) or []
+        i = bisect.bisect_right([r[0] for r in rows], day) - 1 - back
+        if i < 0 or _days(rows[i + back][1], day) > max_age:
+            return None
+        return rows[i][2]
+
+    def fundamentals(self, ticker, day, max_age=135):
+        """What the upstream analyst would have read on `day`, from filings made by then:
+        {"rev_growth": % vs the same quarter a year earlier, "op_margin": % over the last 4
+        quarters, "eps_ttm": diluted EPS over the last 4 quarters, "end": latest quarter}.
+        None if the company had not filed a quarter in the last `max_age` days."""
+        by = self.fund.get(ticker)
+        if not by:
+            return None
+        known = {}
+        for key, rows in by.items():
+            k = {}
+            for filed, end, v in rows[:bisect.bisect_right(rows, (day, "9999", float("inf")))]:
+                k.setdefault(end, v)
+            known[key] = k
+        rev = known.get("revenue") or {}
+        ends = sorted(rev)
+        if not ends or _days(ends[-1], day) > max_age:
+            return None
+        last = ends[-1]
+
+        def ttm(series):
+            got = [series[e] for e in sorted(series) if 0 <= _days(e, last) <= 300]
+            return sum(got) if len(got) == 4 else None
+        prev = [e for e in ends if 345 <= _days(e, last) <= 385]
+        growth = 100.0 * (rev[last] / rev[prev[-1]] - 1) if prev and rev[prev[-1]] > 0 else None
+        r4, o4 = ttm(rev), ttm(known.get("operating_income") or {})
+        return {"end": last, "rev_growth": growth, "op_margin": 100.0 * o4 / r4 if r4 and o4 is not None and r4 > 0
+                else None, "eps_ttm": ttm(known.get("eps_diluted") or {})}
 
     def eps_surprise(self, ticker, day, max_age=135):
         """The latest quarter filed by `day` against the same quarter a year earlier:
@@ -624,12 +822,29 @@ def main(argv=None):
     ep = sub.add_parser("eps")
     ep.add_argument("--out", required=True)
     ep.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
+    for name in ("13f", "fundamentals"):
+        x = sub.add_parser(name)
+        x.add_argument("--out", required=True)
+        x.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
     n = sub.add_parser("info")
     n.add_argument("dir")
     a = ap.parse_args(argv)
     if a.cmd == "info":
         info(a.dir)
         return 0
+    if a.cmd in ("13f", "fundamentals"):
+        if not a.user_agent:
+            print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
+            return 2
+        if a.cmd == "13f":
+            doc, name = build_13f(a.user_agent), "f13.json.gz"
+        else:
+            import universe
+            doc, name = build_fundamentals(list(universe.Universe().spans), a.user_agent), "fundamentals.json.gz"
+        write(os.path.join(a.out, name), doc)
+        print(json.dumps(doc["stats"])[:1500])
+        print("%d rows" % len(doc["rows"]))
+        return 0 if doc["rows"] else 3
     if a.cmd in ("events", "eps"):
         if not a.user_agent:
             print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
