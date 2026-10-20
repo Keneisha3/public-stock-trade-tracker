@@ -947,7 +947,8 @@ def _equal(picks):
     return {t: 1.0 / len(picks) for t in picks} if picks else {"SPY": 1.0}
 
 
-COPY_DEFAULT = {"mode": "top", "n": 3, "who": None, "min_count": 3, "trend": False, "broad": False}
+COPY_DEFAULT = {"mode": "top", "n": 3, "who": None, "min_count": 3, "trend": False, "broad": False,
+                "weighted": False, "top_managers": None}
 COPY_VERSIONS = [
     ("C1", "Copycat: Berkshire's whole portfolio (what the upstream skill does)", {"mode": "book", "who": ["0001067983"]}),
     ("C2", "Copycat: all 23 investors' portfolios, an equal share each", {"mode": "book"}),
@@ -955,25 +956,38 @@ COPY_VERSIONS = [
     ("C4", "Copycat: consensus, in the top 10 of 3+ investors", {"mode": "consensus", "n": 10}),
     ("C5", "Copycat: new buys and big adds, top 3 per investor", {"mode": "new"}),
     ("C6", "Copycat: top 3 ideas, only while above the 200-day", {"trend": True}),
+    # versions of the consensus rule (round 11)
+    ("C7", "Copycat: consensus, in the top 5 of 3+ investors", {"mode": "consensus", "n": 5}),
+    ("C8", "Copycat: consensus, in the top 10 of 4+ investors", {"mode": "consensus", "n": 10, "min_count": 4}),
+    ("C9", "Copycat: consensus, in the top 10 of 2+ investors", {"mode": "consensus", "n": 10, "min_count": 2}),
+    ("C10", "Copycat: consensus top 10 of 3+, more money where more investors agree",
+     {"mode": "consensus", "n": 10, "weighted": True}),
     # the same rules on a list chosen by a rule, not by fame: the 50 largest concentrated managers each year
     ("B1", "Rule-based list: consensus, in the top 10 of 5+ of the 50 managers", {"mode": "consensus", "n": 10,
                                                                                   "min_count": 5, "broad": True}),
     ("B2", "Rule-based list: consensus, in the top 10 of 3+ managers", {"mode": "consensus", "n": 10, "broad": True}),
     ("B3", "Rule-based list: each manager's top 3 ideas", {"broad": True}),
+    ("B4", "Rule-based list, 25 largest only: consensus, in the top 10 of 3+", {"mode": "consensus", "n": 10,
+                                                                               "broad": True, "top_managers": 25}),
+    ("B5", "Rule-based list: consensus top 10 of 5+, weighted by agreement", {"mode": "consensus", "n": 10,
+                                                                            "min_count": 5, "broad": True,
+                                                                            "weighted": True}),
 ]
 
 
-def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False, broad=False):
+def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False, broad=False, weighted=False,
+                    top_managers=None):
     """What the upstream copycat would hold after the close of `d`, from 13Fs the market could act
     on by then. book: each investor's reported portfolio (top 50 stocks) at its weights, an equal
     share per investor. top: each investor's n biggest positions. consensus: stocks in the top n
     of at least min_count investors. new: per investor, the n biggest positions that are new or at
     least 1.5x the shares of the report before. Stocks we have no prices for are skipped.
-    broad: the managers on the rule-based list public by `d`, instead of the famous 23."""
+    broad: the managers on the rule-based list public by `d`, instead of the famous 23 (top_managers:
+    only that many of the largest). weighted: consensus weights by how many hold each stock."""
     if not sig or not (sig.f13b if broad else sig.f13):
         return {"SPY": 1.0}
     if broad:
-        who = sorted(sig.broad_list(d) or [])
+        who = list(sig.broad_list(d) or [])[:top_managers]
         if not who:
             return {"SPY": 1.0}
     books = {}
@@ -994,7 +1008,11 @@ def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=
         for rows in books.values():
             for t, _ in rows[:n]:
                 count[t] = count.get(t, 0) + 1
-        return _equal(sorted(t for t, c in count.items() if c >= min_count))
+        keep = {t: c for t, c in count.items() if c >= min_count}
+        if weighted and keep:
+            tot = float(sum(keep.values()))
+            return {t: c / tot for t, c in sorted(keep.items())}
+        return _equal(sorted(keep))
     for rows in books.values():
         rows = rows if mode == "book" else rows[:n]
         tot = sum(v[0] for _, v in rows) if mode == "book" else len(rows)
@@ -2568,6 +2586,7 @@ LONG_STRATS = [
 ]
 LONG_BENCH = [("Nasdaq 100 (QQQ)", "QQQ"), ("S&P 500 (SPY)", "SPY")]
 LONG_C4 = ("Copycat consensus (C4)", "70% Nasdaq 100 + 30% C4")
+LONG_COPY = ("C7", "C8", "C9", "C10")  # the other versions of the consensus rule
 
 
 def c4_coverage(data, sig, start, end, step=91):
@@ -2675,6 +2694,9 @@ def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91,
         if sig and sig.f13:
             out[LONG_C4[0]] = run_copycat(data, sig, start, end, cash, mode="consensus", n=10)
             out[LONG_C4[1]] = run_plan(data, None, sig, start, end, cash, sleeves={"C4": 1.0})
+            for code, name, over in COPY_VERSIONS:
+                if code in LONG_COPY:
+                    out["%s. %s" % (code, name)] = run_copycat(data, sig, start, end, cash, **over)
         for name, sym in LONG_BENCH:
             if sym in data.charts:
                 out[name] = run_hold(data, {sym: 1.0}, start, end, cash)
@@ -2701,7 +2723,9 @@ def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91,
     return {"asof": until, "first": first, "rolling": {"table": table, "horizon_days": horizon, "step_days": step,
                                                        "count": count},
             "periods": periods, "notes": notes or {},
-            "names": [n for n, _ in LONG_STRATS] + (list(LONG_C4) if sig and sig.f13 else []) + [n for n, _ in LONG_BENCH]}
+            "names": [n for n, _ in LONG_STRATS] + (list(LONG_C4) + ["%s. %s" % (c, n) for c, n, _ in COPY_VERSIONS
+                                                                      if c in LONG_COPY] if sig and sig.f13 else [])
+            + [n for n, _ in LONG_BENCH]}
 
 
 def render_long(out):

@@ -841,7 +841,7 @@ class Signals:
         for row in sorted((f13_broad or {}).get("rows") or [], key=lambda r: r[:4]):
             eff, cik, period, filed, total, positions = row[:6]
             self.f13b.setdefault(cik, []).append((eff, period, {t: (v, sh) for t, v, sh in positions}))
-        self.lists = sorted((x["usable_from"], frozenset(x["ciks"])) for x in (f13_broad or {}).get("lists", []))
+        self.lists = sorted((x["usable_from"], tuple(x["ciks"])) for x in (f13_broad or {}).get("lists", []))  # largest first
         self.fund = {}  # ticker -> key -> [(filed, quarter end, value)] by filing date
         for filed, t, end, key, v in sorted((fundamentals or {}).get("rows") or []):
             self.fund.setdefault(t, {}).setdefault(key, []).append((filed, end, v))

@@ -421,4 +421,4 @@ class RuleBasedList(unittest.TestCase):
         s = signals.Signals(f13_broad={"rows": [], "lists": [{"year": 2024, "usable_from": "2024-04-01",
                                                                "ciks": ["0000000111"]}]})
         self.assertIsNone(s.broad_list("2024-03-31"))                   # not public yet
-        self.assertEqual(s.broad_list("2024-04-01"), frozenset(["0000000111"]))
+        self.assertEqual(s.broad_list("2024-04-01"), ("0000000111",))

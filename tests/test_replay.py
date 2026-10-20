@@ -1128,6 +1128,12 @@ class UpstreamAgents(unittest.TestCase):
         self.assertEqual(cw(days[302], mode="consensus", n=10), {"SPY": 1.0})     # list not public yet
         self.assertEqual(set(cw(days[306], mode="consensus", n=10)), {"AAA", "BBB"})
         self.assertEqual(set(cw(days[306], mode="consensus", n=10, min_count=4)), {"SPY"})
+        self.assertEqual(cw(days[306], mode="consensus", n=10, min_count=1, top_managers=1), {"AAA": 0.5, "BBB": 0.5})
+        f = {"managers": {}, "rows": [[days[300], m, days[260], days[300], 0, h] for m, h in
+                                      (("X", [["AAA", 9, 1], ["BBB", 5, 1]]), ("Y", [["AAA", 9, 1]]))]}
+        w = replay.copycat_weights(data, replay.sigs.Signals(f13=f), days[306], mode="consensus", n=10, min_count=1,
+                                   weighted=True)
+        self.assertAlmostEqual(w["AAA"], 2 / 3.0)                                  # two hold it, one holds BBB
 
     def test_screener_and_pelosi(self):
         d = tempfile.mkdtemp()
