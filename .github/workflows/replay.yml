@@ -448,6 +448,7 @@ jobs:
       - name: Save to the replay-results branch
         run: |
           cp forward/record.json "$RUNNER_TEMP/record.json"
+          rm -f forward/record.json  # the results branch has its own copy: an untracked one blocks the switch
           git config user.name "replay-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -q -B replay-results origin/replay-results
