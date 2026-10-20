@@ -36,6 +36,11 @@ SEC_345 = "https://www.sec.gov/files/structureddata/data/insider-transactions-da
 SEC_DAILY = "https://www.sec.gov/Archives/edgar/daily-index/%d/QTR%d/form.%s.idx"
 SEC_DOC = "https://www.sec.gov/Archives/%s"
 SEC_TICKERS = "https://www.sec.gov/files/company_tickers.json"
+SEC_SUBMISSIONS = "https://data.sec.gov/submissions/%s"
+EVENT_ITEMS = {"1.01": "material agreement", "1.03": "bankruptcy", "2.01": "acquisition or sale done",
+               "2.02": "earnings results", "2.05": "restructuring costs", "2.06": "impairment",
+               "4.02": "restatement", "5.02": "executive or director change", "7.01": "investor update",
+               "8.01": "other news"}
 MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT",
                                       "NOV", "DEC"), 1)}
 
@@ -263,6 +268,71 @@ def build_insiders_recent(since, until, ua, tickers=None, log=print, http=None, 
             "columns": ["filed", "ticker", "owner_cik", "role", "shares", "price", "value"], "rows": rows, "stats": stats}
 
 
+# ---------------------------------------------------------------- news events (SEC 8-K)
+
+def effective_day(filed, accepted):
+    """The first day the market could trade on a filing: the filing day if the SEC accepted it
+    before 4 p.m. New York time, otherwise the next calendar day (the replay then waits for
+    the next trading day)."""
+    t = (accepted or "")[11:16]
+    if t and t >= "16:00":
+        return (datetime.date.fromisoformat(filed) + datetime.timedelta(days=1)).isoformat()
+    return filed
+
+
+def parse_submissions(doc, ticker, since="2015-01-01"):
+    """One data.sec.gov submissions JSON (the 'recent' block or an extra file) -> 8-K rows
+    [effective, ticker, items, filed]."""
+    block = (doc.get("filings") or {}).get("recent") if "filings" in doc else doc
+    block = block or {}
+    out = []
+    for form, filed, acc, items in zip(block.get("form", []), block.get("filingDate", []),
+                                       block.get("acceptanceDateTime", []), block.get("items", [])):
+        if form not in ("8-K", "8-K/A") or not filed or filed < since:
+            continue
+        out.append([effective_day(filed, acc), ticker, items or "", filed])
+    return out
+
+
+def build_events(tickers, ua, since="2015-01-01", log=print, http=None, pause=0.12):
+    """Every 8-K (company news filed with the SEC: earnings, deals, executive changes...) for these
+    tickers since `since`, from data.sec.gov submissions, dated to when the market could act."""
+    def get(url):
+        req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "identity"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.read().decode("utf-8", "replace")
+    http = http or get
+    names = json.loads(http(SEC_TICKERS))
+    cik = {}
+    for v in names.values():
+        t = yahoo(v.get("ticker"))
+        if t and t not in cik:
+            cik[t] = "CIK%010d.json" % int(v["cik_str"])
+    rows, stats = [], {"tickers": 0, "no_cik": 0, "errors": []}
+    for i, t in enumerate(sorted(set(tickers))):
+        if t not in cik:
+            stats["no_cik"] += 1
+            continue
+        try:
+            doc = json.loads(http(SEC_SUBMISSIONS % cik[t]))
+            got = parse_submissions(doc, t, since)
+            for f in (doc.get("filings") or {}).get("files", []):
+                if (f.get("filingTo") or "9999") >= since:
+                    got += parse_submissions(json.loads(http(SEC_SUBMISSIONS % f["name"])), t, since)
+                    time.sleep(pause)
+            rows += got
+            stats["tickers"] += 1
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError, ValueError) as e:
+            stats["errors"].append("%s: %s" % (t, e))
+        time.sleep(pause)  # the SEC asks for at most 10 requests a second
+        if i % 100 == 99:
+            log("  %d tickers, %d 8-Ks" % (i + 1, len(rows)))
+    rows.sort()
+    stats["errors"] = stats["errors"][:50]
+    return {"source": "SEC EDGAR submissions (8-K)", "built": _now(), "since": since,
+            "columns": ["effective", "ticker", "items", "filed"], "rows": rows, "stats": stats}
+
+
 # ---------------------------------------------------------------- Congress (House PTRs)
 
 def build_congress(years, pdf_dir, log=print, workers=4):
@@ -336,11 +406,13 @@ def _now():
 class Signals:
     """Queries that only see rows filed on or before the day asked about."""
 
-    def __init__(self, congress=None, insiders=None):
+    def __init__(self, congress=None, insiders=None, events=None):
         self.congress = (congress or {}).get("rows") or []
         self.insiders = (insiders or {}).get("rows") or []
+        self.events = (events or {}).get("rows") or []
         self._cd = [r[0] for r in self.congress]
         self._id = [r[0] for r in self.insiders]
+        self._ed = [r[0] for r in self.events]
 
     @classmethod
     def load(cls, folder):
@@ -354,10 +426,21 @@ class Signals:
             last = max((r[0] for r in (ins or {}).get("rows", [])), default="")
             rows = list((ins or {}).get("rows", [])) + [r for r in recent["rows"] if r[0] > last and tuple(r) not in have]
             ins = {"rows": sorted(rows)}
-        return cls(opt("congress.json.gz"), ins)
+        return cls(opt("congress.json.gz"), ins, opt("events.json.gz"))
 
     def __bool__(self):
-        return bool(self.congress or self.insiders)
+        return bool(self.congress or self.insiders or self.events)
+
+    def news(self, day, days=3, item=None):
+        """{ticker: [items...]} for 8-Ks the market could act on in (day-days, day]. item: e.g.
+        '2.02' (earnings) to keep only those."""
+        a, b = bisect.bisect_right(self._ed, self._since(day, days)), bisect.bisect_right(self._ed, day)
+        out = {}
+        for eff, t, items, filed in self.events[a:b]:
+            if item and item not in items.split(","):
+                continue
+            out.setdefault(t, []).append(eff)
+        return out
 
     @staticmethod
     def _since(day, days):
@@ -398,7 +481,7 @@ class Signals:
 
 def info(folder):
     s = Signals.load(folder)
-    for name, rows in (("congress", s.congress), ("insiders", s.insiders)):
+    for name, rows in (("congress", s.congress), ("insiders", s.insiders), ("events", s.events)):
         if rows:
             print("%s: %d rows, filed %s to %s, %d tickers" % (name, len(rows), rows[0][0], rows[-1][0],
                                                                len({r[2 if name == "congress" else 1] for r in rows})))
@@ -424,12 +507,26 @@ def main(argv=None):
     r.add_argument("--out", required=True)
     r.add_argument("--sp500", action="store_true", help="only companies that were ever in the S&P 500")
     r.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
+    ev = sub.add_parser("events")
+    ev.add_argument("--out", required=True)
+    ev.add_argument("--since", default="2015-01-01")
+    ev.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
     n = sub.add_parser("info")
     n.add_argument("dir")
     a = ap.parse_args(argv)
     if a.cmd == "info":
         info(a.dir)
         return 0
+    if a.cmd == "events":
+        if not a.user_agent:
+            print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
+            return 2
+        import universe
+        doc = build_events(list(universe.Universe().spans), a.user_agent, a.since)
+        write(os.path.join(a.out, "events.json.gz"), doc)
+        print(json.dumps(doc["stats"])[:1500])
+        print("%d rows" % len(doc["rows"]))
+        return 0 if doc["rows"] else 3
     if a.cmd == "insiders-recent":
         if not a.user_agent:
             print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)

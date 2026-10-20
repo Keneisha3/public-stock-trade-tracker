@@ -311,7 +311,7 @@ jobs:
           path: out/congress.json.gz
 
   sig-insiders:
-    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals' }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'insiders')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -336,8 +336,30 @@ jobs:
           name: sig-insiders
           path: out/insiders*.json.gz
 
+  sig-events:
+    # every 8-K (company news filed with the SEC) since 2015 for every S&P 500 member since 2014
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'events')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SEC 8-K news events
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          python .claude/skills/trader-replay/signals.py events --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-events
+          path: out/events.json.gz
+
   sig-save:
-    needs: [sig-congress, sig-insiders]
+    needs: [sig-congress, sig-insiders, sig-events]
     if: ${{ always() && ((github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals') }}
     runs-on: ubuntu-latest
     steps:

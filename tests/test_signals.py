@@ -1,3 +1,4 @@
+import json
 import io
 import os
 import shutil
@@ -143,6 +144,35 @@ class InsidersRecent(unittest.TestCase):
         finally:
             shutil.rmtree(d)
         self.assertEqual([r[0] for r in s.insiders], ["2026-03-30", "2026-04-15"])
+
+
+class Events(unittest.TestCase):
+    def test_8k_rows_are_dated_to_when_the_market_could_act(self):
+        recent = {"filings": {"recent": {
+            "form": ["8-K", "10-Q", "8-K", "8-K/A", "8-K"],
+            "filingDate": ["2026-07-30", "2026-07-30", "2026-07-29", "2026-05-01", "2014-03-03"],
+            "acceptanceDateTime": ["2026-07-30T16:05:11.000Z", "2026-07-30T09:00:00.000Z", "2026-07-29T08:30:00.000Z",
+                                   "2026-05-01T12:00:00.000Z", "2014-03-03T12:00:00.000Z"],
+            "items": ["2.02,9.01", "", "5.02", "8.01", "2.02"]},
+            "files": [{"name": "CIK0000000222-submissions-001.json", "filingTo": "2016-01-01"}]}}
+        older = {"form": ["8-K"], "filingDate": ["2015-06-01"], "acceptanceDateTime": ["2015-06-01T17:00:00.000Z"],
+                 "items": ["1.01"]}
+
+        def http(url):
+            if url.endswith("company_tickers.json"):
+                return '{"0": {"cik_str": 222, "ticker": "ACME"}}'
+            return json.dumps(older if "-submissions-001" in url else recent)
+        doc = signals.build_events(["ACME", "GONE"], "ua", log=lambda m: None, http=http, pause=0)
+        self.assertEqual(doc["rows"], [
+            ["2015-06-02", "ACME", "1.01", "2015-06-01"],          # after 4 p.m.: the next day
+            ["2026-05-01", "ACME", "8.01", "2026-05-01"],
+            ["2026-07-29", "ACME", "5.02", "2026-07-29"],
+            ["2026-07-31", "ACME", "2.02,9.01", "2026-07-30"]])    # earnings after the close: tradable next day
+        self.assertEqual(doc["stats"]["no_cik"], 1)
+        s = signals.Signals(events=doc)
+        self.assertEqual(s.news("2026-07-31", 3), {"ACME": ["2026-07-29", "2026-07-31"]})
+        self.assertEqual(s.news("2026-07-30", 3, item="2.02"), {})  # not tradable until the 31st
+        self.assertEqual(s.news("2026-07-31", 3, item="2.02"), {"ACME": ["2026-07-31"]})
 
 
 class Congress(unittest.TestCase):
