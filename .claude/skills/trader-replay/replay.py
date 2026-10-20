@@ -1082,6 +1082,44 @@ def pelosi_weights(data, sig, d, mode="mirror", days=365, min_low=0, member="pel
     return _equal([t for t in held if t in data.charts and data.close(t, d)])
 
 
+LEADERS_DEFAULT = {"k": 5, "horizon": 63, "years": 3, "min_trades": 5, "min_edge": None, "days": 365,
+                   "everyone": False}
+LEADER_VERSIONS = [
+    ("L0", "Congress: every member's buys, no ranking (the baseline the leaders must beat)", {"everyone": True}),
+    ("L1", "Congress leaders: the 5 best past records (default)", {}),
+    ("L2", "Congress leaders: the 10 best past records", {"k": 10}),
+    ("L3", "Congress leaders: the 5 best, judged 6 months after each buy", {"horizon": 126}),
+    ("L4", "Congress leaders: the 5 best with 10+ past trades", {"min_trades": 10}),
+    ("L5", "Congress leaders: everyone whose past buys beat the S&P 500 by 2+ pts", {"k": 999, "min_edge": 2.0}),
+    ("L6", "Congress leaders: the 3 best, judged on 2 years", {"k": 3, "years": 2}),
+]
+
+
+def leader_weights(data, sig, d, k=5, horizon=63, years=3, min_trades=5, min_edge=None, days=365, everyone=False):
+    """Follow the Congress members whose PAST buys did best: rank members by how their disclosed buys
+    did against the S&P 500 over `horizon` trading days after each filing (only outcomes known by
+    `d`, over the last `years`), keep the top k (and, with min_edge, only those ahead by that many
+    points), then hold equal weight in what they bought in the last `days`. everyone: no ranking."""
+    if not sig or not sig.congress:
+        return {"SPY": 1.0}
+    if everyone:
+        leaders = None
+    else:
+        rec = member_records(data, sig, d, horizon, years, min_trades)
+        ranked = sorted(((v, m) for m, v in rec.items() if min_edge is None or v >= min_edge), reverse=True)
+        leaders = {m for _, m in ranked[:k]}
+        if not leaders:
+            return {"SPY": 1.0}
+    picks = [same_company(r[2]) for r in sorted(sig.congress_rows(d, days, "buy"), key=lambda r: r[0])
+             if r[2] and (leaders is None or r[1] in leaders)]
+    return _equal([t for t in picks if t in data.charts and data.close(t, d)])
+
+
+def run_leaders(data, sig, start, asof, cash, **opts):
+    o = dict(LEADERS_DEFAULT, **opts)
+    return run_targets(data, start, asof, cash, lambda d: leader_weights(data, sig, d, **o), 7)
+
+
 def run_pelosi_signals(data, sig, start, asof, cash, **opts):
     o = dict(PELOSI_DEFAULT, **opts)
     return run_targets(data, start, asof, cash, lambda d: pelosi_weights(data, sig, d, **o), 7)
@@ -1152,8 +1190,10 @@ def upstream_rows(data, uni, sig, start, asof, cash):
         out["pelosi (since 2015)"] = run_pelosi_signals(data, sig, start, asof, cash)
     if sig and sig.f13:  # the finalists of round 7, so the 28-window statistics cover them too
         out["copycat consensus (C4)"] = run_copycat(data, sig, start, asof, cash, mode="consensus", n=10)
-        if sig.fund and "QQQ" in data.charts:
-            out["mix M2"] = run_plan(data, uni, sig, start, asof, cash, sleeves={"C4": 0.5, "S1": 0.5})
+        if "QQQ" in data.charts:
+            out["Nasdaq 100 + C4 (K4)"] = run_plan(data, uni, sig, start, asof, cash, sleeves={"C4": 1.0})
+    if sig and sig.congress:
+        out["congress leaders (L1)"] = run_leaders(data, sig, start, asof, cash)
     return out
 
 
@@ -1167,6 +1207,10 @@ UPSTREAM_PLANS = [
     ("M2", "70% Nasdaq 100 + 15% copycat consensus + 15% screener (no Pelosi)", {"sleeves": {"C4": 0.5, "S1": 0.5}}),
     ("M3", "50% Nasdaq 100 + 25% copycat consensus + 25% screener", {"core_weight": 0.5, "sleeves": {"C4": 0.5, "S1": 0.5}}),
     ("M4", "Half copycat consensus, half screener (no index)", {"core_weight": 0.0, "sleeves": {"C4": 0.5, "S1": 0.5}}),
+    # C4 next to the Nasdaq 100, the way the plan is built (round 10)
+    ("K4", "70% Nasdaq 100 + 30% copycat consensus (C4)", {"sleeves": {"C4": 1.0}}),
+    ("K5", "50% Nasdaq 100 + 50% copycat consensus (C4)", {"core_weight": 0.5, "sleeves": {"C4": 1.0}}),
+    ("K6", "70% Nasdaq 100 + 30% C4, rebalanced every 2 weeks", {"sleeves": {"C4": 1.0}, "every": 14}),
 ]
 
 
@@ -1831,6 +1875,9 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
                 add("screener", "%s. %s" % (code, name), over,
                     lambda st, o=over: run_screen(data, ctx["uni"], sig, st, asof, cash, **o))
         if sig and sig.congress:
+            for code, name, over in LEADER_VERSIONS:
+                add("congress leaders", "%s. %s" % (code, name), over,
+                    lambda st, o=over: run_leaders(data, sig, st, asof, cash, **o))
             for code, name, over in PELOSI_VERSIONS:
                 add("pelosi", "%s. %s" % (code, name), over,
                     lambda st, o=over: run_pelosi_signals(data, sig, st, asof, cash, **o))
@@ -2320,7 +2367,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
          "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)",
-         "copycat consensus (C4)", "mix M2",
+         "copycat consensus (C4)", "Nasdaq 100 + C4 (K4)", "congress leaders (L1)",
          "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
@@ -2337,7 +2384,8 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "screener": "Screener (upstream): its example rules on filed results, top 10",
           "pelosi (since 2015)": "Pelosi (upstream): her buys of the last year, mirrored, since 2015",
           "copycat consensus (C4)": "Copycat consensus (upstream): stocks in the top 10 of 3+ famous investors",
-          "mix M2": "70% Nasdaq 100 + 15% copycat consensus + 15% screener"}
+          "Nasdaq 100 + C4 (K4)": "70% Nasdaq 100 + 30% copycat consensus",
+          "congress leaders (L1)": "Congress leaders: buys of the 5 members with the best past records"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 

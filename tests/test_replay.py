@@ -1131,6 +1131,21 @@ class UpstreamAgents(unittest.TestCase):
         with self.assertRaises(replay.ReplayError):
             replay.upstream_version("Z9")
 
+    def test_congress_leaders_are_ranked_on_known_outcomes_only(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        lw = lambda day, **o: replay.leader_weights(data, sig, day, **dict(replay.LEADERS_DEFAULT, **o))  # noqa: E731
+        self.assertEqual(lw(days[320], k=1, min_trades=1), {"SPY": 1.0})          # no outcome known yet
+        self.assertEqual(set(lw(days[400], k=1, min_trades=1)), {"AAA", "BBB"})    # her buys did better
+        self.assertEqual(set(lw(days[400], everyone=True)), {"AAA", "BBB", "MMM"})
+        self.assertEqual(lw(days[400], k=1, min_trades=1, min_edge=1000.0), {"SPY": 1.0})
+        r = replay.run_leaders(data, sig, days[300], days[420], 100, k=1, min_trades=1)
+        self.assertTrue(all(f["day"] > days[363] for f in r["fills"] if f["ticker"] in ("AAA", "BBB")))
+
     def test_live_record_can_copy_pelosi(self):
         d = tempfile.mkdtemp()
         try:
@@ -1196,6 +1211,7 @@ class NoLookaheadUpstream(unittest.TestCase):
             (copy_day, lambda dt, s, a, st: replay.run_copycat(dt, s, st, a, 100, mode="new")),
             (copy_day, lambda dt, s, a, st: replay.run_pelosi_signals(dt, s, st, a, 100, mode="hold")),
             (copy_day, lambda dt, s, a, st: replay.leagues(dt, s, st, a, 100, min_buys=1)),
+            (copy_day, lambda dt, s, a, st: replay.run_leaders(dt, s, st, a, 100, k=1, min_trades=1)),
             (screen_day, lambda dt, s, a, st: replay.run_screen(dt, uni, s, st, a, 100, pe=1e9)),
             (screen_day, lambda dt, s, a, st: replay.run_plan(dt, uni, s, st, a, 100,
                                                               sleeves={"C4": 0.5, "S1": 0.25, "P2": 0.25})),
