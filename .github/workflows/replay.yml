@@ -14,7 +14,7 @@ on:
         required: false
         default: "replay"
         type: choice
-        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history"]
+        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history", "sessions"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -323,6 +323,40 @@ jobs:
           cp "$RUNNER_TEMP"/out/long.md "$RUNNER_TEMP"/out/long.json "$RUNNER_TEMP"/out/long-stats.md "research/$LABEL/"
           git add "research/$LABEL"
           git commit -qm "Long history: $LABEL" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- sessions
+  # Overseas sessions -> New York / Toronto day trade, on paper: about 2 years of hourly bars.
+
+  sessions:
+    if: ${{ inputs.mode == 'sessions' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Backtest every version
+        env:
+          LABEL: ${{ inputs.label || 'sessions' }}
+        run: |
+          [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
+          python .claude/skills/trader-replay/sessions.py backtest --out out > /dev/null
+          cat out/sessions.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        env:
+          LABEL: ${{ inputs.label || 'sessions' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out" && cp out/* "$RUNNER_TEMP/out/"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p "research/$LABEL"
+          cp "$RUNNER_TEMP"/out/sessions.md "$RUNNER_TEMP"/out/sessions.json "research/$LABEL/"
+          git add "research/$LABEL"
+          git commit -qm "Sessions research: $LABEL" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
 
   # ---------------------------------------------------------------- build-signals
