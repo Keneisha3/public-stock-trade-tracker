@@ -1070,8 +1070,8 @@ def pelosi_weights(data, sig, d, mode="mirror", days=365, min_low=0, member="pel
     else's name, for the league table that asks whether she is special."""
     if not sig or not sig.congress:
         return {"SPY": 1.0}
-    rows = sorted(r for r in sig.congress_rows(d, days, "buy") + sig.congress_rows(d, days, "sell")
-                  if member in (r[1] or "").lower() and (r[4] or 0) >= min_low)
+    rows = sorted((r for r in sig.congress_rows(d, days, "buy") + sig.congress_rows(d, days, "sell")
+                   if member in (r[1] or "").lower() and (r[4] or 0) >= min_low), key=lambda r: r[0])
     held = []
     for filed, member, t, side, low, high, traded, owner in rows:
         t = same_company(t)

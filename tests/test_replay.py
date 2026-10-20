@@ -1081,7 +1081,8 @@ class UpstreamAgents(unittest.TestCase):
         congress = {"rows": [[days[300], "Hon. Nancy Pelosi", "AAA", "buy", 1000001, 5000000, days[290], "SP"],
                              [days[310], "Hon. Nancy Pelosi", "BBB", "buy", 15001, 50000, days[300], "SP"],
                              [days[350], "Hon. Nancy Pelosi", "AAA", "sell", 1000001, 5000000, days[340], "SP"],
-                             [days[310], "Someone Else", "MMM", "buy", 15001, 50000, days[300], "SP"]]}
+                             [days[310], "Someone Else", "MMM", "buy", 15001, 50000, days[300], "SP"],
+                             [days[310], "Someone Else", "MMM", "buy", None, None, days[300], "SP"]]}  # no amount
         sig = replay.sigs.Signals(congress=congress, f13=f13, fundamentals=fund)
         return base, off, data, uni, sig
 
