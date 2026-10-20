@@ -1,9 +1,17 @@
 {
- "start": "2026-10-19",
+ "start": "2026-10-20",
  "cash": 100.0,
- "note": "Frozen when the live record started. Change the settings only by starting a new record with a new start date.",
+ "note": "Frozen when the live record started. Change the settings only by starting a new record with a new start date (the earlier record is kept under 'earlier').",
  "strategies": {
-  "70% Nasdaq 100 + 30% dual momentum (chosen)": {
+  "70% Nasdaq 100 + 30% dual momentum, every 2 weeks (chosen)": {
+   "kind": "dual",
+   "opts": {
+    "core": "QQQ",
+    "core_weight": 0.7,
+    "every": 14
+   }
+  },
+  "70% Nasdaq 100 + 30% dual momentum, monthly (previous plan)": {
    "kind": "dual",
    "opts": {
     "core": "QQQ",
@@ -27,5 +35,5 @@
    }
   }
  },
- "chosen_by": "walk-forward pit-v6-safety: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods (+14.9 pts, worst drop -22.4%); held-out last 12 months: +9.2 pts"
+ "chosen_by": "walk-forward pit-v11-news, decision rule v4 written before the results: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods, kept only if it beats the Nasdaq 100's gap (+14.0 pts). Rebalancing every 2 weeks: +16.9 pts, worst drop -22.4%. Held-out last 12 months: -0.6 pts (the monthly plan: +9.2 pts), so both stay on the record."
 }

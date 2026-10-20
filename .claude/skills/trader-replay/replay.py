@@ -1443,9 +1443,9 @@ DUAL_VARIANTS = [
     ("Dual momentum: best 5 funds", {"k": 5}),
     ("Dual momentum: 6-month lookback", {"months": 6}),
 ]
-CORE_DEFAULT = {"core": "QQQ", "core_weight": 0.7}  # chosen in the walk-forward (pit-v6-safety)
+CORE_DEFAULT = {"core": "QQQ", "core_weight": 0.7, "every": 14}  # chosen in the walk-forward (pit-v11-news, rule v4)
 CORE_VARIANTS = [
-    ("Core: 70% Nasdaq 100, 30% dual momentum (default)", {"core": "QQQ", "core_weight": 0.7}),
+    ("Core: 70% Nasdaq 100, 30% dual momentum, monthly (previous plan)", {"core": "QQQ", "core_weight": 0.7}),
     ("Core: half Nasdaq 100, half dual momentum, rebalanced monthly", {"core": "QQQ", "core_weight": 0.5}),
     ("Core: half Nasdaq 100, half dual momentum (volatility target 15%)", {"core": "QQQ", "core_weight": 0.5,
                                                                          "vol_target": 15}),
@@ -1468,7 +1468,7 @@ PEAD_VARIANTS = [
 ]
 PLAN_VARIANTS = [  # the five adjustments to 70% Nasdaq 100 + 30% dual momentum
     ("Plan A: dual momentum on 12-1 months", {"core": "QQQ", "core_weight": 0.7, "skip": 1}),
-    ("Plan B: rebalanced every 2 weeks", {"core": "QQQ", "core_weight": 0.7, "every": 14}),
+    ("Plan B: rebalanced every 2 weeks (default)", {"core": "QQQ", "core_weight": 0.7, "every": 14}),
     ("Plan C: satellite half dual momentum, half earnings drift", {"plan": True, "sleeves": {"dual": 0.5, "drift": 0.5}}),
     ("Plan D: satellite = top 20 momentum stocks", {"plan": True, "sleeves": {"momentum": 1.0}}),
     ("Plan E: switch funds only for a 5-point lead", {"core": "QQQ", "core_weight": 0.7, "margin": 5.0}),
@@ -2014,7 +2014,7 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "momentum": "Momentum agent (top 20 of the S&P 500)", "dual momentum": "Dual momentum (index funds)",
           "insider buys": "Insider buying (2+ insiders, S&P 500)", "congress buys": "Congress buying (2+ members, S&P 500)",
           "blend": "Blend: dual momentum + momentum + Congress (thirds)",
-          "core + dual": "Core + satellite: 70% Nasdaq 100, 30% dual momentum",
+          "core + dual": "Core + satellite: 70% Nasdaq 100, 30% dual momentum, rebalanced every 2 weeks",
           "model": "Learned score (top 20, refit every January)",
           "earnings drift": "Earnings drift (8-K news: jumps on earnings, held ~60 days)"}
 STRATS = [k for k in ORDER if k not in BENCH]
@@ -2196,6 +2196,9 @@ def forward(plan, record=None, offline=None, today=None, log=print):
     last = data.trading_day_on_or_before(today or data.days[-1])
     first = data.trading_day_on_or_before(start)
     rec = record or {"start": start, "plan": plan, "days": {}}
+    if rec.get("start") != start:  # a new plan starts a new record; the old one is kept exactly as it was
+        old = dict(rec)
+        rec = {"start": start, "plan": plan, "days": {}, "earlier": old.pop("earlier", []) + [old]}
     out = {}
     for name, st in plan["strategies"].items():
         if st["kind"] == "hold":

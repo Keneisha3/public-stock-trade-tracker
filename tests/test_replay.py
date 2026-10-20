@@ -626,6 +626,8 @@ class ForwardRecord(unittest.TestCase):
             frozen = json.loads(json.dumps(rec["days"]))
             plan["strategies"]["Dual"]["opts"] = {"k": 3}  # even if the code or settings change later...
             rec = replay.forward(plan, rec, offline=off, today=days[510], log=lambda m: None)
+            plan2 = dict(plan, start=days[505])  # a new plan starts a new record and archives the old one untouched
+            rec2 = replay.forward(plan2, json.loads(json.dumps(rec)), offline=off, today=days[510], log=lambda m: None)
         finally:
             shutil.rmtree(d)
         for day, vals in frozen.items():
@@ -637,6 +639,9 @@ class ForwardRecord(unittest.TestCase):
         with open(replay.FORWARD_PLAN) as fh:
             real = json.load(fh)
         self.assertIn("S&P 500 (SPY)", real["strategies"])
+        self.assertEqual(sum("(chosen)" in k for k in real["strategies"]), 1)
+        self.assertEqual(sorted(rec2["days"])[0], days[505])
+        self.assertEqual(rec2["earlier"][0]["days"], rec["days"])
 
 
 class CongressRecords(unittest.TestCase):

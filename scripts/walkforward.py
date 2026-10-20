@@ -25,7 +25,7 @@ BENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX
 NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "Dividend (Wealthsimple)",
          "stock bot": "Stock bot", "VIX agent": "VIX agent", "momentum": "Momentum (top 20 S&P 500)",
          "dual momentum": "Dual momentum (funds)", "insider buys": "Insider buying", "congress buys": "Congress buying",
-         "blend": "Blend (dual + momentum + Congress)", "core + dual": "70% Nasdaq 100, 30% dual momentum",
+         "blend": "Blend (dual + momentum + Congress)", "core + dual": "70% Nasdaq 100, 30% dual momentum (2 weeks)",
          "model": "Learned score (top 20)", "earnings drift": "Earnings drift (8-K news)"}
 TEST_WINDOWS = ["12 months", "6 months", "1 month"]
 HOLDOUT_DAYS = 365
