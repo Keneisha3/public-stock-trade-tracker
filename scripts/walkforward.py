@@ -20,7 +20,8 @@ import json
 import sys
 
 KEYS = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
-        "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)", "VIX agent"]
+        "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)",
+        "copycat consensus (C4)", "mix M2", "VIX agent"]
 BENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)"]
 NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "Dividend (Wealthsimple)",
          "stock bot": "Stock bot", "VIX agent": "VIX agent", "momentum": "Momentum (top 20 S&P 500)",
@@ -28,7 +29,8 @@ NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "D
          "blend": "Blend (dual + momentum + Congress)", "core + dual": "70% Nasdaq 100, 30% dual momentum (2 weeks)",
          "model": "Learned score (top 20)", "earnings drift": "Earnings drift (8-K news)",
          "copycat": "Copycat: investors' top 3 (13F)", "screener": "Screener: example rules",
-         "pelosi (since 2015)": "Pelosi: her buys, mirrored"}
+         "pelosi (since 2015)": "Pelosi: her buys, mirrored",
+         "copycat consensus (C4)": "Copycat consensus (C4)", "mix M2": "Mix M2: 70% Nasdaq 100 + C4 + screener"}
 TEST_WINDOWS = ["12 months", "6 months", "1 month"]
 HOLDOUT_DAYS = 365
 
@@ -97,6 +99,7 @@ def table(reports):
             cells.append("%s of %s" % (t["beat_spy"], t["windows"]) if t else "n/a")
         if any(c != "n/a" for c in cells):
             L.append("| %s | %s |" % (NAMES[k], " | ".join(cells)))
+    L += league(reports, win)
     L += scenarios(train, last, win)
     L += ["", "## Coverage and self-checks", ""]
     for r in reports:
@@ -106,6 +109,34 @@ def table(reports):
             r["asof"], cov.get("priced", "?"), cov.get("members", "?"), "all passed" if not bad else "FAILED: " + ", ".join(bad)))
     L += ["", "_Point in time; survivorship bias remains for companies Yahoo has no prices for. Not financial advice._"]
     return "\n".join(L) + "\n"
+
+
+def league(reports, win):
+    """Is Pelosi special, or just the luckiest of hundreds of members? Every member with 10+ buys,
+    and every famous investor's top 3, copied the same way, against the S&P 500."""
+    rows = []
+    for r in reports:
+        lg = (r["results"].get(win) or {}).get("leagues")
+        if not lg:
+            continue
+        spy, cong, inv = lg["spy"], lg["congress"], lg["investors"]
+        gaps = sorted(x["return_pct"] - spy for x in cong)
+        rank = next((i + 1 for i, x in enumerate(cong) if "pelosi" in x["name"].lower()), None)
+        igaps = sorted(x["return_pct"] - spy for x in inv)
+        med = lambda xs: xs[len(xs) // 2] if xs else None  # noqa: E731
+        rows.append("| %s | %d of %d | %s | %s | %d of %d | %s |" % (
+            r["asof"], sum(g > 0 for g in gaps), len(gaps), "n/a" if med(gaps) is None else "%+.1f pts" % med(gaps),
+            "%d of %d" % (rank, len(cong)) if rank else "not active", sum(g > 0 for g in igaps), len(igaps),
+            "n/a" if med(igaps) is None else "%+.1f pts" % med(igaps)))
+    if not rows:
+        return []
+    return ["", "## Hindsight check: everyone copied the same way (%s windows)" % win, "",
+            "Pelosi and the 23 investors are famous today, partly because they did well: choosing them is "
+            "hindsight. So every House member with 10+ disclosed buys is copied like Pelosi (each buy kept a "
+            "year) and every investor's top 3 like the copycat. If most of them beat the S&P 500, the "
+            "method works; if only the famous one does, it was hindsight.", "",
+            "| period ending | members who beat the S&P 500 | median member | Pelosi's rank | investors who "
+            "beat it | median investor |", "| --- | ---: | ---: | ---: | ---: | ---: |"] + rows
 
 
 def scenarios(train, last, win):

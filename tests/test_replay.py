@@ -1081,7 +1081,8 @@ class UpstreamAgents(unittest.TestCase):
         congress = {"rows": [[days[300], "Hon. Nancy Pelosi", "AAA", "buy", 1000001, 5000000, days[290], "SP"],
                              [days[310], "Hon. Nancy Pelosi", "BBB", "buy", 15001, 50000, days[300], "SP"],
                              [days[350], "Hon. Nancy Pelosi", "AAA", "sell", 1000001, 5000000, days[340], "SP"],
-                             [days[310], "Someone Else", "MMM", "buy", 15001, 50000, days[300], "SP"]]}
+                             [days[310], "Someone Else", "MMM", "buy", 15001, 50000, days[300], "SP"],
+                             [days[310], "Someone Else", "MMM", "buy", None, None, days[300], "SP"]]}  # no amount
         sig = replay.sigs.Signals(congress=congress, f13=f13, fundamentals=fund)
         return base, off, data, uni, sig
 
@@ -1149,3 +1150,54 @@ class UpstreamAgents(unittest.TestCase):
                                         {"rows": [["2026-01-02", "x"], ["2026-01-03", "z"]], "source": "s"})
         self.assertEqual(merged["rows"], [["2026-01-01", "y"], ["2026-01-02", "x"], ["2026-01-03", "z"]])
         self.assertEqual(merged["source"], "s")
+
+
+class NoLookaheadUpstream(unittest.TestCase):
+    def test_upstream_agents_never_see_the_future(self):
+        """Same past, different future (prices cut off at the as-of date vs the real later prices AND
+        filings made after it): copycat, screener, Pelosi, the mixes and the league tables give
+        identical results."""
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = UpstreamAgents.world(UpstreamAgents(), d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+
+        def cut(asof):
+            out = {}
+            for s, ch in data.charts.items():
+                bars = [b for b in ch["bars"] if b["d"] <= asof]
+                if bars:
+                    out[s] = dict(ch, bars=bars, dividends=[x for x in ch["dividends"] if x[0] <= asof])
+            return replay.Data(out, {})
+
+        def with_future(asof):
+            later = [x for x in days if x > asof][:5]
+            return replay.sigs.Signals(
+                congress={"rows": sig.congress + [[later[0], "Hon. Nancy Pelosi", "MMM", "buy", 1000001, 5000000, asof,
+                                                   "SP"]]},
+                f13={"managers": sig.managers, "rows": [[eff, cik, period, eff, 0, [[t, v, sh] for t, (v, sh) in h.items()]]
+                                                        for cik, rows in sig.f13.items() for eff, period, h in rows]
+                     + [[later[1], "A", asof, later[1], 0, [["INTC", 10 ** 9, 1]]],
+                        [later[1], "B", asof, later[1], 0, [["INTC", 10 ** 9, 1]]]]},
+                fundamentals={"rows": [[f, t, e, k, v] for t, by in sig.fund.items() for k, rows in by.items()
+                                       for f, e, v in rows] + [[later[2], "MMM", "2026-06-30", "revenue", 10 ** 6]]})
+        copy_day = days[370]                                     # 13F reports are live here
+        screen_day = data.trading_day_on_or_before("2026-06-15")  # company results are live here
+        self.assertNotEqual(replay.copycat_weights(data, sig, copy_day, mode="consensus", n=10, min_count=2),
+                            {"SPY": 1.0})
+        self.assertNotEqual(replay.screen_weights(data, uni, sig, screen_day, pe=1e9), {"SPY": 1.0})
+        runs = [
+            (copy_day, lambda dt, s, a, st: replay.run_copycat(dt, s, st, a, 100, mode="consensus", n=10, min_count=2)),
+            (copy_day, lambda dt, s, a, st: replay.run_copycat(dt, s, st, a, 100, mode="new")),
+            (copy_day, lambda dt, s, a, st: replay.run_pelosi_signals(dt, s, st, a, 100, mode="hold")),
+            (copy_day, lambda dt, s, a, st: replay.leagues(dt, s, st, a, 100, min_buys=1)),
+            (screen_day, lambda dt, s, a, st: replay.run_screen(dt, uni, s, st, a, 100, pe=1e9)),
+            (screen_day, lambda dt, s, a, st: replay.run_plan(dt, uni, s, st, a, 100,
+                                                              sleeves={"C4": 0.5, "S1": 0.25, "P2": 0.25})),
+        ]
+        for i, (asof, run) in enumerate(runs):
+            start = days[days.index(asof) - 120]
+            self.assertEqual(run(cut(asof), sig, asof, start), run(data, with_future(asof), asof, start),
+                             "run %d saw the future" % i)

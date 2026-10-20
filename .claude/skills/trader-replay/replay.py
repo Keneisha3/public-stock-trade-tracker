@@ -908,11 +908,12 @@ def run_plan(data, uni, sig, start, asof, cash, **opts):
             w[o["core"]] = o["core_weight"]
         for sleeve, share in o["sleeves"].items():
             part = sat * share
-            if sleeve in ("dual", "copycat", "screen", "pelosi"):
+            if sleeve in ("dual", "copycat", "screen", "pelosi") or sleeve[:1] in ("C", "S", "P"):
                 got = (dual_weights(data, d) if sleeve == "dual" else
                        copycat_weights(data, sig, d, **COPY_DEFAULT) if sleeve == "copycat" else
                        screen_weights(data, uni, sig, d, **SCREEN_DEFAULT) if sleeve == "screen" else
-                       pelosi_weights(data, sig, d, **PELOSI_DEFAULT))
+                       pelosi_weights(data, sig, d, **PELOSI_DEFAULT) if sleeve == "pelosi" else
+                       version_weights(sleeve, data, uni, sig, d))
                 for f, x in got.items():
                     w[f] = w.get(f, 0.0) + part * x
                 continue
@@ -931,6 +932,15 @@ def run_plan(data, uni, sig, start, asof, cash, **opts):
 
 
 # ---------------------------------------------------------------- the upstream agents, point in time
+
+RENAMED = {"FB": "META", "GOOG": "GOOGL", "BRK-A": "BRK-B", "ANTM": "ELV", "WLTW": "WTW", "FISV": "FI",
+           "CBS": "PARA", "VIAC": "PARA", "RTN": "RTX", "UTX": "RTX", "PCLN": "BKNG", "SQ": "XYZ"}  # one name per company
+
+
+def same_company(t):
+    """The ticker Yahoo prices a company under today (old tickers and second share classes)."""
+    return RENAMED.get(t, t)
+
 
 def _equal(picks):
     picks = list(dict.fromkeys(picks))
@@ -958,13 +968,13 @@ def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=
         return {"SPY": 1.0}
     books = {}
     for cik in (who or sorted(sig.f13)):
-        h = sig.holdings_13f(cik, d)
+        h = _merge_names(sig.holdings_13f(cik, d))
         if not h:
             continue
         ok = {t: v for t, v in h.items() if t in data.charts and data.close(t, d)
               and (not trend or (data.quick(t, d, 21) or {}).get("above200"))}
         if mode == "new":
-            before = sig.holdings_13f(cik, d, back=1) or {}
+            before = _merge_names(sig.holdings_13f(cik, d, back=1)) or {}
             ok = {t: v for t, v in ok.items() if t not in before or v[1] >= 1.5 * max(before[t][1], 1)}
         if ok:
             books[cik] = sorted(ok.items(), key=lambda kv: -kv[1][0])
@@ -982,6 +992,17 @@ def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=
             share = (v[0] if mode == "book" else 1.0) / tot / len(books)
             w[t] = w.get(t, 0.0) + share
     return w or {"SPY": 1.0}
+
+
+def _merge_names(h):
+    """13F holdings with share classes and old tickers folded into one company."""
+    if h is None:
+        return None
+    out = {}
+    for t, (v, sh) in h.items():
+        a, b = out.get(same_company(t), (0, 0))
+        out[same_company(t)] = (a + v, b + sh)
+    return out
 
 
 def run_copycat(data, sig, start, asof, cash, **opts):
@@ -1043,15 +1064,17 @@ PELOSI_VERSIONS = [
 ]
 
 
-def pelosi_weights(data, sig, d, mode="mirror", days=365, min_low=0):
+def pelosi_weights(data, sig, d, mode="mirror", days=365, min_low=0, member="pelosi"):
     """Nancy Pelosi's disclosed trades since 2015 (House PTRs, from the day each was filed): equal
-    weight in what she bought in the last `days`. mirror: a later sale drops it."""
+    weight in what she bought in the last `days`. mirror: a later sale drops it. member: anyone
+    else's name, for the league table that asks whether she is special."""
     if not sig or not sig.congress:
         return {"SPY": 1.0}
-    rows = sorted(r for r in sig.congress_rows(d, days, "buy") + sig.congress_rows(d, days, "sell")
-                  if "pelosi" in (r[1] or "").lower() and (r[4] or 0) >= min_low)
+    rows = sorted((r for r in sig.congress_rows(d, days, "buy") + sig.congress_rows(d, days, "sell")
+                   if member in (r[1] or "").lower() and (r[4] or 0) >= min_low), key=lambda r: r[0])
     held = []
     for filed, member, t, side, low, high, traded, owner in rows:
+        t = same_company(t)
         if side == "buy" and t not in held:
             held.append(t)
         elif side == "sell" and mode == "mirror" and t in held:
@@ -1073,15 +1096,49 @@ def upstream_version(code):
     raise ReplayError("no version %s (copycat C1-C6, screener S1-S4, Pelosi P1-P3)" % code)
 
 
+def version_weights(code, data, uni, sig, day):
+    """{ticker: weight} one version (C1-C6, S1-S4, P1-P3) holds after the close of `day`."""
+    fam, name, over = upstream_version(code)
+    return (copycat_weights(data, sig, day, **dict(COPY_DEFAULT, **over)) if fam == "copycat" else
+            screen_weights(data, uni, sig, day, **dict(SCREEN_DEFAULT, **over)) if fam == "screener" else
+            pelosi_weights(data, sig, day, **dict(PELOSI_DEFAULT, **over)))
+
+
 def upstream_picks(code, data, uni, sig, day):
     """Today's weights for one version, as the upstream budget skill reads them (trader/targets.json)."""
     fam, name, over = upstream_version(code)
-    w = (copycat_weights(data, sig, day, **dict(COPY_DEFAULT, **over)) if fam == "copycat" else
-         screen_weights(data, uni, sig, day, **dict(SCREEN_DEFAULT, **over)) if fam == "screener" else
-         pelosi_weights(data, sig, day, **dict(PELOSI_DEFAULT, **over)))
+    w = version_weights(code, data, uni, sig, day)
     return {"source": "%s %s, from filings public by %s (trader-replay --picks)" % (code.upper(), name, day),
             "as_of": day, "weights": [{"ticker": t, "weight": round(100.0 * x, 2)}
                                       for t, x in sorted(w.items(), key=lambda kv: -kv[1])]}
+
+
+def leagues(data, sig, start, asof, cash, min_buys=10):
+    """Hindsight check. Picking Pelosi (or 23 famous investors) because they are famous today is
+    choosing with hindsight. So copy EVERY House member with at least `min_buys` disclosed buys
+    in the window the same way (every buy kept a year), and every investor's top 3, and see where
+    the famous ones rank and how many of all of them beat the S&P 500."""
+    spy = run_hold(data, {"SPY": 1.0}, start, asof, cash)["return_pct"]
+    out = {"spy": spy, "congress": [], "investors": []}
+    if sig and sig.congress:
+        lo = (_date(start) - datetime.timedelta(days=365)).isoformat()
+        buys = {}
+        for r in sig.congress:
+            if lo < r[0] <= asof and r[3] == "buy" and r[1]:
+                buys[r[1]] = buys.get(r[1], 0) + 1
+        for name, n in sorted(buys.items()):
+            if n >= min_buys:
+                key = name.lower()
+                r = run_targets(data, start, asof, cash,
+                                lambda d, k=key: pelosi_weights(data, sig, d, mode="hold", member=k), 7)
+                out["congress"].append({"name": name, "buys": n, "return_pct": r["return_pct"]})
+    if sig and sig.f13:
+        for cik in sorted(sig.f13):
+            r = run_copycat(data, sig, start, asof, cash, who=[cik])
+            out["investors"].append({"name": sig.managers.get(cik, cik), "return_pct": r["return_pct"]})
+    for k in ("congress", "investors"):
+        out[k].sort(key=lambda x: -x["return_pct"])
+    return out
 
 
 def upstream_rows(data, uni, sig, start, asof, cash):
@@ -1093,6 +1150,10 @@ def upstream_rows(data, uni, sig, start, asof, cash):
         out["screener"] = run_screen(data, uni, sig, start, asof, cash)
     if sig and any("pelosi" in (r[1] or "").lower() for r in sig.congress):
         out["pelosi (since 2015)"] = run_pelosi_signals(data, sig, start, asof, cash)
+    if sig and sig.f13:  # the finalists of round 7, so the 28-window statistics cover them too
+        out["copycat consensus (C4)"] = run_copycat(data, sig, start, asof, cash, mode="consensus", n=10)
+        if sig.fund and "QQQ" in data.charts:
+            out["mix M2"] = run_plan(data, uni, sig, start, asof, cash, sleeves={"C4": 0.5, "S1": 0.5})
     return out
 
 
@@ -1100,6 +1161,12 @@ UPSTREAM_PLANS = [
     ("K1", "70% Nasdaq 100 + 30% copycat top-3 ideas", {"sleeves": {"copycat": 1.0}}),
     ("K2", "70% Nasdaq 100 + 30% screener picks", {"sleeves": {"screen": 1.0}}),
     ("K3", "70% Nasdaq 100 + 30% Pelosi's buys", {"sleeves": {"pelosi": 1.0}}),
+    # the finalists mixed (round 8): different ways of choosing, so their bad years should not line up
+    ("M1", "70% Nasdaq 100 + 10% each: copycat consensus, screener, Pelosi",
+     {"sleeves": {"C4": 1 / 3.0, "S1": 1 / 3.0, "P2": 1 / 3.0}}),
+    ("M2", "70% Nasdaq 100 + 15% copycat consensus + 15% screener (no Pelosi)", {"sleeves": {"C4": 0.5, "S1": 0.5}}),
+    ("M3", "50% Nasdaq 100 + 25% copycat consensus + 25% screener", {"core_weight": 0.5, "sleeves": {"C4": 0.5, "S1": 0.5}}),
+    ("M4", "Half copycat consensus, half screener (no index)", {"core_weight": 0.0, "sleeves": {"C4": 0.5, "S1": 0.5}}),
 ]
 
 
@@ -1768,9 +1835,10 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
                 add("pelosi", "%s. %s" % (code, name), over,
                     lambda st, o=over: run_pelosi_signals(data, sig, st, asof, cash, **o))
         if sig and "QQQ" in data.charts:
+            have = {"copycat": sig.f13, "C": sig.f13, "screen": sig.fund, "S": sig.fund, "pelosi": sig.congress,
+                    "P": sig.congress}
             for code, name, over in UPSTREAM_PLANS:
-                need = {"copycat": sig.f13, "screen": sig.fund, "pelosi": sig.congress}[next(iter(over["sleeves"]))]
-                if need:
+                if all(have.get(s, have.get(s[:1])) for s in over["sleeves"]):
                     add("core + upstream", "%s. %s" % (code, name), over,
                         lambda st, o=over: run_plan(data, ctx["uni"], sig, st, asof, cash, **o))
     sig = ctx.get("signals")
@@ -2110,8 +2178,8 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         since = (_date(end) - datetime.timedelta(days=365 * HISTORY_YEARS.get(history, 5))).isoformat()
         syms |= set(uni.ever(since, end)) | set(univ.CANADA) | {x for v in univ.ETFS.values() for x in v}
     if sig:  # what the copycat's investors and Nancy Pelosi held, so the upstream agents can be replayed
-        syms |= {t for rows in sig.f13.values() for _, _, h in rows for t in h}
-        syms |= {r[2] for r in sig.congress if "pelosi" in (r[1] or "").lower() and r[2]}
+        syms |= {same_company(t) for rows in sig.f13.values() for _, _, h in rows for t in h}
+        syms |= {same_company(r[2]) for r in sig.congress if r[2]}  # every member: the league table needs them
     syms = sorted(syms)
     charts = {}
     if not offline and len(syms) > 100:
@@ -2204,6 +2272,9 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         row["insights"] = insights(row, row["factors"], cash)
         results[label] = row
     longest = results[windows[0][0]]
+    if uni is not None and sig:
+        log("league tables (every Congress member, every investor)...")
+        longest["leagues"] = leagues(data, sig, longest["start"], asof, cash)
     curves, short = mc_curves(longest)
     for k, c in curves.items():
         longest[k]["risk"] = risk_stats(c)
@@ -2249,6 +2320,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
 
 ORDER = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
          "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)",
+         "copycat consensus (C4)", "mix M2",
          "crypto team", "VIX agent",
          "Pelosi copycat",
          "S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)", "Bitcoin (hold)", "cash"]
@@ -2263,7 +2335,9 @@ LABELS = {"growth": "Growth reviewer (Questrade)", "medium": "Medium-term review
           "earnings drift": "Earnings drift (8-K news: jumps on earnings, held ~60 days)",
           "copycat": "Copycat (upstream): each famous investor's top 3 from their 13Fs",
           "screener": "Screener (upstream): its example rules on filed results, top 10",
-          "pelosi (since 2015)": "Pelosi (upstream): her buys of the last year, mirrored, since 2015"}
+          "pelosi (since 2015)": "Pelosi (upstream): her buys of the last year, mirrored, since 2015",
+          "copycat consensus (C4)": "Copycat consensus (upstream): stocks in the top 10 of 3+ famous investors",
+          "mix M2": "70% Nasdaq 100 + 15% copycat consensus + 15% screener"}
 STRATS = [k for k in ORDER if k not in BENCH]
 
 
@@ -2600,7 +2674,8 @@ def forward(plan, record=None, offline=None, today=None, log=print, signals=None
         if st["kind"] == "hold":
             syms |= set(st["weights"])
         elif st["kind"] == "pelosi":
-            syms |= {r[2] for r in (signals.congress if signals else []) if "pelosi" in (r[1] or "").lower() and r[2]}
+            syms |= {same_company(r[2]) for r in (signals.congress if signals else [])
+                     if "pelosi" in (r[1] or "").lower() and r[2]}
         elif st["kind"] == "dual":
             pool = DUAL_POOLS[dict(DUAL_DEFAULT, **st.get("opts", {}))["pool"]]
             syms |= {x for g in pool for x in univ.ETFS[g] if not x.endswith(".TO")}
@@ -2718,8 +2793,9 @@ def main(argv=None):
             uni = univ.load()
             today = a.asof or datetime.date.today().isoformat()
             syms = {"SPY"} | (set(uni.members_on(today)) if fam == "screener" else
-                              {t for rows in sig.f13.values() for _, _, h in rows[-2:] for t in h} if fam == "copycat"
-                              else {r[2] for r in sig.congress if "pelosi" in (r[1] or "").lower() and r[2]})
+                              {same_company(t) for rows in sig.f13.values() for _, _, h in rows[-2:] for t in h}
+                              if fam == "copycat" else
+                              {same_company(r[2]) for r in sig.congress if "pelosi" in (r[1] or "").lower() and r[2]})
             charts = {}
             for s in sorted(syms):
                 try:
