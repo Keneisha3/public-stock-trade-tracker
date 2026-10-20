@@ -2776,6 +2776,9 @@ def forward(plan, record=None, offline=None, today=None, log=print, signals=None
         elif st["kind"] == "copycat":
             syms |= {same_company(t) for rows in (signals.f13.values() if signals else [])
                      for _, _, h in rows[-3:] for t in h}
+        elif st["kind"] == "leaders":  # every stock members bought in the years the records look back on
+            since = (_date(start) - datetime.timedelta(days=365 * (st.get("opts", {}).get("years", 3) + 1))).isoformat()
+            syms |= {same_company(r[2]) for r in (signals.congress if signals else []) if r[2] and r[0] >= since}
         elif st["kind"] == "dual":
             pool = DUAL_POOLS[dict(DUAL_DEFAULT, **st.get("opts", {}))["pool"]]
             syms |= {x for g in pool for x in univ.ETFS[g] if not x.endswith(".TO")}
@@ -2800,6 +2803,8 @@ def forward(plan, record=None, offline=None, today=None, log=print, signals=None
             r = run_pelosi_signals(data, signals, first, last, plan.get("cash", 100.0), **st.get("opts", {}))
         elif st["kind"] == "copycat":
             r = run_copycat(data, signals, first, last, plan.get("cash", 100.0), **st.get("opts", {}))
+        elif st["kind"] == "leaders":
+            r = run_leaders(data, signals, first, last, plan.get("cash", 100.0), **st.get("opts", {}))
         else:
             r = run_dual(data, first, last, plan.get("cash", 100.0), **st.get("opts", {}))
         out[name] = {d: v for d, v in r["curve"]}
@@ -2818,6 +2823,8 @@ def forward(plan, record=None, offline=None, today=None, log=print, signals=None
             return pelosi_weights(data, signals, last, **dict(PELOSI_DEFAULT, **st.get("opts", {})))
         if st["kind"] == "copycat":
             return copycat_weights(data, signals, last, **dict(COPY_DEFAULT, **st.get("opts", {})))
+        if st["kind"] == "leaders":
+            return leader_weights(data, signals, last, **dict(LEADERS_DEFAULT, **st.get("opts", {})))
         return st["weights"]
     rec["targets"] = {name: {k: round(x, 4) for k, x in today_weights(st).items()}
                       for name, st in plan["strategies"].items()}
@@ -2951,7 +2958,7 @@ def main(argv=None):
                 rec = json.load(fh)
         sig = sigs.Signals.load(a.signals) if a.signals else None
         kinds = {st["kind"] for st in plan["strategies"].values()}
-        if ("pelosi" in kinds and not (sig and sig.congress)) or ("copycat" in kinds and not (sig and sig.f13)):
+        if ({"pelosi", "leaders"} & kinds and not (sig and sig.congress)) or ("copycat" in kinds and not (sig and sig.f13)):
             print("replay: the plan copies filings: pass --signals DIR with congress.json.gz and f13.json.gz",
                   file=sys.stderr)
             return 2

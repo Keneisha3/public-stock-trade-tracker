@@ -652,7 +652,7 @@ jobs:
   forward:
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '41 22 * * 1-5') || inputs.mode == 'forward' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45  # the Congress-leaders line needs the stocks members bought in recent years
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -1176,17 +1176,19 @@ class UpstreamAgents(unittest.TestCase):
             days = data.days
             plan = {"start": days[290], "cash": 100.0, "strategies": {
                 "P2": {"kind": "pelosi", "opts": {"mode": "hold"}}, "SPY": {"kind": "hold", "weights": {"SPY": 1.0}},
-                "C4": {"kind": "copycat", "opts": {"mode": "consensus", "n": 10, "min_count": 2}}}}
+                "C4": {"kind": "copycat", "opts": {"mode": "consensus", "n": 10, "min_count": 2}},
+                "L6": {"kind": "leaders", "opts": {"k": 1, "min_trades": 1}}}}
             rec = replay.forward(plan, None, offline=off, today=days[330], log=lambda m: None, signals=sig)
         finally:
             shutil.rmtree(d)
         self.assertEqual(set(rec["targets"]["P2"]), {"AAA", "BBB"})
         self.assertEqual(set(rec["targets"]["C4"]), {"AAA", "MMM"})   # in the top 10 of 2+ investors
         self.assertIsNotNone(rec["days"][days[330]]["C4"])
+        self.assertIsNotNone(rec["days"][days[330]]["L6"])
         self.assertIsNotNone(rec["days"][days[330]]["P2"])
         with open(replay.FORWARD_PLAN) as fh:
             kinds = {st["kind"] for st in json.load(fh)["strategies"].values()}
-        self.assertLessEqual(kinds, {"dual", "hold", "pelosi", "copycat"})
+        self.assertLessEqual(kinds, {"dual", "hold", "pelosi", "copycat", "leaders"})
         merged = replay.sigs.merge_rows({"rows": [["2026-01-02", "x"], ["2026-01-01", "y"]]},
                                         {"rows": [["2026-01-02", "x"], ["2026-01-03", "z"]], "source": "s"})
         self.assertEqual(merged["rows"], [["2026-01-01", "y"], ["2026-01-02", "x"], ["2026-01-03", "z"]])
