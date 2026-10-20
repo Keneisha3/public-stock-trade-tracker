@@ -197,7 +197,7 @@ def run(hourly, daily):
     last = spy[-1]["d"]
     cut = (datetime.date.fromisoformat(last) - datetime.timedelta(days=HOLDOUT_DAYS)).isoformat()
     first = min(b[0] for bars in hourly.values() for b in bars[:1]) if hourly else None
-    first = _utc_date(first) if first else spy[0]["d"]
+    first = max(_utc_date(first), spy[0]["d"]) if first else spy[0]["d"]  # both the read and the fund needed
     return {"first": first, "cut": cut, "last": last, "markets": MARKETS,
             "training": backtest(hourly, daily, start=first, end=cut),
             "test": backtest(hourly, daily, start=cut, end=last)}

@@ -316,6 +316,19 @@ C4, the screener and Pelosi (+12.6 to +14.8 pts) did not beat the plan. A
 test also confirms no agent can see the future: prices cut at the as-of date
 and later prices plus later filings give identical results.
 
+**Overseas sessions, day-traded** (`sessions.py`, `research/sessions-v1/`).
+Tokyo and Hong Kong (closed) and London and Frankfurt (half way) are read
+from hourly bars that had closed by 9:15 a.m. New York time; SPY, QQQ or
+XIU.TO is bought at the open and sold at the close, never short. On the
+year of training data and the held-out year after it, no version beat
+holding the fund: holding SPY made +15.0 % and +14.5 %, day-trading it
+every day lost -15.5 % and -21.7 %, and following Asia or Europe up made it
+worse (-10 to -21 %). What happened overseas is already in the opening
+price, and day trades miss the overnight gains where most of the return
+comes from. Buying SPY for the day only after a broad overseas drop (D4)
+made +8.5 % with small drops, still short of holding, and -2.0 % in the
+held-out year. `sessions.py today` prints the morning read for reference.
+
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the
 Actions tab, with an optional as-of date). The report appears on the run's
