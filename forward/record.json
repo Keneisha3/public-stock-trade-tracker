@@ -45,5 +45,20 @@
   "Nasdaq 100 (QQQ)": [],
   "S&P 500 (SPY)": []
  },
- "updated": "2026-10-19"
+ "updated": "2026-10-19",
+ "targets": {
+  "70% Nasdaq 100 + 30% dual momentum (chosen)": {
+   "USO": 0.3,
+   "QQQ": 0.7
+  },
+  "Dual momentum (single strongest fund)": {
+   "USO": 1.0
+  },
+  "Nasdaq 100 (QQQ)": {
+   "QQQ": 1.0
+  },
+  "S&P 500 (SPY)": {
+   "SPY": 1.0
+  }
+ }
 }
