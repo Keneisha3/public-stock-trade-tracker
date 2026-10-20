@@ -20,13 +20,15 @@ import json
 import sys
 
 KEYS = ["growth", "medium", "dividend", "stock bot", "momentum", "dual momentum", "insider buys", "congress buys",
-        "blend", "core + dual", "model", "earnings drift", "VIX agent"]
+        "blend", "core + dual", "model", "earnings drift", "copycat", "screener", "pelosi (since 2015)", "VIX agent"]
 BENCH = ["S&P 500 (SPY)", "Nasdaq 100 (QQQ)", "S&P 500 equal weight (RSP)", "TSX 60 (XIU.TO)"]
 NAMES = {"growth": "Growth (Questrade)", "medium": "Medium term", "dividend": "Dividend (Wealthsimple)",
          "stock bot": "Stock bot", "VIX agent": "VIX agent", "momentum": "Momentum (top 20 S&P 500)",
          "dual momentum": "Dual momentum (funds)", "insider buys": "Insider buying", "congress buys": "Congress buying",
          "blend": "Blend (dual + momentum + Congress)", "core + dual": "70% Nasdaq 100, 30% dual momentum (2 weeks)",
-         "model": "Learned score (top 20)", "earnings drift": "Earnings drift (8-K news)"}
+         "model": "Learned score (top 20)", "earnings drift": "Earnings drift (8-K news)",
+         "copycat": "Copycat: investors' top 3 (13F)", "screener": "Screener: example rules",
+         "pelosi (since 2015)": "Pelosi: her buys, mirrored"}
 TEST_WINDOWS = ["12 months", "6 months", "1 month"]
 HOLDOUT_DAYS = 365
 

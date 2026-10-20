@@ -1055,3 +1055,97 @@ class LongHistory(unittest.TestCase):
             replay.mk.fetch = real
         self.assertIn("period1=631152000", seen[0])                 # range=max would give monthly bars
         self.assertIn("range=10y", seen[1])
+
+
+class UpstreamAgents(unittest.TestCase):
+    def world(self, d):
+        base, off = write_world(d)
+        for sym, g in (("XLK", 0.6), ("IEF", 0.03), ("SHY", 0.02), ("QQQ", 0.4)):
+            _synth.write(off, sym, _synth.chart(sym, p0=50, growth=g, wiggle=0.005, n=520))
+        data = load_data(off)
+        days = data.days
+        uni = fake_universe(days)
+        f13 = {"managers": {"A": "Ann", "B": "Bob", "C": "Cy"}, "rows": [
+            [days[300], "A", days[260], days[300], 0, [["AAA", 900, 10], ["BBB", 50, 5], ["MMM", 50, 5]]],
+            [days[300], "B", days[260], days[300], 0, [["AAA", 500, 10], ["MMM", 400, 10], ["INTC", 100, 1]]],
+            [days[300], "C", days[260], days[300], 0, [["AAA", 10, 1], ["MMM", 5, 1], ["ZZZ", 99, 1]]],
+            [days[360], "A", days[320], days[360], 0, [["AAA", 900, 10], ["BE", 300, 30], ["MMM", 50, 5]]]]}
+        fund = {"rows": []}
+        ends = ["2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31"]
+        for t, growth, op in (("AAA", 30, 30), ("MMM", 4, 40), ("BBB", 50, 5)):
+            for k, e in enumerate(ends):
+                v = 100.0 if k == 0 else 100.0 + growth  # the last quarter is `growth`% above a year earlier
+                filed = (replay._date(e) + replay.datetime.timedelta(days=40)).isoformat()
+                fund["rows"] += [[filed, t, e, key, x] for key, x in (("revenue", v), ("operating_income", v * op / 100.0),
+                                                                      ("eps_diluted", 0.5))]
+        congress = {"rows": [[days[300], "Hon. Nancy Pelosi", "AAA", "buy", 1000001, 5000000, days[290], "SP"],
+                             [days[310], "Hon. Nancy Pelosi", "BBB", "buy", 15001, 50000, days[300], "SP"],
+                             [days[350], "Hon. Nancy Pelosi", "AAA", "sell", 1000001, 5000000, days[340], "SP"],
+                             [days[310], "Someone Else", "MMM", "buy", 15001, 50000, days[300], "SP"]]}
+        sig = replay.sigs.Signals(congress=congress, f13=f13, fundamentals=fund)
+        return base, off, data, uni, sig
+
+    def test_copycat_versions_see_only_filed_reports(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        cw = lambda day, **o: replay.copycat_weights(data, sig, day, **dict(replay.COPY_DEFAULT, **o))  # noqa: E731
+        self.assertEqual(cw(days[299]), {"SPY": 1.0})                       # nothing filed yet
+        top1 = cw(days[300], n=1)
+        self.assertEqual(top1, {"AAA": 1.0})                                # everyone's biggest is AAA
+        book = cw(days[300], mode="book", who=["A"])
+        self.assertAlmostEqual(book["AAA"], 0.9)                            # Ann's own weights
+        self.assertNotIn("ZZZ", cw(days[300]))                              # no prices: skipped
+        self.assertEqual(set(cw(days[300], mode="consensus", n=2, min_count=3)), {"AAA"})
+        new = cw(days[361], mode="new", who=["A"])
+        self.assertEqual(set(new), {"BE"})                                  # Ann's only new position
+        r = replay.run_copycat(data, sig, days[290], days[330], 100)
+        self.assertTrue(all(f["day"] > days[300] for f in r["fills"] if f["ticker"] == "AAA"))
+
+    def test_screener_and_pelosi(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        day = data.trading_day_on_or_before("2026-06-01")
+        w = replay.screen_weights(data, uni, sig, day, pe=1e9)
+        self.assertEqual(set(w), {"AAA"})            # MMM grows too slowly, BBB's margin is too thin
+        loose = replay.screen_weights(data, uni, sig, day, growth=0.0, margin=0.0, pe=1e9)
+        self.assertEqual(set(loose), {"AAA", "MMM", "BBB"} & set(uni.members_on(day)))
+        self.assertEqual(replay.screen_weights(data, uni, sig, day), {"SPY": 1.0})  # P/E 35 cap: none pass
+        self.assertEqual(replay.pelosi_weights(data, sig, days[320]), {"AAA": 0.5, "BBB": 0.5})
+        self.assertEqual(set(replay.pelosi_weights(data, sig, days[360])), {"BBB"})              # she sold AAA
+        self.assertEqual(set(replay.pelosi_weights(data, sig, days[360], mode="hold")), {"AAA", "BBB"})
+        self.assertEqual(set(replay.pelosi_weights(data, sig, days[320], min_low=1000001)), {"AAA"})
+        plan = replay.run_plan(data, uni, sig, days[300], days[330], 100, sleeves={"pelosi": 1.0})
+        self.assertIn("QQQ", plan["picks"][-1][1])
+        doc = replay.upstream_picks("p2", data, uni, sig, days[360])
+        self.assertEqual(sum(x["weight"] for x in doc["weights"]), 100.0)
+        self.assertIn("P2", doc["source"])
+        with self.assertRaises(replay.ReplayError):
+            replay.upstream_version("Z9")
+
+    def test_live_record_can_copy_pelosi(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+            days = data.days
+            plan = {"start": days[290], "cash": 100.0, "strategies": {
+                "P2": {"kind": "pelosi", "opts": {"mode": "hold"}}, "SPY": {"kind": "hold", "weights": {"SPY": 1.0}}}}
+            rec = replay.forward(plan, None, offline=off, today=days[330], log=lambda m: None, signals=sig)
+        finally:
+            shutil.rmtree(d)
+        self.assertEqual(set(rec["targets"]["P2"]), {"AAA", "BBB"})
+        self.assertIsNotNone(rec["days"][days[330]]["P2"])
+        with open(replay.FORWARD_PLAN) as fh:
+            kinds = {st["kind"] for st in json.load(fh)["strategies"].values()}
+        self.assertLessEqual(kinds, {"dual", "hold", "pelosi"})
+        merged = replay.sigs.merge_rows({"rows": [["2026-01-02", "x"], ["2026-01-01", "y"]]},
+                                        {"rows": [["2026-01-02", "x"], ["2026-01-03", "z"]], "source": "s"})
+        self.assertEqual(merged["rows"], [["2026-01-01", "y"], ["2026-01-02", "x"], ["2026-01-03", "z"]])
+        self.assertEqual(merged["source"], "s")

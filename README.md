@@ -258,6 +258,40 @@ from 2026-10-19, is kept under `earlier`) is the test that matters next.
 (`research/long-history/` and `long-history-2/` used monthly bars by mistake;
 ignore them.)
 
+**The upstream agents, replayed point in time** (`research/pit-v13-upstream/`).
+The copycat, screener and Pelosi skills from Jakeschincariol/trader-skill
+were rebuilt from SEC data as it was filed: every 13F of the copycat's 23
+investors since 2013, each company's results as first filed, and Pelosi's
+trades since 2015. Gap to the S&P 500, averaged over the four training
+periods, then the held-out last 12 months:
+
+| version | training gap | training worst drop | last 12 months |
+| --- | ---: | ---: | ---: |
+| P3 Pelosi, only $1M+ trades | +67.5 pts | -29.1 % | -33.7 pts |
+| **P2 Pelosi, every buy kept a year (picked)** | **+46.5 pts** | -26.5 % | -10.1 pts |
+| P1 Pelosi, buys mirrored with her sales | +31.4 pts | -26.5 % | -16.3 pts |
+| K3 70 % Nasdaq 100 + 30 % Pelosi | +20.7 pts | -23.1 % | -5.7 pts |
+| C4 Copycat consensus (top 10 of 3+ investors) | +20.2 pts | -24.4 % | +4.2 pts |
+| Current plan (70 % Nasdaq 100 + 30 % dual momentum) | +16.9 pts | -22.4 % | -0.6 pts |
+| Nasdaq 100 | +14.0 pts | -22.3 % | +2.5 pts |
+| K2 70 % Nasdaq 100 + 30 % screener | +13.6 pts | -19.8 % | +6.1 pts |
+| S4 / S1 / S2 / S3 screener versions | +13.1 to +8.1 pts | about -19 % | +6.2 / +13.8 / +7.2 / +0.3 pts |
+| C3 / C6 / C5 copycat versions | +12.4 / +2.2 / +2.0 pts | about -21 % | +2.1 / +2.6 / -2.9 pts |
+| K1 70 % Nasdaq 100 + 30 % copycat top 3 | +5.6 pts | -19.4 % | -1.8 pts |
+| C2 all 23 portfolios / C1 Berkshire's portfolio | -4.6 / -4.9 pts | | -6.7 / +4.5 pts |
+
+The rule written before the results (beat the Nasdaq 100's training gap
+with drops within 5 points of it, then the best) picks P2; P3 was left
+out for its drops. In 28 overlapping years the default Pelosi copy (P1)
+beat the S&P 500 by +17.4 pts on average (90 % range +5.9 to +33.0) and the
+reality check puts luck at 3 %. But: it trailed in the held-out year, it holds a
+few big technology names, and her filings stop when her term ends in
+January 2027 (she is not running again), after which the copy keeps her
+last buys for a year. It runs in the live record beside the plan, not
+instead of it. `python3 trade.py replay --picks P2 --signals DIR` writes
+today's picks to `trader/targets.json` for `/trader-budget`, `/trader-risk`
+and `/trader-broker`.
+
 **It runs itself.** The `replay` GitHub Actions workflow runs the whole replay
 on GitHub's machines every Saturday after Friday's close (or on demand from the
 Actions tab, with an optional as-of date). The report appears on the run's

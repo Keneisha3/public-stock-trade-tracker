@@ -65,7 +65,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
       - name: Replay $100 in every strategy
@@ -194,7 +194,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
           ls -la signals
@@ -237,7 +237,7 @@ jobs:
         run: |
           mkdir -p signals
           git fetch -q origin replay-results || true
-          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz; do
+          for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz fundamentals.json.gz; do
             git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
           done
       - name: Rolling windows inside the training years
@@ -416,8 +416,52 @@ jobs:
           name: sig-eps
           path: out/eps.json.gz
 
+  sig-13f:
+    # the upstream copycat's 23 investors: every 13F-HR since mid 2013, top 50 stocks each
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, '13f')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SEC 13F holdings of famous investors
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          python .claude/skills/trader-replay/signals.py 13f --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-13f
+          path: out/f13.json.gz
+
+  sig-fundamentals:
+    # the upstream analyst's numbers (revenue, operating income, net income, EPS) as first filed
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'fundamentals')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SEC XBRL company facts
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          python .claude/skills/trader-replay/signals.py fundamentals --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-fundamentals
+          path: out/fundamentals.json.gz
+
   sig-save:
-    needs: [sig-congress, sig-insiders, sig-events, sig-eps]
+    needs: [sig-congress, sig-insiders, sig-events, sig-eps, sig-13f, sig-fundamentals]
     if: ${{ always() && ((github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || inputs.mode == 'build-signals') }}
     runs-on: ubuntu-latest
     steps:
@@ -502,7 +546,14 @@ jobs:
           mkdir -p forward
           git fetch -q origin replay-results || true
           git show origin/replay-results:forward/record.json > forward/record.json 2>/dev/null || rm -f forward/record.json
-          python .claude/skills/trader-replay/replay.py --forward forward/record.json | tee -a "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RUNNER_TEMP/signals"  # the Pelosi copy reads the dated Congress filings
+          git show origin/replay-results:signals/congress.json.gz > "$RUNNER_TEMP/signals/congress.json.gz"
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null  # her latest filings
+          python .claude/skills/trader-replay/signals.py congress --years "$(date -u +%Y)" --member Pelosi \
+            --merge "$RUNNER_TEMP/signals/congress.json.gz" --out "$RUNNER_TEMP/signals" > /dev/null \
+            || echo "::warning::could not refresh Pelosi's filings; using the monthly build"
+          python .claude/skills/trader-replay/replay.py --forward forward/record.json --signals "$RUNNER_TEMP/signals" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Save to the replay-results branch
         run: |
           cp forward/record.json "$RUNNER_TEMP/record.json"

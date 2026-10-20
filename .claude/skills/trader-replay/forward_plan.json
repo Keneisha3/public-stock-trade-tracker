@@ -18,6 +18,12 @@
     "core_weight": 0.7
    }
   },
+  "Pelosi copy: every buy kept a year (P2, upstream agent)": {
+   "kind": "pelosi",
+   "opts": {
+    "mode": "hold"
+   }
+  },
   "Dual momentum (single strongest fund)": {
    "kind": "dual",
    "opts": {}
@@ -35,5 +41,5 @@
    }
   }
  },
- "chosen_by": "walk-forward pit-v11-news, decision rule v4 written before the results: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods, kept only if it beats the Nasdaq 100's gap (+14.0 pts). Rebalancing every 2 weeks: +16.9 pts, worst drop -22.4%. Held-out last 12 months: -0.6 pts (the monthly plan: +9.2 pts), so both stay on the record."
+ "chosen_by": "walk-forward pit-v11-news, decision rule v4 written before the results: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods, kept only if it beats the Nasdaq 100's gap (+14.0 pts). Rebalancing every 2 weeks: +16.9 pts, worst drop -22.4%. Held-out last 12 months: -0.6 pts (the monthly plan: +9.2 pts), so both stay on the record. The Pelosi copy (P2) was added by decision rule v7 (walk-forward pit-v13-upstream): of the upstream agents' versions that beat the Nasdaq 100's training gap with drops within 5 points of it, the best (+46.5 pts, worst drop -26.5%); held-out last 12 months: -10.1 pts. It runs beside the plan, it does not replace it."
 }
