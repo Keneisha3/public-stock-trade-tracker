@@ -537,6 +537,13 @@ class PointInTimeUniverse(unittest.TestCase):
         self.assertIn("XLK", calm["picks"][-1][1])
         held = {h: 1 for h in calm["holdings"]}
         self.assertIn("IEF", held)
+        w = replay.dual_weights(data, data.days[500], core="XLE", core_weight=0.7, core_trend=True)
+        self.assertNotIn("XLE", w)                      # the core is under its 200-day: its share sits in bonds
+        self.assertAlmostEqual(w["IEF"], 0.7, places=6)
+        w = replay.dual_weights(data, data.days[500], core="XLK", core_weight=0.7, core_trend=True)
+        self.assertAlmostEqual(w["XLK"], 1.0, places=6)  # above its 200-day: 70% core + it is also the best fund
+        blended = replay.dual_weights(data, data.days[500], k=3, lookbacks=[1, 3, 6, 12])
+        self.assertEqual(sorted(blended), ["IEF", "SPY", "XLK"])
         trend = replay.run_dual(data, data.days[300], ASOF, 100, k=3, trend=True)
         self.assertNotIn("XLE", trend["picks"][-1][1])
         self.assertIn("XLK", r["holdings"])
