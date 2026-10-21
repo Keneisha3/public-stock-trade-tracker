@@ -45,10 +45,11 @@ IDEA_SOURCES = "trending,screens,news,fool,reddit"
 # there); the briefing reads the published copy. "record_url" in trader/config.json overrides it.
 RECORD_URL = "https://raw.githubusercontent.com/Keneisha3/public-stock-trade-tracker/replay-results/forward/record.json"
 RUNS_URL = "https://api.github.com/repos/Keneisha3/public-stock-trade-tracker/actions/workflows/replay.yml/runs?per_page=20"
-NOTES = {"(chosen)": "The main plan (C7): stocks in the top 5 holdings of at least 3 of the copycat's 23 investors, "
-                     "from their latest 13F reports. It beat the S&P 500 from 2000 to 2017 (+7 pts a year) and in "
-                     "training, but part of that edge came from choosing famous investors, and the live record has "
-                     "to confirm it. An option, not an order: nothing is placed for you.",
+NOTES = {"(chosen)": "The main plan (F4): stocks in the top 5 holdings of at least 3 of the copycat's 23 investors "
+                     "that at least 2 of the 50 largest concentrated managers (a list chosen by rule, not fame) also "
+                     "hold in their top 10, from the latest 13F reports; the S&P 500 when none qualify. It beat C7 "
+                     "and the Nasdaq 100 in training (2019-2024), but there is no pre-2014 test and the live record "
+                     "has to confirm it. An option, not an order: nothing is placed for you.",
          "(C4": "Stocks in the top 10 of at least 3 of the copycat's 23 investors, from their latest 13F reports. It "
                 "beat the Nasdaq 100 in training and the S&P 500 in 22 of 28 windows, trailed in the held-out year, "
                 "and is concentrated in a few large companies. An option, not an order."}
@@ -122,7 +123,7 @@ def health(rec, today, runs=None):
     data = rec.get("data") or {}
     f13, cong = data.get("f13_latest"), data.get("congress_latest")
     if f13 and (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(f13)).days > 135:
-        out.append("The newest 13F behind C7 and C4 is from %s: the 13F refresh may be failing (new reports land "
+        out.append("The newest 13F behind the copycat lines is from %s: the 13F refresh may be failing (new reports land "
                    "every quarter)." % f13)
     if cong and (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(cong)).days > 60:
         out.append("The newest Congress filing on file is from %s: the Congress refresh may be failing." % cong)

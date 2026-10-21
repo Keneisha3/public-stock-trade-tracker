@@ -607,6 +607,31 @@ jobs:
           name: sig-13f-broad
           path: out/f13_broad.json.gz
 
+  sig-13f-broad-refresh:
+    # monthly: this year's rule-based list (from April) and its managers' newest 13Fs, for F4 (the main plan)
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && contains(inputs.skip, 'only-broad-refresh')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bring the rule-based list's 13Fs up to date
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || 'Keneisha 140374931+Keneisha3@users.noreply.github.com' }}
+        run: |
+          ua=$(jq -r '.inputs.sec_user_agent // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$ua" ]; then echo "::add-mask::$ua"; export SEC_USER_AGENT="$ua"; fi
+          mkdir -p out
+          git fetch -q origin replay-results
+          git show origin/replay-results:signals/f13_broad.json.gz > out/f13_broad.json.gz
+          python .claude/skills/trader-replay/signals.py 13f-broad-refresh --file out/f13_broad.json.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-13f-broad-refresh
+          path: out/f13_broad.json.gz
+
   sig-fundamentals:
     # the upstream analyst's numbers (revenue, operating income, net income, EPS) as first filed
     if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 7 3 * *') || (inputs.mode == 'build-signals' && !contains(inputs.skip, 'fundamentals')) }}
@@ -630,7 +655,7 @@ jobs:
           path: out/fundamentals.json.gz
 
   sig-save:
-    needs: [sig-congress, sig-insiders, sig-events, sig-eps, sig-13f, sig-13f-old, sig-13dg, sig-13f-broad, sig-fundamentals]
+    needs: [sig-congress, sig-insiders, sig-events, sig-eps, sig-13f, sig-13f-old, sig-13dg, sig-13f-broad, sig-13f-broad-refresh, sig-fundamentals]
     if: ${{ always() && ((github.event_name == 'schedule' && (github.event.schedule == '23 7 3 * *' || github.event.schedule == '17 13 * * 6')) || inputs.mode == 'build-signals') }}
     runs-on: ubuntu-latest
     steps:
@@ -718,6 +743,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/signals"  # the Pelosi copy reads the dated Congress filings
           git show origin/replay-results:signals/congress.json.gz > "$RUNNER_TEMP/signals/congress.json.gz"
           git show origin/replay-results:signals/f13.json.gz > "$RUNNER_TEMP/signals/f13.json.gz"  # the copycat line
+          git show origin/replay-results:signals/f13_broad.json.gz > "$RUNNER_TEMP/signals/f13_broad.json.gz"  # F4 checks the rule-based list
           sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null  # her latest filings
           python .claude/skills/trader-replay/signals.py congress --years "$(date -u +%Y)" --member Pelosi \
             --merge "$RUNNER_TEMP/signals/congress.json.gz" --out "$RUNNER_TEMP/signals" > /dev/null \

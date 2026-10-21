@@ -333,6 +333,31 @@ class StakeSec(FakeSec):
         return (HDR % ("GONE CORP", "0000999999")).encode()
 
 
+class BroadRefresh(unittest.TestCase):
+    def test_adds_this_years_list_and_only_new_reports(self):
+        doc = {"managers": {"X": "X"}, "lists": [{"year": 2025, "usable_from": "2025-04-01", "rule": {}, "ciks": ["X"]}],
+               "rows": [["2025-05-15", "X", "2025-03-31", "2025-05-15", 0, []]]}
+        asked = []
+
+        def build(filers, since):
+            asked.append(([f["cik"] for f in filers], since))
+            return {"rows": [["2025-05-15", "Y", "2025-03-31", "2025-05-15", 0, []],
+                             ["2026-05-15", "Y", "2026-03-31", "2026-05-15", 0, [["AAA", 1, 1]]]]}
+        out = signals.refresh_broad(doc, "t t@example.com", 2026, log=lambda m: None, build=build,
+                                    build_list=lambda y: {"usable_from": "2026-04-01", "rule": {},
+                                                          "managers": [{"cik": "Y", "name": "Why"}]})
+        self.assertEqual([x["year"] for x in out["lists"]], [2025, 2026])
+        self.assertEqual(asked, [(["Y"], "2025-01-01")])                 # the newest list's managers only
+        self.assertEqual(len(out["rows"]), 3)
+        again = signals.refresh_broad(out, "t t@example.com", 2026, log=lambda m: None, build=build,
+                                      build_list=lambda y: self.fail("list already there"))
+        self.assertEqual(len(again["rows"]), 3)                          # nothing twice
+        empty = signals.refresh_broad(doc, "t t@example.com", 2027, log=lambda m: None, build=build,
+                                      build_list=lambda y: {"managers": []})  # January: no list yet
+        self.assertEqual(len(empty["lists"]), 1)
+        self.assertEqual(len(doc["rows"]), 1)                            # the input is not changed
+
+
 class Stakes(unittest.TestCase):
     def test_new_stakes_are_dated_originals_with_tickers(self):
         f = StakeSec()

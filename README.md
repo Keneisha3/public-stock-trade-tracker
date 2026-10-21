@@ -330,13 +330,13 @@ old holdings could be matched to a ticker, and 3-33 % of its picks around
 2002 had no prices (companies that vanished), which flatters it; the 23
 investors are still famous today (the rule-based list tests that).
 
-**The main plan is now C7** (rule v11, written before the results;
+**C7 became the main plan** (rule v11, written before the results;
 `research/pit-v16-versions/`, `pit-v17-broad/`, `long-history-c4-versions/`).
 Versions of the consensus rule, gap to the S&P 500:
 
 | version | training 2017-24 | 2000-2017 a year (90 % range) | held-out year |
 | --- | ---: | ---: | ---: |
-| **C7 top 5 of 3+ famous investors (main plan)** | +24.5 | +7.3 (+2.7 to +12.0) | -6.0 |
+| **C7 top 5 of 3+ famous investors (main plan until F4, below)** | +24.5 | +7.3 (+2.7 to +12.0) | -6.0 |
 | C8 top 10 of 4+ | +23.8 | +10.0 (+5.1 to +15.3) | +5.5 |
 | C4 top 10 of 3+ | +20.5 | +5.2 (+1.5 to +8.6) | -2.9 |
 | C10 top 10 of 3+, weighted | +17.5 | +6.1 (+2.5 to +9.5) | -3.3 |
@@ -349,7 +349,7 @@ The rule-based list (chosen each year by size and concentration, not fame)
 still beat the S&P 500 with the consensus rule and matched the Nasdaq 100,
 so the method holds without hindsight, but only by a hair against the
 Nasdaq 100: roughly 6-10 points of the famous list's training edge are
-likely the famous-today choice. C7 leads the live record from 2026-10-20;
+likely the famous-today choice. C7 led the live record from 2026-10-20;
 the previous plan, C4 and the rest stay beside it. Real money should wait
 for the live record (see "Production" below).
 
@@ -359,7 +359,7 @@ average worst drop:
 
 | version | training 2019-24 (worst drop) | 2000-2017 a year (90 % range), worst drop | held-out year |
 | --- | ---: | ---: | ---: |
-| **C7 (main plan)** | +24.5 (-23.3 %) | +7.2 (+2.7 to +12.0), -15.9 % | -6.0 |
+| **C7** | +24.5 (-23.3 %) | +7.2 (+2.7 to +12.0), -15.9 % | -6.0 |
 | C11 no stock over 20 % | +27.4 (-23.1 %) | +2.2 (+0.3 to +4.0), -14.1 % | -6.0 |
 | C12 plus no sector over 40 % | +26.5 (-23.3 %) | +2.3 (+0.3 to +4.0), -14.1 % | -6.3 |
 | C13 half in Treasuries while the S&P 500 is under its 200-day | +19.4 (-20.2 %) | +9.1 (+4.4 to +13.6), -11.9 % | -8.9 |
@@ -376,6 +376,52 @@ crashes were short (2020 recovered in months), the brake sold near the
 bottom, and it gave up 5 points a year, past the 3 the rule allowed. If a
 slow bear market worries you more than a fast one, C13 is the version to
 think about; the rule says C7.
+
+**Early 13D / 13G stakes** (rule v13; `research/pit-v19-stakes-blends/`,
+`long-history-stakes/`). A 13D or 13G says an investor crossed 5 % of a
+company, filed within 10 to 45 days: much sooner than a 13F. 1,950 such
+filings by the 23 investors since 2001, dated to when the market could act.
+
+| version | training 2019-24 (worst drop) | 2000-2017 a year (90 % range) | held-out year |
+| --- | ---: | ---: | ---: |
+| E1 every new stake of the last 12 months | +27.6 (-27.3 %) | +17.6 (+9.1 to +28.5) | -34.0 |
+| E2 13D stakes only | +5.4 (-31.7 %) | +5.5 (-9.4 to +24.4) | -68.7 |
+| E3 C7 plus stakes of the last 6 months | +28.5 (-20.2 %) | +19.5 (+10.9 to +30.7) | -17.0 |
+| E4 C7, a stake counts as a vote | +24.5 (-23.3 %) | +9.0 (+4.2 to +14.4) | -7.1 |
+
+E3 passed the rule on paper, and it is **not used**: it is survivorship,
+not an edge. Tickers come from the SEC's list of companies trading today,
+so a stake in a company that later went bust, was bought out or delisted
+cannot be bought in the replay. Only 24 % of the 2000s stakes have a ticker
+today, 43 % of 2009-2016's, 60 % of 2017-2024's and 90 % of the last two
+years'. The further back, the more the replay held only the survivors,
+and the better it looked; in the held-out year, where nearly every stake is
+tradeable, E1 lost 34 points to the S&P 500 and E3 17. Rule v13 should have
+asked for that check; prices for delisted companies (an EODHD key) would
+let it be re-tested fairly.
+
+**Blending the famous 23 with the rule-based list** (rule v14;
+`research/pit-v19-stakes-blends/`). Training 2019-2024 only: the rule-based
+list starts in 2014.
+
+| version | training 2019-24 | worst drop | held-out year |
+| --- | ---: | ---: | ---: |
+| **F4 C7's picks that 2+ rule-based managers also hold in their top 10 (main plan)** | +29.2 | -24.8 % | -6.0 |
+| C7 | +24.5 | -23.3 % | -6.0 |
+| F3 half C7, half B1 | +22.6 | -21.0 % | -11.1 |
+| F2 top 10 of 4+ of all 73 managers | +9.0 | -22.4 % | -4.3 |
+| F1 top 5 of 3+ of all 73 managers | +7.2 | -23.3 % | -3.9 |
+| Nasdaq 100 | +14.0 | -22.3 % | +2.5 |
+
+**F4 is the main plan from 2026-10-22.** It holds what at least 3 famous
+investors rank in their top 5 *and* at least 2 of the 50 largest concentrated
+managers (chosen by rule, not fame) hold in their top 10; the S&P 500 when
+none qualify. The second check cannot add famous-today hindsight, only
+remove some. Throwing all 73 managers into one vote (F1, F2) did much worse:
+the larger list's picks drown out the famous ones. Caveats: no test before
+2014, and 4.7 points a period more than C7 across four training periods is
+not much. C7 stays on
+the live record beside it, and the live record decides.
 
 **Following the best Congress members** (`research/pit-v15-leaders/`).
 Each month, members were ranked by how their past disclosed buys did
@@ -419,7 +465,7 @@ and are range-checked. The live review and the replay use the same rules.
 import Wealthsimple (CSV) and sync Questrade yourself (`accounts sync --token`,
 never in chat), then run `python3 trade.py daily` every weekday evening (cron
 or Task Scheduler) and open `python3 trade.py dashboard --open`. The briefing
-shows the main plan (C7) in your growth account's dollars beside what it
+shows the main plan (F4) in your growth account's dollars beside what it
 holds, the C4 card, and an alert when the picks change (new 13Fs land in
 mid February, May, August and November). When you act: size with
 `/trader-budget`, check with `/trader-risk`, enter the orders yourself in
@@ -427,7 +473,7 @@ Questrade (its API is read-only), convert CAD with Norbert's gambit.
 
 **Not yet ready for real money.** Before that:
 1. A live record: at least 3, better 6, months of the paper record (from
-   2026-10-20) with C7 inside its backtest range and no data failures.
+   2026-10-22) with F4 and C7 inside their backtest ranges and no data failures.
 2. Survivorship: about a third of the pre-2013 holdings and some delisted
    companies have no prices; an EODHD key in `.env` fills the prices.
 3. Health checks (done): the briefing warns when the record is stale, the 13F

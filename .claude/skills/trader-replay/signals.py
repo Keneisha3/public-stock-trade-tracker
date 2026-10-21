@@ -525,6 +525,33 @@ def build_13f(ua, since="2013-07-01", filers=None, log=print, fetcher=None, figi
             "columns": ["effective", "cik", "period", "filed", "total", "positions"], "rows": out, "stats": stats}
 
 
+def refresh_broad(doc, ua, year, log=print, fetcher=None, build_list=None, build=None):
+    """Keep the rule-based list current for the live record: add `year`'s list once its February
+    13Fs are in (from April 1 it is the one used), then fetch the newest 13Fs of the managers on
+    the latest list and add the reports not already in `doc` (rows are never rewritten)."""
+    build_list = build_list or (lambda y: build_13f_list(ua, y, log=log, fetcher=fetcher))
+    build = build or (lambda filers, since: build_13f(ua, since=since, filers=filers, log=log, fetcher=fetcher))
+    doc = dict(doc, lists=list(doc.get("lists") or []), rows=list(doc.get("rows") or []),
+               managers=dict(doc.get("managers") or {}))
+    if year not in {x["year"] for x in doc["lists"]}:
+        new = build_list(year)
+        if new.get("managers"):
+            doc["lists"].append({"year": year, "usable_from": new["usable_from"], "rule": new["rule"],
+                                 "ciks": [m["cik"] for m in new["managers"]]})
+            doc.setdefault("managers", {}).update({m["cik"]: m["name"] for m in new["managers"]})
+    if not doc["lists"]:
+        return doc
+    latest = max(doc["lists"], key=lambda x: x["year"])
+    since = "%d-01-01" % (latest["year"] - 1)
+    have = {tuple(r[1:4]) for r in doc["rows"]}
+    got = build([{"cik": c, "name": (doc.get("managers") or {}).get(c, c)} for c in latest["ciks"]], since)
+    added = [r for r in got["rows"] if tuple(r[1:4]) not in have]
+    doc["rows"] = sorted(doc["rows"] + added)
+    doc["refreshed"] = {"at": _now(), "added": len(added), "list_year": latest["year"]}
+    log("13f-broad refresh: %d new reports for the %d list" % (len(added), latest["year"]))
+    return doc
+
+
 # ---------------------------------------------------------------- 13D / 13G: new 5% stakes
 
 STAKE_FORMS = {"SC 13D": "13D", "SC 13G": "13G", "SCHEDULE 13D": "13D", "SCHEDULE 13G": "13G"}  # originals only
@@ -1121,6 +1148,10 @@ def main(argv=None):
     lp.add_argument("--year", type=int, required=True)
     lp.add_argument("--out", required=True)
     lp.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
+    rp = sub.add_parser("13f-broad-refresh")
+    rp.add_argument("--file", required=True, help="f13_broad.json.gz to bring up to date (rewritten in place)")
+    rp.add_argument("--year", type=int, default=datetime.date.today().year)
+    rp.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
     bp = sub.add_parser("13f-broad")
     bp.add_argument("--lists", required=True, help="folder with f13_list-YEAR.json.gz files")
     bp.add_argument("--out", required=True)
@@ -1134,6 +1165,14 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "info":
         info(a.dir)
+        return 0
+    if a.cmd == "13f-broad-refresh":
+        if not a.user_agent:
+            print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
+            return 2
+        doc = refresh_broad(read(a.file), a.user_agent, a.year)
+        write(a.file, doc)
+        print(json.dumps(doc.get("refreshed")))
         return 0
     if a.cmd in ("13f-list", "13f-broad"):
         if not a.user_agent:
