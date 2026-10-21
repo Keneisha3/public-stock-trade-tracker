@@ -626,6 +626,11 @@ class ForwardRecord(unittest.TestCase):
             frozen = json.loads(json.dumps(rec["days"]))
             plan["strategies"]["Dual"]["opts"] = {"k": 3}  # even if the code or settings change later...
             rec = replay.forward(plan, rec, offline=off, today=days[510], log=lambda m: None)
+            early = replay.forward(dict(plan, start=days[510]), None, offline=off, today=days[509], log=lambda m: None)
+            self.assertEqual(early["days"], {})          # the start's prices are not out yet: nothing recorded
+            bad = {"start": days[505], "plan": plan, "days": {days[504]: {"Dual": 100.0}}}
+            fixed = replay.forward(dict(plan, start=days[505]), bad, offline=off, today=days[506], log=lambda m: None)
+            self.assertEqual(min(fixed["days"]), days[505])  # a day before the plan existed is dropped
             plan2 = dict(plan, start=days[505])  # a new plan starts a new record and archives the old one untouched
             rec2 = replay.forward(plan2, json.loads(json.dumps(rec)), offline=off, today=days[510], log=lambda m: None)
         finally:
