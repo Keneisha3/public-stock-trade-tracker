@@ -53,7 +53,10 @@
   {
    "us": "AAPL",
    "cdr": "AAPL.NE",
-   "name": "Apple Inc."
+   "name": "Apple Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "from": "2026-07-17",
@@ -65,239 +68,377 @@
    "hedge_cost_per_year": 2.52,
    "us": "ABBV",
    "cdr": "ABBV.NE",
-   "name": "AbbVie Inc."
+   "name": "AbbVie Inc.",
+   "bars": 65,
+   "first_bar": "2026-07-17",
+   "last_bar": "2026-10-20"
   },
   {
    "us": "ADBE",
    "cdr": "ADBE.NE",
-   "name": "Adobe Inc."
+   "name": "Adobe Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "AMAT",
    "cdr": "AMAT.NE",
-   "name": "Applied Materials, Inc."
+   "name": "Applied Materials, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "from": "2021-12-01",
    "to": "2026-10-21",
    "days": 1223,
    "cdr_pct": 221.89,
-   "us_usd": 266.0,
-   "us_cad": 303.0,
-   "hedge_cost_per_year": 2.66,
+   "us_usd": 265.84,
+   "us_cad": 302.81,
+   "hedge_cost_per_year": 2.65,
    "us": "AMD",
    "cdr": "AMD.NE",
-   "name": "Advanced Micro Devices, Inc."
+   "name": "Advanced Micro Devices, Inc.",
+   "bars": 1223,
+   "first_bar": "2021-12-01",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "AMZN",
    "cdr": "AMZN.NE",
-   "name": "Amazon.com, Inc."
+   "name": "Amazon.com, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "AVGO",
    "cdr": "AVGO.NE",
-   "name": "Broadcom Inc."
+   "name": "Broadcom Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "BA",
    "cdr": "BA.NE",
-   "name": "The Boeing Company"
+   "name": "The Boeing Company",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "BRK-B",
    "cdr": "BRK.NE",
-   "name": "Berkshire Hathaway Inc."
+   "name": "Berkshire Hathaway Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "COST",
    "cdr": "COST.NE",
-   "name": "Costco Wholesale Corporation"
+   "name": "Costco Wholesale Corporation",
+   "bars": 1,
+   "first_bar": "2026-10-20",
+   "last_bar": "2026-10-20"
   },
   {
    "us": "CRM",
    "cdr": "CRM.NE",
-   "name": "Salesforce, Inc."
+   "name": "Salesforce, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "CSCO",
    "cdr": "CSCO.NE",
-   "name": "CISCO CDR (CAD HEDGED)"
+   "name": "CISCO CDR (CAD HEDGED)",
+   "bars": 1,
+   "first_bar": "2026-10-20",
+   "last_bar": "2026-10-20"
   },
   {
    "us": "CVX",
    "cdr": "CVX.NE",
-   "name": "CHEVRON CDR (CAD HEDGED)"
+   "name": "CHEVRON CDR (CAD HEDGED)",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "DIS",
    "cdr": "DIS.NE",
-   "name": "The Walt Disney Company"
+   "name": "The Walt Disney Company",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "GOOGL",
    "cdr": "GOOG.NE",
-   "name": "Alphabet Inc."
+   "name": "Alphabet Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "GS",
    "cdr": "GS.NE",
-   "name": "The Goldman Sachs Group, Inc."
+   "name": "The Goldman Sachs Group, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "HD",
    "cdr": "HD.NE",
-   "name": "The Home Depot, Inc."
+   "name": "The Home Depot, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "HON",
    "cdr": "HON.NE",
-   "name": "Honeywell International Inc."
+   "name": "Honeywell International Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "IBM",
    "cdr": "IBM.NE",
-   "name": "International Business Machines Corporation"
+   "name": "International Business Machines Corporation",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "INTC",
    "cdr": "INTC.NE",
-   "name": "Intel Corporation"
+   "name": "Intel Corporation",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "JNJ",
    "cdr": "JNJ.NE",
-   "name": "JOHNSON & JOHNSON CDR (CAD HEDG"
+   "name": "JOHNSON & JOHNSON CDR (CAD HEDG",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "JPM",
    "cdr": "JPM.NE",
-   "name": "JPMorgan Chase & Co."
+   "name": "JPMorgan Chase & Co.",
+   "bars": 1,
+   "first_bar": "2026-10-20",
+   "last_bar": "2026-10-20"
   },
   {
    "us": "LLY",
    "cdr": "LLY.NE",
-   "name": "Eli Lilly and Company"
+   "name": "Eli Lilly and Company",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "LRCX",
    "cdr": "LRCX.NE",
-   "name": "LAM RESEARCH CORP"
+   "name": "LAM RESEARCH CORP",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "MA",
    "cdr": "MA.NE",
-   "name": "Mastercard Incorporated"
+   "name": "Mastercard Incorporated",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "MCD",
    "cdr": "MCD.NE",
-   "name": "MCDONALD'S CDR (CAD HEDGED)"
+   "name": "MCDONALD'S CDR (CAD HEDGED)",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "META",
    "cdr": "META.NE",
-   "name": "Meta Platforms, Inc."
+   "name": "Meta Platforms, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "MSFT",
    "cdr": "MSFT.NE",
-   "name": "Microsoft Corporation"
+   "name": "Microsoft Corporation",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "MU",
    "cdr": "MU.NE",
-   "name": "Micron Technology, Inc."
+   "name": "Micron Technology, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "NFLX",
    "cdr": "NFLX.NE",
-   "name": "Netflix, Inc."
+   "name": "Netflix, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "NKE",
    "cdr": "NKE.NE",
-   "name": "NIKE, Inc."
+   "name": "NIKE, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-20",
+   "last_bar": "2026-10-20"
   },
   {
    "us": "NVDA",
    "cdr": "NVDA.NE",
-   "name": "NVIDIA Corporation"
+   "name": "NVIDIA Corporation",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "ORCL",
    "cdr": "ORCL.NE",
-   "name": "ORACLE COMMODITY HOLDING CORP"
+   "name": "ORACLE COMMODITY HOLDING CORP",
+   "bars": 1,
+   "first_bar": "2026-10-14",
+   "last_bar": "2026-10-14"
   },
   {
    "us": "PEP",
    "cdr": "PEP.NE",
-   "name": "PepsiCo, Inc."
+   "name": "PepsiCo, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "PFE",
    "cdr": "PFE.NE",
-   "name": "Pfizer Inc."
+   "name": "Pfizer Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "PG",
    "cdr": "PG.NE",
-   "name": "The Procter & Gamble Company"
+   "name": "The Procter & Gamble Company",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "PYPL",
    "cdr": "PYPL.NE",
-   "name": "PayPal Holdings, Inc."
+   "name": "PayPal Holdings, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-20",
+   "last_bar": "2026-10-20"
   },
   {
    "us": "QCOM",
    "cdr": "QCOM.NE",
-   "name": "QUALCOMM Incorporated"
+   "name": "QUALCOMM Incorporated",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "SBUX",
    "cdr": "SBUX.NE",
-   "name": "Starbucks Corporation"
+   "name": "Starbucks Corporation",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "TSLA",
    "cdr": "TSLA.NE",
-   "name": "Tesla, Inc."
+   "name": "Tesla, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "TXN",
    "cdr": "TXN.NE",
-   "name": "Texas Instruments Incorporated"
+   "name": "Texas Instruments Incorporated",
+   "bars": 1,
+   "first_bar": "2026-10-20",
+   "last_bar": "2026-10-20"
   },
   {
    "us": "UBER",
    "cdr": "UBER.NE",
-   "name": "Uber Technologies, Inc."
+   "name": "Uber Technologies, Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "UNH",
    "cdr": "UNH.NE",
-   "name": "UnitedHealth Group Incorporated"
+   "name": "UnitedHealth Group Incorporated",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "UNP",
    "cdr": "UNP.NE",
-   "name": "UNION PACIFIC CDR (CAD HEDGED)"
+   "name": "UNION PACIFIC CDR (CAD HEDGED)",
+   "bars": 1,
+   "first_bar": "2026-10-20",
+   "last_bar": "2026-10-20"
   },
   {
    "us": "V",
    "cdr": "VISA.NE",
-   "name": "Visa Inc."
+   "name": "Visa Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "WMT",
    "cdr": "WMT.NE",
-   "name": "Walmart Inc."
+   "name": "Walmart Inc.",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   },
   {
    "us": "XOM",
    "cdr": "XOM.NE",
-   "name": "Exxon Mobil Corporation"
+   "name": "Exxon Mobil Corporation",
+   "bars": 1,
+   "first_bar": "2026-10-21",
+   "last_bar": "2026-10-21"
   }
  ]
 }
