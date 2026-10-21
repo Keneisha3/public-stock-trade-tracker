@@ -1,0 +1,296 @@
+{
+ "verified": "2026-10-21",
+ "cdr": {
+  "AAPL": "AAPL.NE",
+  "ABBV": "ABBV.NE",
+  "ADBE": "ADBE.NE",
+  "AMAT": "AMAT.NE",
+  "AMD": "AMD.NE",
+  "AMZN": "AMZN.NE",
+  "AVGO": "AVGO.NE",
+  "BA": "BA.NE",
+  "BRK-B": "BRK.NE",
+  "COST": "COST.NE",
+  "CRM": "CRM.NE",
+  "CSCO": "CSCO.NE",
+  "CVX": "CVX.NE",
+  "DIS": "DIS.NE",
+  "GOOGL": "GOOG.NE",
+  "GS": "GS.NE",
+  "HD": "HD.NE",
+  "HON": "HON.NE",
+  "IBM": "IBM.NE",
+  "INTC": "INTC.NE",
+  "JNJ": "JNJ.NE",
+  "JPM": "JPM.NE",
+  "LLY": "LLY.NE",
+  "LRCX": "LRCX.NE",
+  "MA": "MA.NE",
+  "MCD": "MCD.NE",
+  "META": "META.NE",
+  "MSFT": "MSFT.NE",
+  "MU": "MU.NE",
+  "NFLX": "NFLX.NE",
+  "NKE": "NKE.NE",
+  "NVDA": "NVDA.NE",
+  "ORCL": "ORCL.NE",
+  "PEP": "PEP.NE",
+  "PFE": "PFE.NE",
+  "PG": "PG.NE",
+  "PYPL": "PYPL.NE",
+  "QCOM": "QCOM.NE",
+  "SBUX": "SBUX.NE",
+  "TSLA": "TSLA.NE",
+  "TXN": "TXN.NE",
+  "UBER": "UBER.NE",
+  "UNH": "UNH.NE",
+  "UNP": "UNP.NE",
+  "V": "VISA.NE",
+  "WMT": "WMT.NE",
+  "XOM": "XOM.NE"
+ },
+ "rows": [
+  {
+   "us": "AAPL",
+   "cdr": "AAPL.NE",
+   "name": "Apple Inc."
+  },
+  {
+   "us": "ABBV",
+   "cdr": "ABBV.NE",
+   "name": "AbbVie Inc."
+  },
+  {
+   "us": "ADBE",
+   "cdr": "ADBE.NE",
+   "name": "Adobe Inc."
+  },
+  {
+   "us": "AMAT",
+   "cdr": "AMAT.NE",
+   "name": "Applied Materials, Inc."
+  },
+  {
+   "from": "2021-12-01",
+   "to": "2026-10-21",
+   "days": 1054,
+   "cdr_pct": 221.89,
+   "us_usd": 265.95,
+   "us_cad": 302.95,
+   "hedge_cost_per_year": 2.66,
+   "us": "AMD",
+   "cdr": "AMD.NE",
+   "name": "Advanced Micro Devices, Inc."
+  },
+  {
+   "us": "AMZN",
+   "cdr": "AMZN.NE",
+   "name": "Amazon.com, Inc."
+  },
+  {
+   "us": "AVGO",
+   "cdr": "AVGO.NE",
+   "name": "Broadcom Inc."
+  },
+  {
+   "us": "BA",
+   "cdr": "BA.NE",
+   "name": "The Boeing Company"
+  },
+  {
+   "us": "BRK-B",
+   "cdr": "BRK.NE",
+   "name": "Berkshire Hathaway Inc."
+  },
+  {
+   "us": "COST",
+   "cdr": "COST.NE",
+   "name": "Costco Wholesale Corporation"
+  },
+  {
+   "us": "CRM",
+   "cdr": "CRM.NE",
+   "name": "Salesforce, Inc."
+  },
+  {
+   "us": "CSCO",
+   "cdr": "CSCO.NE",
+   "name": "CISCO CDR (CAD HEDGED)"
+  },
+  {
+   "us": "CVX",
+   "cdr": "CVX.NE",
+   "name": "CHEVRON CDR (CAD HEDGED)"
+  },
+  {
+   "us": "DIS",
+   "cdr": "DIS.NE",
+   "name": "The Walt Disney Company"
+  },
+  {
+   "us": "GOOGL",
+   "cdr": "GOOG.NE",
+   "name": "Alphabet Inc."
+  },
+  {
+   "us": "GS",
+   "cdr": "GS.NE",
+   "name": "The Goldman Sachs Group, Inc."
+  },
+  {
+   "us": "HD",
+   "cdr": "HD.NE",
+   "name": "The Home Depot, Inc."
+  },
+  {
+   "us": "HON",
+   "cdr": "HON.NE",
+   "name": "Honeywell International Inc."
+  },
+  {
+   "us": "IBM",
+   "cdr": "IBM.NE",
+   "name": "International Business Machines Corporation"
+  },
+  {
+   "us": "INTC",
+   "cdr": "INTC.NE",
+   "name": "Intel Corporation"
+  },
+  {
+   "us": "JNJ",
+   "cdr": "JNJ.NE",
+   "name": "JOHNSON & JOHNSON CDR (CAD HEDG"
+  },
+  {
+   "us": "JPM",
+   "cdr": "JPM.NE",
+   "name": "JPMorgan Chase & Co."
+  },
+  {
+   "us": "LLY",
+   "cdr": "LLY.NE",
+   "name": "Eli Lilly and Company"
+  },
+  {
+   "us": "LRCX",
+   "cdr": "LRCX.NE",
+   "name": "LAM RESEARCH CORP"
+  },
+  {
+   "us": "MA",
+   "cdr": "MA.NE",
+   "name": "Mastercard Incorporated"
+  },
+  {
+   "us": "MCD",
+   "cdr": "MCD.NE",
+   "name": "MCDONALD'S CDR (CAD HEDGED)"
+  },
+  {
+   "us": "META",
+   "cdr": "META.NE",
+   "name": "Meta Platforms, Inc."
+  },
+  {
+   "us": "MSFT",
+   "cdr": "MSFT.NE",
+   "name": "Microsoft Corporation"
+  },
+  {
+   "us": "MU",
+   "cdr": "MU.NE",
+   "name": "Micron Technology, Inc."
+  },
+  {
+   "us": "NFLX",
+   "cdr": "NFLX.NE",
+   "name": "Netflix, Inc."
+  },
+  {
+   "us": "NKE",
+   "cdr": "NKE.NE",
+   "name": "NIKE, Inc."
+  },
+  {
+   "us": "NVDA",
+   "cdr": "NVDA.NE",
+   "name": "NVIDIA Corporation"
+  },
+  {
+   "us": "ORCL",
+   "cdr": "ORCL.NE",
+   "name": "ORACLE COMMODITY HOLDING CORP"
+  },
+  {
+   "us": "PEP",
+   "cdr": "PEP.NE",
+   "name": "PepsiCo, Inc."
+  },
+  {
+   "us": "PFE",
+   "cdr": "PFE.NE",
+   "name": "Pfizer Inc."
+  },
+  {
+   "us": "PG",
+   "cdr": "PG.NE",
+   "name": "The Procter & Gamble Company"
+  },
+  {
+   "us": "PYPL",
+   "cdr": "PYPL.NE",
+   "name": "PayPal Holdings, Inc."
+  },
+  {
+   "us": "QCOM",
+   "cdr": "QCOM.NE",
+   "name": "QUALCOMM Incorporated"
+  },
+  {
+   "us": "SBUX",
+   "cdr": "SBUX.NE",
+   "name": "Starbucks Corporation"
+  },
+  {
+   "us": "TSLA",
+   "cdr": "TSLA.NE",
+   "name": "Tesla, Inc."
+  },
+  {
+   "us": "TXN",
+   "cdr": "TXN.NE",
+   "name": "Texas Instruments Incorporated"
+  },
+  {
+   "us": "UBER",
+   "cdr": "UBER.NE",
+   "name": "Uber Technologies, Inc."
+  },
+  {
+   "us": "UNH",
+   "cdr": "UNH.NE",
+   "name": "UnitedHealth Group Incorporated"
+  },
+  {
+   "us": "UNP",
+   "cdr": "UNP.NE",
+   "name": "UNION PACIFIC CDR (CAD HEDGED)"
+  },
+  {
+   "us": "V",
+   "cdr": "VISA.NE",
+   "name": "Visa Inc."
+  },
+  {
+   "us": "WMT",
+   "cdr": "WMT.NE",
+   "name": "Walmart Inc."
+  },
+  {
+   "us": "XOM",
+   "cdr": "XOM.NE",
+   "name": "Exxon Mobil Corporation"
+  }
+ ]
+}
