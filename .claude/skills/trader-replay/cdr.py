@@ -49,20 +49,20 @@ def compare(cdr, us, fx, since=None):
     """How a CDR did against its US share over the days both traded: {"days", "cdr_pct", "us_usd",
     "us_cad", "hedge_cost_per_year"} (returns in %, the cost is how far the CDR fell short of the
     US-dollar return, per year)."""
-    days = sorted({b["d"] for b in cdr["bars"]} & {b["d"] for b in us["bars"]})  # FX bars are dated differently
-    if since:
-        days = [d for d in days if d >= since]
-    if len(days) < 60:
+    first_us = us["bars"][0]["d"] if us["bars"] else "9999"
+    days = sorted(x["d"] for x in cdr["bars"] if x["d"] >= first_us and (not since or x["d"] >= since))
+    if len(days) < 60:  # the listings and the FX rate are dated a little differently: match on/before
         return None
     a, b = days[0], days[-1]
 
-    def rate(day):  # the last exchange rate on or before `day`
-        xs = [x["c"] for x in fx["bars"] if x["d"] <= day]
+    def last(bars, day):  # the last close on or before `day`
+        xs = [x["c"] for x in bars if x["d"] <= day]
         return xs[-1] if xs else None
-    r_cdr, r_usd = _ret(cdr["bars"], a, b), _ret(us["bars"], a, b)
-    if not rate(a) or not rate(b):
+    vals = [(last(cdr["bars"], d), last(us["bars"], d), last(fx["bars"], d)) for d in (a, b)]
+    if not all(v for pair in vals for v in pair):
         return None
-    r_fx = 100.0 * (rate(b) / rate(a) - 1)
+    (c0, u0, f0), (c1, u1, f1) = vals
+    r_cdr, r_usd, r_fx = 100.0 * (c1 / c0 - 1), 100.0 * (u1 / u0 - 1), 100.0 * (f1 / f0 - 1)
     years = (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days / 365.25
     r_cad = 100.0 * ((1 + r_usd / 100) * (1 + r_fx / 100) - 1)
     cost = 100.0 * (((1 + r_usd / 100) / (1 + r_cdr / 100)) ** (1 / years) - 1) if years > 0 else None
