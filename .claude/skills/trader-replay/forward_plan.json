@@ -8,6 +8,11 @@
    "opts": {
     "mode": "consensus",
     "n": 5
+   },
+   "expect": {
+    "gap_mean": 7.25,
+    "gap_sd": 14.26,
+    "source": "C7 over 68 one-year windows, 2000-2017 (long-history-c4-versions)"
    }
   },
   "70% Nasdaq 100 + 30% dual momentum, every 2 weeks (main plan until 2026-10-21)": {
@@ -30,6 +35,11 @@
    "opts": {
     "mode": "consensus",
     "n": 10
+   },
+   "expect": {
+    "gap_mean": 5.21,
+    "gap_sd": 12.27,
+    "source": "C4 over 68 one-year windows, 2000-2017 (long-history-c4-versions)"
    }
   },
   "Pelosi copy, watch only: hindsight check failed (P2)": {

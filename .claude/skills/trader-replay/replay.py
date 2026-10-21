@@ -2860,7 +2860,36 @@ def forward(plan, record=None, offline=None, today=None, log=print, signals=None
     rec["targets"] = {name: {k: round(x, 4) for k, x in today_weights(st).items()}
                       for name, st in plan["strategies"].items()}
     rec["updated"] = last
+    rec["expect"] = {n: st["expect"] for n, st in plan["strategies"].items() if st.get("expect")}  # for tracking()
+    if signals:  # how fresh the filings behind the copy lines are (the briefing warns when they go stale)
+        rec["data"] = {"f13_latest": max((r[-1][0] for r in signals.f13.values() if r), default=None),
+                       "congress_latest": max((r[0] for r in signals.congress), default=None)}
     return rec
+
+
+def tracking(rec, bench="S&P 500 (SPY)", z=1.645):
+    """Is each live line where its backtest said it would be? For every strategy with an "expect"
+    entry in the plan ({"gap_mean": pts a year vs the S&P 500, "gap_sd": pts a year}), the live
+    gap so far against the 90% range the backtest gives for that many trading days (the mean grows
+    with time, the spread with its square root). Returns [{name, days, gap, low, high, status}]."""
+    days = sorted(rec.get("days") or {})
+    if not days:
+        return []
+    last, cash = rec["days"][days[-1]], (rec.get("plan") or {}).get("cash", 100.0)
+    b = last.get(bench)
+    out = []
+    expect = dict(rec.get("expect") or {})
+    for name, st in ((rec.get("plan") or {}).get("strategies") or {}).items():
+        e, v = st.get("expect") or expect.get(name), last.get(name)
+        if not e or v is None or b is None:
+            continue
+        t = len(days) / 252.0
+        gap = 100.0 * (v - b) / cash
+        mid, half = e["gap_mean"] * t, z * e["gap_sd"] * t ** 0.5
+        out.append({"name": name, "days": len(days), "gap": round(gap, 2), "low": round(mid - half, 2),
+                    "high": round(mid + half, 2), "status": "below its range" if gap < mid - half else
+                    "above its range" if gap > mid + half else "on track", "source": e.get("source", "")})
+    return out
 
 
 def render_forward(rec):
@@ -2874,6 +2903,9 @@ def render_forward(rec):
         if v is not None:
             L.append("  %-40s $%.2f (%+.1f%%)  holds %s" % (name, v, v - rec["plan"].get("cash", 100),
                                                             ", ".join(rec.get("holdings", {}).get(name, [])[:5])))
+    for t in tracking(rec):
+        L.append("  %s: %+.1f pts vs the S&P 500 after %d days, %s (90%% range %+.1f to %+.1f)" % (
+            t["name"], t["gap"], t["days"], t["status"], t["low"], t["high"]))
     return "\n".join(L)
 
 

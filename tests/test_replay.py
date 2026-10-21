@@ -1256,3 +1256,18 @@ class NoLookaheadUpstream(unittest.TestCase):
             start = days[days.index(asof) - 120]
             self.assertEqual(run(cut(asof), sig, asof, start), run(data, with_future(asof), asof, start),
                              "run %d saw the future" % i)
+
+
+class Tracking(unittest.TestCase):
+    def test_live_gap_against_the_backtest_range(self):
+        days = {"2026-10-%02d" % d: {"C7": 100.0 + d, "S&P 500 (SPY)": 100.0} for d in range(1, 22)}
+        rec = {"days": days, "plan": {"cash": 100.0, "strategies": {"C7": {}, "S&P 500 (SPY)": {}}},
+               "expect": {"C7": {"gap_mean": 7.25, "gap_sd": 14.26}}}
+        t = replay.tracking(rec)[0]
+        self.assertEqual((t["days"], t["gap"]), (21, 21.0))          # 21 pts ahead after 21 days
+        self.assertEqual(t["status"], "above its range")              # far more than a month's 90% range
+        rec["days"]["2026-10-21"]["C7"] = 100.5
+        self.assertEqual(replay.tracking(rec)[0]["status"], "on track")
+        rec["days"]["2026-10-21"]["C7"] = 90.0
+        self.assertEqual(replay.tracking(rec)[0]["status"], "below its range")
+        self.assertEqual(replay.tracking({"days": {}}), [])

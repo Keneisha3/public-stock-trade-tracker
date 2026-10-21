@@ -137,6 +137,20 @@ class TestedPlan(unittest.TestCase):
         self.assertEqual(p[0]["outside_plan"], 700.0)
         self.assertEqual(daily.tested_plan(review, None), [])
 
+    def test_health_warnings(self):
+        rec = {"updated": "2026-10-20", "data": {"f13_latest": "2026-08-15", "congress_latest": "2026-10-15"}}
+        self.assertEqual(daily.health(rec, "2026-10-21"), [])
+        self.assertEqual(daily.health(rec, "2026-10-22"), [])                         # one weekday late: fine
+        self.assertIn("last updated", daily.health(rec, "2026-10-23")[0])            # two missed: warn
+        old = dict(rec, data={"f13_latest": "2026-05-15", "congress_latest": "2026-08-01"})
+        self.assertEqual(len(daily.health(old, "2026-10-21")), 2)
+        runs = [{"conclusion": "failure", "created_at": "2026-10-19T01:00:00Z", "html_url": "u"},
+                {"conclusion": "failure", "created_at": "2026-10-01T01:00:00Z", "html_url": "old"}]
+        self.assertEqual(daily.health(rec, "2026-10-21", runs), ["A GitHub run failed on 2026-10-19: u"])
+        self.assertIn("No live record", daily.health(None, "2026-10-21")[0])
+        text = daily.render({"date": "2026-10-21", "steps": {}, "health": ["x"]})
+        self.assertIn("WARNING: x", text)
+
     def test_copycat_consensus_section_and_change_alert(self):
         review = {"accounts": [{"name": "Questrade", "strategy": "growth", "total": 1000.0,
                                 "positions": [{"ticker": "AMZN", "value_base": 500.0}]}]}

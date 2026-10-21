@@ -31,9 +31,11 @@ SKILLS = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(SKILLS, "trader-accounts"))
 sys.path.insert(0, os.path.join(SKILLS, "trader-paper"))
 sys.path.insert(0, os.path.join(SKILLS, "trader-team"))
+sys.path.insert(0, os.path.join(SKILLS, "trader-replay"))
 import accounts as acc  # noqa: E402
 import paper  # noqa: E402
 import team  # noqa: E402
+import replay  # noqa: E402
 
 STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward"]
 NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward"}
@@ -41,6 +43,7 @@ IDEA_SOURCES = "trending,screens,news,fool,reddit"
 # The live paper record is computed on GitHub every weekday (it needs the SEC and Congress data kept
 # there); the briefing reads the published copy. "record_url" in trader/config.json overrides it.
 RECORD_URL = "https://raw.githubusercontent.com/Keneisha3/public-stock-trade-tracker/replay-results/forward/record.json"
+RUNS_URL = "https://api.github.com/repos/Keneisha3/public-stock-trade-tracker/actions/workflows/replay.yml/runs?per_page=20"
 NOTES = {"(chosen)": "The main plan (C7): stocks in the top 5 holdings of at least 3 of the copycat's 23 investors, "
                      "from their latest 13F reports. It beat the S&P 500 from 2000 to 2017 (+7 pts a year) and in "
                      "training, but part of that edge came from choosing famous investors, and the live record has "
@@ -87,6 +90,40 @@ def tested_plan(review, rec, marker="(chosen)"):
         out.append({"account": a["name"], "plan": name, "total": a["total"], "rows": rows, "note": NOTES.get(marker, ""),
                     "outside_plan": round(sum(v for t, v in held.items() if t not in targets), 2),
                     "as_of": rec.get("updated")})
+    return out
+
+
+def _weekdays_between(a, b):
+    """Weekdays strictly after date a and strictly before date b (ISO strings)."""
+    d, n = datetime.date.fromisoformat(a) + datetime.timedelta(days=1), 0
+    end = datetime.date.fromisoformat(b)
+    while d < end:
+        n += d.weekday() < 5
+        d += datetime.timedelta(days=1)
+    return n
+
+
+def health(rec, today, runs=None):
+    """Plain warnings when the machinery behind the briefing is not working: the live record stopped
+    updating, the 13F or Congress filings behind the copy lines went stale, or a GitHub job failed
+    in the last week. An empty list means all is well."""
+    out = []
+    if not rec:
+        return ["No live record yet: the weekday GitHub run has not published one (or it could not be fetched)."]
+    upd = rec.get("updated")
+    if upd and _weekdays_between(upd, today) > 1:
+        out.append("The live record was last updated %s: the weekday GitHub run may be failing." % upd)
+    data = rec.get("data") or {}
+    f13, cong = data.get("f13_latest"), data.get("congress_latest")
+    if f13 and (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(f13)).days > 135:
+        out.append("The newest 13F behind C7 and C4 is from %s: the 13F refresh may be failing (new reports land "
+                   "every quarter)." % f13)
+    if cong and (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(cong)).days > 60:
+        out.append("The newest Congress filing on file is from %s: the Congress refresh may be failing." % cong)
+    week = (datetime.date.fromisoformat(today) - datetime.timedelta(days=7)).isoformat()
+    for r in runs or []:
+        if r.get("conclusion") == "failure" and (r.get("created_at") or "")[:10] >= week:
+            out.append("A GitHub run failed on %s: %s" % (r["created_at"][:10], r.get("html_url", "")))
     return out
 
 
@@ -212,6 +249,14 @@ def run(base="trader", skip=(), offline=None, today=None):
                                 "days": len(rec["days"]), "cash": rec["plan"].get("cash", 100)}
         did("forward", err is None, err or "%d days on the record" % len((rec or {}).get("days", {})))
     rec = acc.read_json(rec_path, None)
+    runs = None
+    if "forward" not in skip:
+        try:  # public repository: no token needed to see whether the GitHub jobs are passing
+            runs = json.loads(acc.mk.fetch(acc.read_json(paths.config, {}).get("runs_url") or RUNS_URL)).get("workflow_runs")
+        except (acc.mk.MarketError, ValueError, AttributeError):
+            runs = None
+    brief["health"] = health(rec, brief["date"], runs) if ("forward" not in skip or rec) else []
+    brief["tracking"] = replay.tracking(rec) if rec else []
     brief["plan"] = tested_plan(review, rec)
     brief["c4"] = tested_plan(review, rec, "(C4")
     brief["c4_change"] = picks_change(os.path.join(base, "state", "c4.json"), rec)
@@ -242,6 +287,10 @@ def render(b):
         if p.get("mix"):
             L.append("Mix: " + ", ".join("%s %.0f%%%s" % (m["label"], m["pct"], (" of %.0f%% target" % m["target_pct"])
                                                          if m["target_pct"] is not None else "") for m in p["mix"]))
+        L.append("")
+    if b.get("health"):
+        L.append("## Health checks")
+        L += ["- WARNING: " + h for h in b["health"]]
         L.append("")
     ch = b.get("c4_change")
     if ch:
@@ -308,6 +357,9 @@ def render(b):
         for name, v in f["values"].items():
             if v is not None:
                 L.append("- %s: $%.2f (%+.1f%%)" % (name, v, 100.0 * (v / f["cash"] - 1)))
+        for t in b.get("tracking") or []:
+            L.append("- **%s is %s**: %+.1f pts vs the S&P 500 after %d trading days; the backtest's 90%% range "
+                     "for that long is %+.1f to %+.1f." % (t["name"], t["status"], t["gap"], t["days"], t["low"], t["high"]))
         L.append("")
     if b.get("ideas"):
         L.append("## Ideas from the market (leads to research, not advice)")
