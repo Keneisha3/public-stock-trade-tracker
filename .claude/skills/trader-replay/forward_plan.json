@@ -1,13 +1,29 @@
 {
- "start": "2026-10-20",
+ "start": "2026-10-22",
  "cash": 100.0,
  "note": "Frozen when the live record started. Change the settings only by starting a new record with a new start date (the earlier record is kept under 'earlier').",
  "strategies": {
-  "Copycat consensus: top 5 of 3+ famous investors, C7 (chosen)": {
+  "Copycat consensus confirmed by the rule-based list, F4 (chosen)": {
+   "kind": "copycat",
+   "opts": {
+    "mode": "consensus",
+    "n": 5,
+    "confirm": [
+     10,
+     2
+    ]
+   }
+  },
+  "Copycat consensus: top 5 of 3+ famous investors (C7, main plan until 2026-10-22)": {
    "kind": "copycat",
    "opts": {
     "mode": "consensus",
     "n": 5
+   },
+   "expect": {
+    "gap_mean": 7.25,
+    "gap_sd": 14.26,
+    "source": "C7 over 68 one-year windows, 2000-2017 (long-history-c4-versions)"
    }
   },
   "70% Nasdaq 100 + 30% dual momentum, every 2 weeks (main plan until 2026-10-21)": {
@@ -30,6 +46,11 @@
    "opts": {
     "mode": "consensus",
     "n": 10
+   },
+   "expect": {
+    "gap_mean": 5.21,
+    "gap_sd": 12.27,
+    "source": "C4 over 68 one-year windows, 2000-2017 (long-history-c4-versions)"
    }
   },
   "Pelosi copy, watch only: hindsight check failed (P2)": {
@@ -62,5 +83,5 @@
    }
   }
  },
- "chosen_by": "walk-forward pit-v11-news, decision rule v4 written before the results: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods, kept only if it beats the Nasdaq 100's gap (+14.0 pts). Rebalancing every 2 weeks: +16.9 pts, worst drop -22.4%. Held-out last 12 months: -0.6 pts (the monthly plan: +9.2 pts), so both stay on the record. Rule v8 (walk-forward pit-v14-hindsight): every House member with 10+ buys copied like Pelosi beat the S&P 500 in half or more of cases in only 2 of 4 training periods, and her rank swung from 1st to 51st, so her result is called hindsight-driven: she stays as a watch line, not a recommendation. Every one of the 23 investors copied alone beat the S&P 500 in half or more of cases in 3 of 4 periods, so copying them is a method, not one star; copycat consensus (C4) beat the Nasdaq 100's (+14.0) and the plan's (+16.9) training gap with +20.5 pts, worst drop -23.7%, and joins the record. Held-out last 12 months: C4 -2.9 pts, Pelosi -10.1 pts. Rule v10 (walk-forward pit-v15-leaders): ranking House members each month by how their past disclosed buys did (outcomes known by then) and copying the 3 best on 2-year records (L6) beat the Nasdaq 100's training gap, the plan's and copying every member (+17.2 pts, worst drop -22.8%; held-out year +1.5 pts); only 1 of 6 ranking versions passed, so it is weak evidence and joins the record to be watched. Rule v11 (written before the results; walk-forwards pit-v16-versions and pit-v17-broad, long histories long-history-c4 and long-history-c4-versions): the consensus rule also beat the S&P 500 on a rule-based investor list (the 50 largest concentrated 13F filers each year, usable from April) with +14.2 pts in training against the Nasdaq 100's +14.0, a pass by a hair; so the main plan becomes the consensus version with the best training gap whose 2000-2017 range is above zero and whose drops are within 5 points of the Nasdaq 100's: C7, stocks in the top 5 of at least 3 of the 23 investors (+24.5 pts, worst drop -23.3%; 2000-2017 +7.3 pts a year, range +2.7 to +12.0; held-out year -6.0 pts). Part of that edge is likely the famous-today choice of investors (the rule-based list made about 10 pts less), so expect less, and let the live record confirm it before real money."
+ "chosen_by": "walk-forward pit-v11-news, decision rule v4 written before the results: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods, kept only if it beats the Nasdaq 100's gap (+14.0 pts). Rebalancing every 2 weeks: +16.9 pts, worst drop -22.4%. Held-out last 12 months: -0.6 pts (the monthly plan: +9.2 pts), so both stay on the record. Rule v8 (walk-forward pit-v14-hindsight): every House member with 10+ buys copied like Pelosi beat the S&P 500 in half or more of cases in only 2 of 4 training periods, and her rank swung from 1st to 51st, so her result is called hindsight-driven: she stays as a watch line, not a recommendation. Every one of the 23 investors copied alone beat the S&P 500 in half or more of cases in 3 of 4 periods, so copying them is a method, not one star; copycat consensus (C4) beat the Nasdaq 100's (+14.0) and the plan's (+16.9) training gap with +20.5 pts, worst drop -23.7%, and joins the record. Held-out last 12 months: C4 -2.9 pts, Pelosi -10.1 pts. Rule v10 (walk-forward pit-v15-leaders): ranking House members each month by how their past disclosed buys did (outcomes known by then) and copying the 3 best on 2-year records (L6) beat the Nasdaq 100's training gap, the plan's and copying every member (+17.2 pts, worst drop -22.8%; held-out year +1.5 pts); only 1 of 6 ranking versions passed, so it is weak evidence and joins the record to be watched. Rule v11 (written before the results; walk-forwards pit-v16-versions and pit-v17-broad, long histories long-history-c4 and long-history-c4-versions): the consensus rule also beat the S&P 500 on a rule-based investor list (the 50 largest concentrated 13F filers each year, usable from April) with +14.2 pts in training against the Nasdaq 100's +14.0, a pass by a hair; so the main plan becomes the consensus version with the best training gap whose 2000-2017 range is above zero and whose drops are within 5 points of the Nasdaq 100's: C7, stocks in the top 5 of at least 3 of the 23 investors (+24.5 pts, worst drop -23.3%; 2000-2017 +7.3 pts a year, range +2.7 to +12.0; held-out year -6.0 pts). Part of that edge is likely the famous-today choice of investors (the rule-based list made about 10 pts less), so expect less, and let the live record confirm it before real money. Rule v12 (walk-forward pit-v18-caps, long history long-history-caps): no version of C7 with a 20% stock cap, a 40% sector cap or a crash brake (half in Treasuries while the S&P 500 is under its 200-day) cut the training drop by 3+ points while keeping its gap within 3 points; the brake (C13) was the near miss (2000-2017 +9.1 pts a year, worst one-year window -15.6% against -26.9%, but +19.4 pts in training). Rule v13 (pit-v19-stakes-blends, long-history-stakes): 13D/13G stakes passed on paper (E3 +28.5 pts in training, 2000-2017 +19.5) but only 24% of 2000s stakes and 60% of 2017-2024 stakes have a ticker today, so the replay could buy only survivors; in the held-out year (90% coverage) E3 made -17.0 pts and E1 -34.0, so the pass is called survivorship, not an edge, and no 13D/13G version is used. Rule v14 (pit-v19-stakes-blends): F4, C7's picks that 2+ of the rule-based list's managers also hold in their top 10, beat C7 in training (+29.2 pts against +24.5, worst drop -24.8% against the Nasdaq 100's -22.3%; held-out year -6.0 pts, the same as C7) and becomes the main plan; the rule-based list starts in 2014, so it has no 2000-2017 test. C7 stays on the record beside it."
 }

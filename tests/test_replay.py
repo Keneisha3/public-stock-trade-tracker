@@ -1140,6 +1140,72 @@ class UpstreamAgents(unittest.TestCase):
                                    weighted=True)
         self.assertAlmostEqual(w["AAA"], 2 / 3.0)                                  # two hold it, one holds BBB
 
+    def test_blends_of_the_famous_and_the_rule_based_list(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        famous = {"managers": {}, "rows": [[days[300], m, days[260], days[300], 0, [["AAA", 9, 1]]] for m in "AB"]}
+        broad = {"rows": [[days[300], m, days[260], days[300], 0, [["BBB", 9, 1], ["AAA", 1, 1]]] for m in "XY"],
+                 "lists": [{"year": 1, "usable_from": days[305], "ciks": ["X", "Y", "A"]}]}
+        s = replay.sigs.Signals(f13=famous, f13_broad=broad)
+        cw = lambda day, **o: replay.copycat_weights(data, s, day, **dict(replay.COPY_DEFAULT, **o))  # noqa: E731
+        self.assertEqual(cw(days[306], mode="consensus", n=1, min_count=2, broad="both"), {"AAA": 0.5, "BBB": 0.5})
+        self.assertEqual(cw(days[302], mode="consensus", n=1, min_count=2, broad="both"), {"AAA": 1.0})  # no list yet
+        half = cw(days[306], mode="consensus", n=1, min_count=2,
+                  half_with={"mode": "consensus", "n": 1, "min_count": 2, "broad": True})
+        self.assertEqual(half, {"AAA": 0.5, "BBB": 0.5})
+        self.assertEqual(cw(days[306], mode="consensus", n=1, min_count=2, confirm=[2, 2]), {"AAA": 1.0})
+        self.assertEqual(cw(days[306], mode="consensus", n=1, min_count=2, confirm=[1, 2]), {"SPY": 1.0})
+
+    def test_early_stakes_versions(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        sig.stakes = sorted([[days[305], "A", "13D", days[305], "x", "Bee", "BBB"],
+                             [days[305], "B", "13G", days[305], "x", "Bee", "BBB"],
+                             [days[305], "C", "13G", days[305], "x", "Zed", "ZZZ"]])   # ZZZ has no prices
+        sig._sd = [r[0] for r in sig.stakes]
+        cw = lambda day, **o: replay.copycat_weights(data, sig, day, **dict(replay.COPY_DEFAULT, **o))  # noqa: E731
+        self.assertEqual(cw(days[304], mode="stakes", stake_days=365), {"SPY": 1.0})  # nothing filed yet
+        self.assertEqual(cw(days[306], mode="stakes", stake_days=365), {"BBB": 1.0})
+        self.assertEqual(cw(days[306], mode="stakes", stake_days=365, stake_forms=("13G",)), {"BBB": 1.0})
+        c7 = cw(days[306], mode="consensus", n=1)
+        self.assertEqual(c7, {"AAA": 1.0})
+        self.assertEqual(set(cw(days[306], mode="consensus", n=1, stake_days=182)), {"AAA", "BBB"})
+        voted = cw(days[306], mode="consensus", n=1, min_count=2, stake_days=365, stake_vote=True)
+        self.assertEqual(set(voted), {"AAA", "BBB"})                        # two stakes = two votes for BBB
+
+    def test_caps_and_crash_brake(self):
+        class Stub:
+            charts = {"IEF": 1, "SPY": 1}
+            up = True
+
+            def close(self, t, d):
+                return 100.0
+
+            def quick(self, t, d, n):
+                return {"above200": self.up}
+        data, w = Stub(), {"AAPL": 0.5, "MSFT": 0.25, "JPM": 0.25}
+        g = replay.guard(data, w, "d", cap=0.2)
+        self.assertEqual((g["AAPL"], g["MSFT"], g["JPM"]), (0.2, 0.2, 0.2))
+        self.assertAlmostEqual(g["SPY"], 0.4)                           # the excess goes to the S&P 500
+        g = replay.guard(data, w, "d", sector_cap=0.4)
+        self.assertAlmostEqual(g["AAPL"] + g["MSFT"], 0.4)              # tech cut to 40%, in proportion
+        self.assertAlmostEqual(g["AAPL"] / g["MSFT"], 2.0)
+        self.assertAlmostEqual(g["SPY"], 0.35)
+        self.assertEqual(replay.guard(data, w, "d", brake=True), w)     # S&P 500 above its 200-day: no brake
+        data.up = False
+        g = replay.guard(data, w, "d", brake=True)
+        self.assertAlmostEqual(g["IEF"], 0.5)
+        self.assertAlmostEqual(sum(g.values()), 1.0)
+        self.assertEqual(replay.guard(data, w, "d"), w)                 # no limits: unchanged
+
     def test_screener_and_pelosi(self):
         d = tempfile.mkdtemp()
         try:
@@ -1256,3 +1322,18 @@ class NoLookaheadUpstream(unittest.TestCase):
             start = days[days.index(asof) - 120]
             self.assertEqual(run(cut(asof), sig, asof, start), run(data, with_future(asof), asof, start),
                              "run %d saw the future" % i)
+
+
+class Tracking(unittest.TestCase):
+    def test_live_gap_against_the_backtest_range(self):
+        days = {"2026-10-%02d" % d: {"C7": 100.0 + d, "S&P 500 (SPY)": 100.0} for d in range(1, 22)}
+        rec = {"days": days, "plan": {"cash": 100.0, "strategies": {"C7": {}, "S&P 500 (SPY)": {}}},
+               "expect": {"C7": {"gap_mean": 7.25, "gap_sd": 14.26}}}
+        t = replay.tracking(rec)[0]
+        self.assertEqual((t["days"], t["gap"]), (21, 21.0))          # 21 pts ahead after 21 days
+        self.assertEqual(t["status"], "above its range")              # far more than a month's 90% range
+        rec["days"]["2026-10-21"]["C7"] = 100.5
+        self.assertEqual(replay.tracking(rec)[0]["status"], "on track")
+        rec["days"]["2026-10-21"]["C7"] = 90.0
+        self.assertEqual(replay.tracking(rec)[0]["status"], "below its range")
+        self.assertEqual(replay.tracking({"days": {}}), [])

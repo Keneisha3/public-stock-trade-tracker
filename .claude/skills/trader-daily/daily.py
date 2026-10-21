@@ -31,9 +31,12 @@ SKILLS = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(SKILLS, "trader-accounts"))
 sys.path.insert(0, os.path.join(SKILLS, "trader-paper"))
 sys.path.insert(0, os.path.join(SKILLS, "trader-team"))
+sys.path.insert(0, os.path.join(SKILLS, "trader-replay"))
 import accounts as acc  # noqa: E402
 import paper  # noqa: E402
 import team  # noqa: E402
+import replay  # noqa: E402
+import cdr as cdrs  # noqa: E402
 
 STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward"]
 NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward"}
@@ -41,10 +44,12 @@ IDEA_SOURCES = "trending,screens,news,fool,reddit"
 # The live paper record is computed on GitHub every weekday (it needs the SEC and Congress data kept
 # there); the briefing reads the published copy. "record_url" in trader/config.json overrides it.
 RECORD_URL = "https://raw.githubusercontent.com/Keneisha3/public-stock-trade-tracker/replay-results/forward/record.json"
-NOTES = {"(chosen)": "The main plan (C7): stocks in the top 5 holdings of at least 3 of the copycat's 23 investors, "
-                     "from their latest 13F reports. It beat the S&P 500 from 2000 to 2017 (+7 pts a year) and in "
-                     "training, but part of that edge came from choosing famous investors, and the live record has "
-                     "to confirm it. An option, not an order: nothing is placed for you.",
+RUNS_URL = "https://api.github.com/repos/Keneisha3/public-stock-trade-tracker/actions/workflows/replay.yml/runs?per_page=20"
+NOTES = {"(chosen)": "The main plan (F4): stocks in the top 5 holdings of at least 3 of the copycat's 23 investors "
+                     "that at least 2 of the 50 largest concentrated managers (a list chosen by rule, not fame) also "
+                     "hold in their top 10, from the latest 13F reports; the S&P 500 when none qualify. It beat C7 "
+                     "and the Nasdaq 100 in training (2019-2024), but there is no pre-2014 test and the live record "
+                     "has to confirm it. An option, not an order: nothing is placed for you.",
          "(C4": "Stocks in the top 10 of at least 3 of the copycat's 23 investors, from their latest 13F reports. It "
                 "beat the Nasdaq 100 in training and the S&P 500 in 22 of 28 windows, trailed in the held-out year, "
                 "and is concentrated in a few large companies. An option, not an order."}
@@ -66,16 +71,18 @@ def _tool(folder, script, args, timeout=180):
         return None, out[:400]
 
 
-def tested_plan(review, rec, marker="(chosen)"):
+def tested_plan(review, rec, marker="(chosen)", cdr_map=None):
     """For each growth account: what a strategy of the live record (the one whose name contains
     `marker`: "(chosen)" for the plan, "(C4" for copycat consensus) would hold today, in the
-    account's money, beside what it holds now."""
+    account's money, beside what it holds now. A pick with a verified Canadian Depositary Receipt
+    (`cdr_map`, from trader-replay/cdr.json) names it: buyable in CAD, currency-hedged."""
     if not rec:
         return []
     name = next((k for k in (rec.get("plan") or {}).get("strategies", {}) if marker in k), None)
     targets = (rec.get("targets") or {}).get(name) if name else None
     if not targets:
         return []
+    cdr_map = cdrs.load() if cdr_map is None else cdr_map
     out = []
     for a in review.get("accounts", []):
         if a.get("strategy") != "growth" or not a.get("total"):
@@ -84,9 +91,46 @@ def tested_plan(review, rec, marker="(chosen)"):
         rows = [{"ticker": t, "target_pct": round(100 * w, 1), "target": round(a["total"] * w, 2),
                  "now": round(held.get(t, 0.0), 2), "change": round(a["total"] * w - held.get(t, 0.0), 2)}
                 for t, w in sorted(targets.items(), key=lambda kv: -kv[1])]
+        for r in rows:
+            if cdr_map.get(r["ticker"]):
+                r["cdr"] = cdr_map[r["ticker"]]
         out.append({"account": a["name"], "plan": name, "total": a["total"], "rows": rows, "note": NOTES.get(marker, ""),
                     "outside_plan": round(sum(v for t, v in held.items() if t not in targets), 2),
                     "as_of": rec.get("updated")})
+    return out
+
+
+def _weekdays_between(a, b):
+    """Weekdays strictly after date a and strictly before date b (ISO strings)."""
+    d, n = datetime.date.fromisoformat(a) + datetime.timedelta(days=1), 0
+    end = datetime.date.fromisoformat(b)
+    while d < end:
+        n += d.weekday() < 5
+        d += datetime.timedelta(days=1)
+    return n
+
+
+def health(rec, today, runs=None):
+    """Plain warnings when the machinery behind the briefing is not working: the live record stopped
+    updating, the 13F or Congress filings behind the copy lines went stale, or a GitHub job failed
+    in the last week. An empty list means all is well."""
+    out = []
+    if not rec:
+        return ["No live record yet: the weekday GitHub run has not published one (or it could not be fetched)."]
+    upd = rec.get("updated")
+    if upd and _weekdays_between(upd, today) > 1:
+        out.append("The live record was last updated %s: the weekday GitHub run may be failing." % upd)
+    data = rec.get("data") or {}
+    f13, cong = data.get("f13_latest"), data.get("congress_latest")
+    if f13 and (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(f13)).days > 135:
+        out.append("The newest 13F behind the copycat lines is from %s: the 13F refresh may be failing (new reports land "
+                   "every quarter)." % f13)
+    if cong and (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(cong)).days > 60:
+        out.append("The newest Congress filing on file is from %s: the Congress refresh may be failing." % cong)
+    week = (datetime.date.fromisoformat(today) - datetime.timedelta(days=7)).isoformat()
+    for r in runs or []:
+        if r.get("conclusion") == "failure" and (r.get("created_at") or "")[:10] >= week:
+            out.append("A GitHub run failed on %s: %s" % (r["created_at"][:10], r.get("html_url", "")))
     return out
 
 
@@ -212,6 +256,14 @@ def run(base="trader", skip=(), offline=None, today=None):
                                 "days": len(rec["days"]), "cash": rec["plan"].get("cash", 100)}
         did("forward", err is None, err or "%d days on the record" % len((rec or {}).get("days", {})))
     rec = acc.read_json(rec_path, None)
+    runs = None
+    if "forward" not in skip:
+        try:  # public repository: no token needed to see whether the GitHub jobs are passing
+            runs = json.loads(acc.mk.fetch(acc.read_json(paths.config, {}).get("runs_url") or RUNS_URL)).get("workflow_runs")
+        except (acc.mk.MarketError, ValueError, AttributeError):
+            runs = None
+    brief["health"] = health(rec, brief["date"], runs) if ("forward" not in skip or rec) else []
+    brief["tracking"] = replay.tracking(rec) if rec else []
     brief["plan"] = tested_plan(review, rec)
     brief["c4"] = tested_plan(review, rec, "(C4")
     brief["c4_change"] = picks_change(os.path.join(base, "state", "c4.json"), rec)
@@ -242,6 +294,10 @@ def render(b):
         if p.get("mix"):
             L.append("Mix: " + ", ".join("%s %.0f%%%s" % (m["label"], m["pct"], (" of %.0f%% target" % m["target_pct"])
                                                          if m["target_pct"] is not None else "") for m in p["mix"]))
+        L.append("")
+    if b.get("health"):
+        L.append("## Health checks")
+        L += ["- WARNING: " + h for h in b["health"]]
         L.append("")
     ch = b.get("c4_change")
     if ch:
@@ -295,9 +351,10 @@ def render(b):
     for p in (b.get("plan") or []) + (b.get("c4") or []):
         L.append("## %s for %s (targets as of %s)" % (p["plan"], p["account"], p["as_of"]))
         for r in p["rows"]:
-            L.append("- %s %.0f%%: %s (now %s, %s %s)" % (r["ticker"], r["target_pct"], acc.money(r["target"]),
-                                                        acc.money(r["now"]), "buy" if r["change"] > 0 else "sell",
-                                                        acc.money(abs(r["change"]))))
+            L.append("- %s %.0f%%: %s (now %s, %s %s)%s" % (
+                r["ticker"], r["target_pct"], acc.money(r["target"]), acc.money(r["now"]),
+                "buy" if r["change"] > 0 else "sell", acc.money(abs(r["change"])),
+                "; in CAD as the CDR %s (currency-hedged; AMD.NE trailed AMD by about 2.7 pts a year)" % r["cdr"] if r.get("cdr") else ""))
         if p["outside_plan"]:
             L.append("- In holdings outside the plan: %s" % acc.money(p["outside_plan"]))
         L.append("- " + (p.get("note") or "An option, not an order. Nothing is placed for you."))
@@ -308,6 +365,9 @@ def render(b):
         for name, v in f["values"].items():
             if v is not None:
                 L.append("- %s: $%.2f (%+.1f%%)" % (name, v, 100.0 * (v / f["cash"] - 1)))
+        for t in b.get("tracking") or []:
+            L.append("- **%s is %s**: %+.1f pts vs the S&P 500 after %d trading days; the backtest's 90%% range "
+                     "for that long is %+.1f to %+.1f." % (t["name"], t["status"], t["gap"], t["days"], t["low"], t["high"]))
         L.append("")
     if b.get("ideas"):
         L.append("## Ideas from the market (leads to research, not advice)")

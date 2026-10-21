@@ -295,6 +295,86 @@ class Thirteenf(unittest.TestCase):
         self.assertIsNone(s.holdings_13f("0001067983", "2025-01-30"))  # stopped filing: stale
 
 
+HDR = """<SEC-HEADER>
+<ACCEPTANCE-DATETIME>20240301170500
+<TYPE>SC 13D
+<SUBJECT-COMPANY>
+<COMPANY-DATA>
+<CONFORMED-NAME>%s
+<CIK>%s
+</COMPANY-DATA>
+</SUBJECT-COMPANY>
+<FILED-BY>
+<COMPANY-DATA>
+<CONFORMED-NAME>BERKSHIRE HATHAWAY INC
+<CIK>0001067983
+</COMPANY-DATA>
+</FILED-BY>
+"""
+
+
+class StakeSec(FakeSec):
+    def get_json(self, url, sec=True):
+        if "submissions" in url:
+            return {"filings": {"recent": {
+                "form": ["SC 13D", "SC 13D/A", "SCHEDULE 13G", "SC 13G", "13F-HR"],
+                "filingDate": ["2024-03-01", "2024-04-01", "2025-02-10", "2024-05-01", "2024-05-15"],
+                "acceptanceDateTime": ["2024-03-01T17:05:00.000Z", "", "2025-02-10T09:00:00.000Z", "", ""],
+                "accessionNumber": ["0001-24-000010", "0001-24-000011", "0001-25-000012", "0001-24-000013", "y"]},
+                "files": []}}
+        return FakeSec.get_json(self, url, sec)
+
+    def get(self, url, sec=True):
+        self.calls.append(url)
+        if "000124000010" in url:
+            return (HDR % ("BANK OF AMERICA CORP", "0000070858")).encode()
+        if "000124000013" in url:
+            return (HDR % ("BERKSHIRE HATHAWAY INC", "0001067983")).encode()  # a stake IN the investor
+        return (HDR % ("GONE CORP", "0000999999")).encode()
+
+
+class BroadRefresh(unittest.TestCase):
+    def test_adds_this_years_list_and_only_new_reports(self):
+        doc = {"managers": {"X": "X"}, "lists": [{"year": 2025, "usable_from": "2025-04-01", "rule": {}, "ciks": ["X"]}],
+               "rows": [["2025-05-15", "X", "2025-03-31", "2025-05-15", 0, []]]}
+        asked = []
+
+        def build(filers, since):
+            asked.append(([f["cik"] for f in filers], since))
+            return {"rows": [["2025-05-15", "Y", "2025-03-31", "2025-05-15", 0, []],
+                             ["2026-05-15", "Y", "2026-03-31", "2026-05-15", 0, [["AAA", 1, 1]]]]}
+        out = signals.refresh_broad(doc, "t t@example.com", 2026, log=lambda m: None, build=build,
+                                    build_list=lambda y: {"usable_from": "2026-04-01", "rule": {},
+                                                          "managers": [{"cik": "Y", "name": "Why"}]})
+        self.assertEqual([x["year"] for x in out["lists"]], [2025, 2026])
+        self.assertEqual(asked, [(["Y"], "2025-01-01")])                 # the newest list's managers only
+        self.assertEqual(len(out["rows"]), 3)
+        again = signals.refresh_broad(out, "t t@example.com", 2026, log=lambda m: None, build=build,
+                                      build_list=lambda y: self.fail("list already there"))
+        self.assertEqual(len(again["rows"]), 3)                          # nothing twice
+        empty = signals.refresh_broad(doc, "t t@example.com", 2027, log=lambda m: None, build=build,
+                                      build_list=lambda y: {"managers": []})  # January: no list yet
+        self.assertEqual(len(empty["lists"]), 1)
+        self.assertEqual(len(doc["rows"]), 1)                            # the input is not changed
+
+
+class Stakes(unittest.TestCase):
+    def test_new_stakes_are_dated_originals_with_tickers(self):
+        f = StakeSec()
+        doc = signals.build_13dg("t t@example.com", filers=[{"cik": "1067983", "name": "Berkshire"}],
+                                 log=lambda m: None, fetcher=f)
+        self.assertFalse(any("000124000011" in c for c in f.calls))        # amendments are not read
+        self.assertEqual([r[:4] + r[6:] for r in doc["rows"]],
+                         [["2024-03-02", "0001067983", "13D", "2024-03-01", "BAC"],   # after 4 p.m.: next day
+                          ["2025-02-10", "0001067983", "13G", "2025-02-10", ""]])     # vanished: no ticker
+        s = signals.Signals(stakes=doc)
+        self.assertEqual(s.new_stakes("2024-03-01"), {})                   # not public yet
+        self.assertEqual(s.new_stakes("2024-03-04"), {"BAC": ["0001067983"]})
+        self.assertEqual(s.new_stakes("2024-03-04", forms=("13G",)), {})
+        self.assertEqual(s.new_stakes("2025-06-01", days=30), {})           # too old
+        self.assertTrue(s)
+
+
 def cf(key, rows):
     return {key: {"units": {("USD/shares" if key.startswith("Earnings") else "USD"): [
         {"start": a, "end": b, "val": v, "filed": f, "form": "10-Q"} for a, b, v, f in rows]}}}

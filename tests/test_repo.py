@@ -102,7 +102,7 @@ class Repo(unittest.TestCase):
         allowed = {"argparse", "copy", "csv", "datetime", "io", "json", "math", "os", "re", "statistics", "sys",
                    "time", "urllib", "subprocess", "threading", "traceback", "webbrowser", "http", "contextlib",
                    "bisect", "market", "accounts", "paper", "daily", "init", "team", "analyst", "candles",
-                   "executor", "risk_manager", "scanner", "trade_log", "ptr", "replay", "vix", "universe", "signals", "gzip", "zipfile", "concurrent", "xml",
+                   "executor", "risk_manager", "scanner", "trade_log", "ptr", "replay", "cdr", "vix", "universe", "signals", "gzip", "zipfile", "concurrent", "xml",
                    "edgar13f", "facts"}
         for path in [os.path.join(ROOT, s, f) for s in OURS for f in os.listdir(os.path.join(ROOT, s))
                      if f.endswith(".py")] + [os.path.join(REPO, "app", "server.py")]:

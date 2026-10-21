@@ -137,6 +137,20 @@ class TestedPlan(unittest.TestCase):
         self.assertEqual(p[0]["outside_plan"], 700.0)
         self.assertEqual(daily.tested_plan(review, None), [])
 
+    def test_health_warnings(self):
+        rec = {"updated": "2026-10-20", "data": {"f13_latest": "2026-08-15", "congress_latest": "2026-10-15"}}
+        self.assertEqual(daily.health(rec, "2026-10-21"), [])
+        self.assertEqual(daily.health(rec, "2026-10-22"), [])                         # one weekday late: fine
+        self.assertIn("last updated", daily.health(rec, "2026-10-23")[0])            # two missed: warn
+        old = dict(rec, data={"f13_latest": "2026-05-15", "congress_latest": "2026-08-01"})
+        self.assertEqual(len(daily.health(old, "2026-10-21")), 2)
+        runs = [{"conclusion": "failure", "created_at": "2026-10-19T01:00:00Z", "html_url": "u"},
+                {"conclusion": "failure", "created_at": "2026-10-01T01:00:00Z", "html_url": "old"}]
+        self.assertEqual(daily.health(rec, "2026-10-21", runs), ["A GitHub run failed on 2026-10-19: u"])
+        self.assertIn("No live record", daily.health(None, "2026-10-21")[0])
+        text = daily.render({"date": "2026-10-21", "steps": {}, "health": ["x"]})
+        self.assertIn("WARNING: x", text)
+
     def test_copycat_consensus_section_and_change_alert(self):
         review = {"accounts": [{"name": "Questrade", "strategy": "growth", "total": 1000.0,
                                 "positions": [{"ticker": "AMZN", "value_base": 500.0}]}]}
@@ -158,6 +172,15 @@ class TestedPlan(unittest.TestCase):
         text = daily.render({"date": "2026-11-16", "steps": {}, "c4_change": ch, "c4": c4})
         self.assertIn("Copycat consensus (C4) changed", text)
         self.assertIn("Copycat consensus (C4, upstream agent) for Questrade", text)
+
+    def test_plan_names_a_verified_cdr(self):
+        review = {"accounts": [{"name": "Questrade", "strategy": "growth", "total": 1000.0, "positions": []}]}
+        rec = {"updated": "2026-10-21", "plan": {"strategies": {"C7 (chosen)": {}}},
+               "targets": {"C7 (chosen)": {"AMD": 0.5, "NVDA": 0.5}}}
+        p = daily.tested_plan(review, rec, cdr_map={"AMD": "AMD.NE"})
+        self.assertEqual({r["ticker"]: r.get("cdr") for r in p[0]["rows"]}, {"AMD": "AMD.NE", "NVDA": None})
+        self.assertIn("CDR AMD.NE", daily.render({"date": "2026-10-21", "steps": {}, "plan": p}))
+        self.assertEqual(daily.cdrs.load().get("AMD"), "AMD.NE")   # the verified map ships with the repo
 
 
 class DailyOffline(unittest.TestCase):
