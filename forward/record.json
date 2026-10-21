@@ -1,15 +1,50 @@
 {
- "start": "2026-10-19",
+ "start": "2026-10-20",
  "plan": {
-  "start": "2026-10-19",
+  "start": "2026-10-20",
   "cash": 100.0,
-  "note": "Frozen when the live record started. Change the settings only by starting a new record with a new start date.",
+  "note": "Frozen when the live record started. Change the settings only by starting a new record with a new start date (the earlier record is kept under 'earlier').",
   "strategies": {
-   "70% Nasdaq 100 + 30% dual momentum (chosen)": {
+   "Copycat consensus: top 5 of 3+ famous investors, C7 (chosen)": {
+    "kind": "copycat",
+    "opts": {
+     "mode": "consensus",
+     "n": 5
+    }
+   },
+   "70% Nasdaq 100 + 30% dual momentum, every 2 weeks (main plan until 2026-10-21)": {
+    "kind": "dual",
+    "opts": {
+     "core": "QQQ",
+     "core_weight": 0.7,
+     "every": 14
+    }
+   },
+   "70% Nasdaq 100 + 30% dual momentum, monthly (previous plan)": {
     "kind": "dual",
     "opts": {
      "core": "QQQ",
      "core_weight": 0.7
+    }
+   },
+   "Copycat consensus: top 10 of 3+ famous investors (C4, upstream agent)": {
+    "kind": "copycat",
+    "opts": {
+     "mode": "consensus",
+     "n": 10
+    }
+   },
+   "Pelosi copy, watch only: hindsight check failed (P2)": {
+    "kind": "pelosi",
+    "opts": {
+     "mode": "hold"
+    }
+   },
+   "Congress leaders: buys of the 3 members with the best 2-year records (L6)": {
+    "kind": "leaders",
+    "opts": {
+     "k": 3,
+     "years": 2
     }
    },
    "Dual momentum (single strongest fund)": {
@@ -29,27 +64,141 @@
     }
    }
   },
-  "chosen_by": "walk-forward pit-v6-safety: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods (+14.9 pts, worst drop -22.4%); held-out last 12 months: +9.2 pts"
+  "chosen_by": "walk-forward pit-v11-news, decision rule v4 written before the results: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods, kept only if it beats the Nasdaq 100's gap (+14.0 pts). Rebalancing every 2 weeks: +16.9 pts, worst drop -22.4%. Held-out last 12 months: -0.6 pts (the monthly plan: +9.2 pts), so both stay on the record. Rule v8 (walk-forward pit-v14-hindsight): every House member with 10+ buys copied like Pelosi beat the S&P 500 in half or more of cases in only 2 of 4 training periods, and her rank swung from 1st to 51st, so her result is called hindsight-driven: she stays as a watch line, not a recommendation. Every one of the 23 investors copied alone beat the S&P 500 in half or more of cases in 3 of 4 periods, so copying them is a method, not one star; copycat consensus (C4) beat the Nasdaq 100's (+14.0) and the plan's (+16.9) training gap with +20.5 pts, worst drop -23.7%, and joins the record. Held-out last 12 months: C4 -2.9 pts, Pelosi -10.1 pts. Rule v10 (walk-forward pit-v15-leaders): ranking House members each month by how their past disclosed buys did (outcomes known by then) and copying the 3 best on 2-year records (L6) beat the Nasdaq 100's training gap, the plan's and copying every member (+17.2 pts, worst drop -22.8%; held-out year +1.5 pts); only 1 of 6 ranking versions passed, so it is weak evidence and joins the record to be watched. Rule v11 (written before the results; walk-forwards pit-v16-versions and pit-v17-broad, long histories long-history-c4 and long-history-c4-versions): the consensus rule also beat the S&P 500 on a rule-based investor list (the 50 largest concentrated 13F filers each year, usable from April) with +14.2 pts in training against the Nasdaq 100's +14.0, a pass by a hair; so the main plan becomes the consensus version with the best training gap whose 2000-2017 range is above zero and whose drops are within 5 points of the Nasdaq 100's: C7, stocks in the top 5 of at least 3 of the 23 investors (+24.5 pts, worst drop -23.3%; 2000-2017 +7.3 pts a year, range +2.7 to +12.0; held-out year -6.0 pts). Part of that edge is likely the famous-today choice of investors (the rule-based list made about 10 pts less), so expect less, and let the live record confirm it before real money."
  },
  "days": {
   "2026-10-19": {
-   "70% Nasdaq 100 + 30% dual momentum (chosen)": 100.0,
+   "Copycat consensus: top 5 of 3+ famous investors, C7 (chosen)": 100.0,
+   "70% Nasdaq 100 + 30% dual momentum, every 2 weeks (main plan until 2026-10-21)": 100.0,
+   "70% Nasdaq 100 + 30% dual momentum, monthly (previous plan)": 100.0,
+   "Copycat consensus: top 10 of 3+ famous investors (C4, upstream agent)": 100.0,
+   "Pelosi copy, watch only: hindsight check failed (P2)": 100.0,
+   "Congress leaders: buys of the 3 members with the best 2-year records (L6)": 100.0,
    "Dual momentum (single strongest fund)": 100.0,
    "Nasdaq 100 (QQQ)": 100.0,
    "S&P 500 (SPY)": 100.0
   }
  },
+ "earlier": [
+  {
+   "start": "2026-10-19",
+   "plan": {
+    "start": "2026-10-19",
+    "cash": 100.0,
+    "note": "Frozen when the live record started. Change the settings only by starting a new record with a new start date.",
+    "strategies": {
+     "70% Nasdaq 100 + 30% dual momentum (chosen)": {
+      "kind": "dual",
+      "opts": {
+       "core": "QQQ",
+       "core_weight": 0.7
+      }
+     },
+     "Dual momentum (single strongest fund)": {
+      "kind": "dual",
+      "opts": {}
+     },
+     "Nasdaq 100 (QQQ)": {
+      "kind": "hold",
+      "weights": {
+       "QQQ": 1.0
+      }
+     },
+     "S&P 500 (SPY)": {
+      "kind": "hold",
+      "weights": {
+       "SPY": 1.0
+      }
+     }
+    },
+    "chosen_by": "walk-forward pit-v6-safety: among settings whose average worst drop in training was within 5 points of the Nasdaq 100's, the best average gap to the S&P 500 over the 2019-2024 training periods (+14.9 pts, worst drop -22.4%); held-out last 12 months: +9.2 pts"
+   },
+   "days": {
+    "2026-10-19": {
+     "70% Nasdaq 100 + 30% dual momentum (chosen)": 100.0,
+     "Dual momentum (single strongest fund)": 100.0,
+     "Nasdaq 100 (QQQ)": 100.0,
+     "S&P 500 (SPY)": 100.0
+    }
+   },
+   "holdings": {
+    "70% Nasdaq 100 + 30% dual momentum (chosen)": [],
+    "Dual momentum (single strongest fund)": [],
+    "Nasdaq 100 (QQQ)": [],
+    "S&P 500 (SPY)": []
+   },
+   "updated": "2026-10-19",
+   "targets": {
+    "70% Nasdaq 100 + 30% dual momentum (chosen)": {
+     "USO": 0.3,
+     "QQQ": 0.7
+    },
+    "Dual momentum (single strongest fund)": {
+     "USO": 1.0
+    },
+    "Nasdaq 100 (QQQ)": {
+     "QQQ": 1.0
+    },
+    "S&P 500 (SPY)": {
+     "SPY": 1.0
+    }
+   }
+  }
+ ],
  "holdings": {
-  "70% Nasdaq 100 + 30% dual momentum (chosen)": [],
+  "Copycat consensus: top 5 of 3+ famous investors, C7 (chosen)": [],
+  "70% Nasdaq 100 + 30% dual momentum, every 2 weeks (main plan until 2026-10-21)": [],
+  "70% Nasdaq 100 + 30% dual momentum, monthly (previous plan)": [],
+  "Copycat consensus: top 10 of 3+ famous investors (C4, upstream agent)": [],
+  "Pelosi copy, watch only: hindsight check failed (P2)": [],
+  "Congress leaders: buys of the 3 members with the best 2-year records (L6)": [],
   "Dual momentum (single strongest fund)": [],
   "Nasdaq 100 (QQQ)": [],
   "S&P 500 (SPY)": []
  },
- "updated": "2026-10-19",
  "targets": {
-  "70% Nasdaq 100 + 30% dual momentum (chosen)": {
+  "Copycat consensus: top 5 of 3+ famous investors, C7 (chosen)": {
+   "AMZN": 0.2,
+   "BRK-B": 0.2,
+   "GOOGL": 0.2,
+   "NVDA": 0.2,
+   "TSM": 0.2
+  },
+  "70% Nasdaq 100 + 30% dual momentum, every 2 weeks (main plan until 2026-10-21)": {
    "USO": 0.3,
    "QQQ": 0.7
+  },
+  "70% Nasdaq 100 + 30% dual momentum, monthly (previous plan)": {
+   "USO": 0.3,
+   "QQQ": 0.7
+  },
+  "Copycat consensus: top 10 of 3+ famous investors (C4, upstream agent)": {
+   "AAPL": 0.1,
+   "AMAT": 0.1,
+   "AMZN": 0.1,
+   "BRK-B": 0.1,
+   "GOOGL": 0.1,
+   "LRCX": 0.1,
+   "META": 0.1,
+   "NVDA": 0.1,
+   "TSM": 0.1,
+   "V": 0.1
+  },
+  "Pelosi copy, watch only: hindsight check failed (P2)": {
+   "AAPL": 0.1,
+   "AB": 0.1,
+   "AMZN": 0.1,
+   "GOOGL": 0.1,
+   "NVDA": 0.1,
+   "TEM": 0.1,
+   "VST": 0.1,
+   "INTC": 0.1,
+   "UBER": 0.1,
+   "BE": 0.1
+  },
+  "Congress leaders: buys of the 3 members with the best 2-year records (L6)": {
+   "GLAS": 0.5,
+   "NVDA": 0.5
   },
   "Dual momentum (single strongest fund)": {
    "USO": 1.0
@@ -60,5 +209,6 @@
   "S&P 500 (SPY)": {
    "SPY": 1.0
   }
- }
+ },
+ "updated": "2026-10-19"
 }
