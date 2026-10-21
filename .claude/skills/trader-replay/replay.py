@@ -2814,11 +2814,18 @@ def forward(plan, record=None, offline=None, today=None, log=print, signals=None
             log("forward: %s" % e)
     data = Data(charts, {})
     last = data.trading_day_on_or_before(today or data.days[-1])
-    first = data.trading_day_on_or_before(start)
     rec = record or {"start": start, "plan": plan, "days": {}}
     if rec.get("start") != start:  # a new plan starts a new record; the old one is kept exactly as it was
         old = dict(rec)
         rec = {"start": start, "plan": plan, "days": {}, "earlier": old.pop("earlier", []) + [old]}
+    # A record never begins before its plan existed: the first day is the first trading day ON OR AFTER
+    # the start (prices for it may not be out yet), and any day before the start is not part of it.
+    rec["days"] = {d: v for d, v in rec["days"].items() if d >= start}
+    after = [d for d in data.days if start <= d <= last]
+    if not after:
+        rec["updated"] = rec.get("updated")
+        return rec
+    first = after[0]
     out = {}
     for name, st in plan["strategies"].items():
         if st["kind"] == "hold":
