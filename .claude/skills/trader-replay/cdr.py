@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "trader-accounts"))
 import market as mk  # noqa: E402
 
 MAP = os.path.join(HERE, "cdr.json")
+MIN_BARS = 120  # about six months of trading: a real listing, not a placeholder quote
 # US ticker -> Yahoo symbols to try (Cboe Canada listings end in .NE). Only verified ones are kept.
 CANDIDATES = {
     "AAPL": ["AAPL.NE"], "MSFT": ["MSFT.NE"], "AMZN": ["AMZN.NE"], "GOOGL": ["GOOG.NE", "GOOGL.NE"],
@@ -71,7 +72,8 @@ def compare(cdr, us, fx, since=None):
 
 
 def verify(get=None, today=None, log=print):
-    """Try every candidate; keep the ones that trade in CAD with a price in the last 10 days.
+    """Try every candidate; keep the ones that trade in CAD, with 6+ months of prices and a price in the
+    last 10 days.
     Returns ({us ticker: cdr symbol}, rows for the report)."""
     get = get or (lambda s, r: mk.get_chart(s, range_=r))
     today = today or datetime.date.today().isoformat()
@@ -87,8 +89,8 @@ def verify(get=None, today=None, log=print):
                 ch = get(sym, "5y")
             except mk.MarketError:
                 continue
-            if (ch.get("currency") or "").upper() != "CAD" or not ch["bars"] or ch["bars"][-1]["d"] < fresh:
-                continue
+            if (ch.get("currency") or "").upper() != "CAD" or len(ch["bars"]) < MIN_BARS or ch["bars"][-1]["d"] < fresh:
+                continue  # a symbol Yahoo answers with a day or two of prices is not a real, trading CDR
             try:
                 usc = get(us, "5y")
             except mk.MarketError as e:
