@@ -80,11 +80,11 @@
   {
    "from": "2021-12-01",
    "to": "2026-10-21",
-   "days": 1197,
+   "days": 1223,
    "cdr_pct": 221.89,
-   "us_usd": 265.83,
-   "us_cad": 302.77,
-   "hedge_cost_per_year": 2.65,
+   "us_usd": 266.0,
+   "us_cad": 303.0,
+   "hedge_cost_per_year": 2.66,
    "us": "AMD",
    "cdr": "AMD.NE",
    "name": "Advanced Micro Devices, Inc."
