@@ -95,7 +95,9 @@ def verify(get=None, today=None, log=print):
                 log("cdr: %s: %s" % (us, e))
                 break
             found[us] = sym
-            rows.append(dict(compare(ch, usc, fx) or {}, us=us, cdr=sym, name=ch.get("name", "")))
+            ds = [x["d"] for x in ch["bars"]]
+            rows.append(dict(compare(ch, usc, fx) or {}, us=us, cdr=sym, name=ch.get("name", ""),
+                             bars=len(ds), first_bar=ds[0], last_bar=ds[-1]))
             break
     return found, rows
 
@@ -113,7 +115,8 @@ def render(found, rows):
             L.append("| %s | %s | %s | %+.1f%% | %+.1f%% | %+.1f%% | %+.2f pts |" % (
                 r["us"], r["cdr"], r["from"], r["cdr_pct"], r["us_usd"], r["us_cad"], r["hedge_cost_per_year"] or 0))
         elif "cdr" in r:
-            L.append("| %s | %s | (too little history) | | | | |" % (r["us"], r["cdr"]))
+            L.append("| %s | %s | (too little history: %s bars from %s) | | | | |" % (
+                r["us"], r["cdr"], r.get("bars"), r.get("first_bar")))
     L += ["", "_Not financial advice. Check the CDR's ratio and fees before buying._"]
     return "\n".join(L) + "\n"
 
