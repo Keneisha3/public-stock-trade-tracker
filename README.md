@@ -406,9 +406,16 @@ Questrade (its API is read-only), convert CAD with Norbert's gambit.
    2026-10-20) with C7 inside its backtest range and no data failures.
 2. Survivorship: about a third of the pre-2013 holdings and some delisted
    companies have no prices; an EODHD key in `.env` fills the prices.
-3. Health checks: GitHub runs scheduled jobs late or not at all sometimes;
-   the briefing should warn when the record is stale or a build failed.
-4. Then start small (say 10-25 % of the growth account), and grow only if
+3. Health checks (done): the briefing warns when the record is stale, the 13F
+   or Congress data stopped updating, or a GitHub run failed, and says
+   whether each copy line is inside its backtest's 90% range so far.
+4. CDRs: a pick with a verified Canadian Depositary Receipt (CAD, hedged,
+   on Cboe Canada) shows it, so the TFSA can skip the CAD to USD conversion.
+   Only AMD.NE could be verified on Yahoo (6+ months of prices); it trailed
+   AMD in US dollars by about 2.7 points a year, the cost of the hedge. Check
+   other CDRs with your broker (`python3 .claude/skills/trader-replay/cdr.py
+   verify --out DIR` re-checks; the workflow mode is `cdr`).
+5. Then start small (say 10-25 % of the growth account), and grow only if
    12 months of live record holds up. Not financial advice.
 
 ## The crypto bot team

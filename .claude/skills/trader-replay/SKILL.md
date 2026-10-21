@@ -89,6 +89,12 @@ Clerk, plus `pdftotext` for the Pelosi filings.
   with VIX changes), and the VIX path in `factors`. Real VIX spikes usually
   come WITH the drop, so the agent often exits after the damage: say so.
 
+- CDRs: `cdr.py verify --out DIR` checks which picks have a Canadian Depositary
+  Receipt trading in CAD (6+ months of Yahoo prices) and how its hedged return
+  compared with the US share; `cdr.json` holds the verified map the briefing
+  shows (only AMD.NE so far). A hedged CDR follows the US-dollar return minus
+  the hedge cost, not the CAD return.
+
 ## Reading it to the user
 
 Lead with the table. Then say plainly:

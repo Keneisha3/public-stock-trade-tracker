@@ -1,0 +1,6 @@
+{
+ "verified": "2026-10-21",
+ "source": "cdr.py verify (workflow mode cdr): only symbols with 6+ months of CAD prices on Yahoo. Most CIBC CDRs are not on Yahoo with real history, so check your broker for the rest.",
+ "cdr": {"AMD": "AMD.NE"},
+ "hedge_cost_per_year": {"AMD": 2.67}
+}

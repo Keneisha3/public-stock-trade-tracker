@@ -36,6 +36,7 @@ import accounts as acc  # noqa: E402
 import paper  # noqa: E402
 import team  # noqa: E402
 import replay  # noqa: E402
+import cdr as cdrs  # noqa: E402
 
 STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward"]
 NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward"}
@@ -69,16 +70,18 @@ def _tool(folder, script, args, timeout=180):
         return None, out[:400]
 
 
-def tested_plan(review, rec, marker="(chosen)"):
+def tested_plan(review, rec, marker="(chosen)", cdr_map=None):
     """For each growth account: what a strategy of the live record (the one whose name contains
     `marker`: "(chosen)" for the plan, "(C4" for copycat consensus) would hold today, in the
-    account's money, beside what it holds now."""
+    account's money, beside what it holds now. A pick with a verified Canadian Depositary Receipt
+    (`cdr_map`, from trader-replay/cdr.json) names it: buyable in CAD, currency-hedged."""
     if not rec:
         return []
     name = next((k for k in (rec.get("plan") or {}).get("strategies", {}) if marker in k), None)
     targets = (rec.get("targets") or {}).get(name) if name else None
     if not targets:
         return []
+    cdr_map = cdrs.load() if cdr_map is None else cdr_map
     out = []
     for a in review.get("accounts", []):
         if a.get("strategy") != "growth" or not a.get("total"):
@@ -87,6 +90,9 @@ def tested_plan(review, rec, marker="(chosen)"):
         rows = [{"ticker": t, "target_pct": round(100 * w, 1), "target": round(a["total"] * w, 2),
                  "now": round(held.get(t, 0.0), 2), "change": round(a["total"] * w - held.get(t, 0.0), 2)}
                 for t, w in sorted(targets.items(), key=lambda kv: -kv[1])]
+        for r in rows:
+            if cdr_map.get(r["ticker"]):
+                r["cdr"] = cdr_map[r["ticker"]]
         out.append({"account": a["name"], "plan": name, "total": a["total"], "rows": rows, "note": NOTES.get(marker, ""),
                     "outside_plan": round(sum(v for t, v in held.items() if t not in targets), 2),
                     "as_of": rec.get("updated")})
@@ -344,9 +350,10 @@ def render(b):
     for p in (b.get("plan") or []) + (b.get("c4") or []):
         L.append("## %s for %s (targets as of %s)" % (p["plan"], p["account"], p["as_of"]))
         for r in p["rows"]:
-            L.append("- %s %.0f%%: %s (now %s, %s %s)" % (r["ticker"], r["target_pct"], acc.money(r["target"]),
-                                                        acc.money(r["now"]), "buy" if r["change"] > 0 else "sell",
-                                                        acc.money(abs(r["change"]))))
+            L.append("- %s %.0f%%: %s (now %s, %s %s)%s" % (
+                r["ticker"], r["target_pct"], acc.money(r["target"]), acc.money(r["now"]),
+                "buy" if r["change"] > 0 else "sell", acc.money(abs(r["change"])),
+                "; in CAD as the CDR %s (currency-hedged; AMD.NE trailed AMD by about 2.7 pts a year)" % r["cdr"] if r.get("cdr") else ""))
         if p["outside_plan"]:
             L.append("- In holdings outside the plan: %s" % acc.money(p["outside_plan"]))
         L.append("- " + (p.get("note") or "An option, not an order. Nothing is placed for you."))

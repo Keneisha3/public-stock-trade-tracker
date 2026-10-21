@@ -173,6 +173,15 @@ class TestedPlan(unittest.TestCase):
         self.assertIn("Copycat consensus (C4) changed", text)
         self.assertIn("Copycat consensus (C4, upstream agent) for Questrade", text)
 
+    def test_plan_names_a_verified_cdr(self):
+        review = {"accounts": [{"name": "Questrade", "strategy": "growth", "total": 1000.0, "positions": []}]}
+        rec = {"updated": "2026-10-21", "plan": {"strategies": {"C7 (chosen)": {}}},
+               "targets": {"C7 (chosen)": {"AMD": 0.5, "NVDA": 0.5}}}
+        p = daily.tested_plan(review, rec, cdr_map={"AMD": "AMD.NE"})
+        self.assertEqual({r["ticker"]: r.get("cdr") for r in p[0]["rows"]}, {"AMD": "AMD.NE", "NVDA": None})
+        self.assertIn("CDR AMD.NE", daily.render({"date": "2026-10-21", "steps": {}, "plan": p}))
+        self.assertEqual(daily.cdrs.load().get("AMD"), "AMD.NE")   # the verified map ships with the repo
+
 
 class DailyOffline(unittest.TestCase):
     def test_daily_run_writes_the_briefing(self):
