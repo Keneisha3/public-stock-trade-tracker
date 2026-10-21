@@ -949,7 +949,8 @@ def _equal(picks):
 
 COPY_DEFAULT = {"mode": "top", "n": 3, "who": None, "min_count": 3, "trend": False, "broad": False,
                 "weighted": False, "top_managers": None, "cap": None, "sector_cap": None, "brake": False,
-                "stake_days": None, "stake_forms": ("13D", "13G"), "stake_vote": False}
+                "stake_days": None, "stake_forms": ("13D", "13G"), "stake_vote": False, "half_with": None,
+                "confirm": None}
 # Broad sectors of the companies the famous investors hold most (a company's sector rarely changes, so
 # this is not hindsight). A company not listed counts as a sector of its own.
 SECTORS = {s: sec for sec, names in {
@@ -1003,6 +1004,15 @@ COPY_VERSIONS = [
                                                                       "stake_days": 182}),
     ("E4", "Copycat C7, a new 5% stake counts as a top-5 holding", {"mode": "consensus", "n": 5,
                                                                     "stake_days": 365, "stake_vote": True}),
+    # the famous 23 blended with the rule-based list (round 14, rule v14)
+    ("F1", "Blend: consensus, in the top 5 of 3+ of the famous 23 and the rule-based 50", {"mode": "consensus",
+                                                                                         "n": 5, "broad": "both"}),
+    ("F2", "Blend: consensus, in the top 10 of 4+ of the 73", {"mode": "consensus", "n": 10, "min_count": 4,
+                                                              "broad": "both"}),
+    ("F3", "Blend: half C7, half B1", {"mode": "consensus", "n": 5, "half_with": {
+        "mode": "consensus", "n": 10, "min_count": 5, "broad": True}}),
+    ("F4", "Blend: C7's picks that 2+ rule-based managers also hold in their top 10",
+     {"mode": "consensus", "n": 5, "confirm": [10, 2]}),
     # the same rules on a list chosen by a rule, not by fame: the 50 largest concentrated managers each year
     ("B1", "Rule-based list: consensus, in the top 10 of 5+ of the 50 managers", {"mode": "consensus", "n": 10,
                                                                                   "min_count": 5, "broad": True}),
@@ -1051,7 +1061,7 @@ def guard(data, w, d, cap=None, sector_cap=None, brake=False, fill="SPY", safe="
 
 def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False, broad=False, weighted=False,
                     top_managers=None, cap=None, sector_cap=None, brake=False, stake_days=None,
-                    stake_forms=("13D", "13G"), stake_vote=False):
+                    stake_forms=("13D", "13G"), stake_vote=False, half_with=None, confirm=None):
     """copycat_picks with the risk limits of `guard` (none by default). stake_days: also use the
     5% stakes (13D / 13G) disclosed in that many days: mode "stakes" holds them alone, consensus
     adds them (stake_vote: counts each as a vote from its investor instead)."""
@@ -1066,6 +1076,17 @@ def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=
                           stakes if stake_vote else None)
         if stakes and not stake_vote:
             w = _equal(sorted(set(w) - {"SPY"} | set(stakes)))
+    if half_with:  # half in these picks, half in another version's (e.g. the rule-based list's)
+        other = copycat_picks(data, sig, d, **half_with)
+        w = {t: (w.get(t, 0.0) + other.get(t, 0.0)) / 2 for t in set(w) | set(other)}
+    if confirm:  # keep only picks that enough rule-based managers also hold in their top n
+        n2, k = confirm
+        count = {}
+        for c in sig.broad_list(d) or []:
+            for t, _ in sorted((_merge_names(sig.holdings_13f(c, d, broad=True)) or {}).items(),
+                               key=lambda kv: -kv[1][0])[:n2]:
+                count[t] = count.get(t, 0) + 1
+        w = _equal(sorted(t for t in w if count.get(t, 0) >= k))
     return guard(data, w, d, cap, sector_cap, brake) if cap or sector_cap or brake else w
 
 
@@ -1077,15 +1098,19 @@ def copycat_picks(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=Fa
     of at least min_count investors. new: per investor, the n biggest positions that are new or at
     least 1.5x the shares of the report before. Stocks we have no prices for are skipped.
     broad: the managers on the rule-based list public by `d`, instead of the famous 23 (top_managers:
-    only that many of the largest). weighted: consensus weights by how many hold each stock."""
+    only that many of the largest); "both": the two lists together. weighted: consensus weights by how many hold each stock."""
     if not sig or not (sig.f13b if broad else sig.f13):
         return {"SPY": 1.0}
-    if broad:
-        who = list(sig.broad_list(d) or [])[:top_managers]
-        if not who:
+    if broad == "both":  # the famous 23 and the rule-based list, one vote per manager
+        pairs = [(c, False) for c in sorted(sig.f13)] + [(c, True) for c in sig.broad_list(d) or [] if c not in sig.f13]
+    elif broad:
+        pairs = [(c, True) for c in list(sig.broad_list(d) or [])[:top_managers]]
+        if not pairs:
             return {"SPY": 1.0}
+    else:
+        pairs = [(c, False) for c in (who or sorted(sig.f13))]
     books = {}
-    for cik in (who or sorted(sig.f13)):
+    for cik, broad in pairs:
         h = _merge_names(sig.holdings_13f(cik, d, broad=broad))
         if not h:
             continue
@@ -1996,7 +2021,8 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
         sig = ctx.get("signals")
         if sig and sig.f13:  # the upstream agents, every version (C: copycat, S: screener, P: Pelosi, K: plans)
             for code, name, over in COPY_VERSIONS:
-                if (over.get("broad") and not sig.f13b) or (over.get("stake_days") and not sig.stakes):
+                if (over.get("broad") or over.get("half_with") or over.get("confirm")) and not sig.f13b \
+                        or (over.get("stake_days") and not sig.stakes):
                     continue
                 add("copycat", "%s. %s" % (code, name), over,
                     lambda st, o=over: run_copycat(data, sig, st, asof, cash, **o))

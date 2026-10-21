@@ -1140,6 +1140,26 @@ class UpstreamAgents(unittest.TestCase):
                                    weighted=True)
         self.assertAlmostEqual(w["AAA"], 2 / 3.0)                                  # two hold it, one holds BBB
 
+    def test_blends_of_the_famous_and_the_rule_based_list(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        famous = {"managers": {}, "rows": [[days[300], m, days[260], days[300], 0, [["AAA", 9, 1]]] for m in "AB"]}
+        broad = {"rows": [[days[300], m, days[260], days[300], 0, [["BBB", 9, 1], ["AAA", 1, 1]]] for m in "XY"],
+                 "lists": [{"year": 1, "usable_from": days[305], "ciks": ["X", "Y", "A"]}]}
+        s = replay.sigs.Signals(f13=famous, f13_broad=broad)
+        cw = lambda day, **o: replay.copycat_weights(data, s, day, **dict(replay.COPY_DEFAULT, **o))  # noqa: E731
+        self.assertEqual(cw(days[306], mode="consensus", n=1, min_count=2, broad="both"), {"AAA": 0.5, "BBB": 0.5})
+        self.assertEqual(cw(days[302], mode="consensus", n=1, min_count=2, broad="both"), {"AAA": 1.0})  # no list yet
+        half = cw(days[306], mode="consensus", n=1, min_count=2,
+                  half_with={"mode": "consensus", "n": 1, "min_count": 2, "broad": True})
+        self.assertEqual(half, {"AAA": 0.5, "BBB": 0.5})
+        self.assertEqual(cw(days[306], mode="consensus", n=1, min_count=2, confirm=[2, 2]), {"AAA": 1.0})
+        self.assertEqual(cw(days[306], mode="consensus", n=1, min_count=2, confirm=[1, 2]), {"SPY": 1.0})
+
     def test_early_stakes_versions(self):
         d = tempfile.mkdtemp()
         try:
