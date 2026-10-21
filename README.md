@@ -353,6 +353,30 @@ likely the famous-today choice. C7 leads the live record from 2026-10-20;
 the previous plan, C4 and the rest stay beside it. Real money should wait
 for the live record (see "Production" below).
 
+**Caps and a crash brake on C7** (rule v12, written before the results;
+`research/pit-v18-caps/`, `long-history-caps/`). Gap to the S&P 500 and
+average worst drop:
+
+| version | training 2019-24 (worst drop) | 2000-2017 a year (90 % range), worst drop | held-out year |
+| --- | ---: | ---: | ---: |
+| **C7 (main plan)** | +24.5 (-23.3 %) | +7.2 (+2.7 to +12.0), -15.9 % | -6.0 |
+| C11 no stock over 20 % | +27.4 (-23.1 %) | +2.2 (+0.3 to +4.0), -14.1 % | -6.0 |
+| C12 plus no sector over 40 % | +26.5 (-23.3 %) | +2.3 (+0.3 to +4.0), -14.1 % | -6.3 |
+| C13 half in Treasuries while the S&P 500 is under its 200-day | +19.4 (-20.2 %) | +9.1 (+4.4 to +13.6), -11.9 % | -8.9 |
+| C14 caps and brake | +19.4 (-20.2 %) | +3.7 (+0.6 to +6.6), -10.0 % | -9.0 |
+
+No version passed both halves, so C7 stays. The caps barely cut drops and
+cost a lot before 2018: until about 2012 C7 often held just 1 or 2 stocks
+(fewer of the 23 were filing and their top 5s rarely overlapped), so the cap
+pushed most of the money into the S&P 500. That also means C7's long-run
+edge came partly from very concentrated bets: worth knowing before copying it. The crash brake is the near miss:
+in 2000-2002 it lost 7 % where C7 lost 33 %, its worst one-year window was
+-15.6 % against -26.9 %, and it made more before 2018; but in 2019-2024 the
+crashes were short (2020 recovered in months), the brake sold near the
+bottom, and it gave up 5 points a year, past the 3 the rule allowed. If a
+slow bear market worries you more than a fast one, C13 is the version to
+think about; the rule says C7.
+
 **Following the best Congress members** (`research/pit-v15-leaders/`).
 Each month, members were ranked by how their past disclosed buys did
 against the S&P 500 (only outcomes known by then), and the leaders' buys
