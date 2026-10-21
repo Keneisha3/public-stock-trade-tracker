@@ -948,7 +948,8 @@ def _equal(picks):
 
 
 COPY_DEFAULT = {"mode": "top", "n": 3, "who": None, "min_count": 3, "trend": False, "broad": False,
-                "weighted": False, "top_managers": None, "cap": None, "sector_cap": None, "brake": False}
+                "weighted": False, "top_managers": None, "cap": None, "sector_cap": None, "brake": False,
+                "stake_days": None, "stake_forms": ("13D", "13G"), "stake_vote": False}
 # Broad sectors of the companies the famous investors hold most (a company's sector rarely changes, so
 # this is not hindsight). A company not listed counts as a sector of its own.
 SECTORS = {s: sec for sec, names in {
@@ -993,6 +994,15 @@ COPY_VERSIONS = [
                                                                                      "brake": True}),
     ("C14", "Copycat C7 with both caps and the crash brake", {"mode": "consensus", "n": 5, "cap": 0.2,
                                                              "sector_cap": 0.4, "brake": True}),
+    # 13D / 13G: new 5% stakes, disclosed within 10 to 45 days (round 13, rule v13)
+    ("E1", "Early stakes: every new 5% stake (13D or 13G) of the last 12 months", {"mode": "stakes",
+                                                                                  "stake_days": 365}),
+    ("E2", "Early stakes: new 13D stakes only (may push for change), last 12 months",
+     {"mode": "stakes", "stake_days": 365, "stake_forms": ("13D",)}),
+    ("E3", "Copycat C7 plus the new 5% stakes of the last 6 months", {"mode": "consensus", "n": 5,
+                                                                      "stake_days": 182}),
+    ("E4", "Copycat C7, a new 5% stake counts as a top-5 holding", {"mode": "consensus", "n": 5,
+                                                                    "stake_days": 365, "stake_vote": True}),
     # the same rules on a list chosen by a rule, not by fame: the 50 largest concentrated managers each year
     ("B1", "Rule-based list: consensus, in the top 10 of 5+ of the 50 managers", {"mode": "consensus", "n": 10,
                                                                                   "min_count": 5, "broad": True}),
@@ -1040,14 +1050,27 @@ def guard(data, w, d, cap=None, sector_cap=None, brake=False, fill="SPY", safe="
 
 
 def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False, broad=False, weighted=False,
-                    top_managers=None, cap=None, sector_cap=None, brake=False):
-    """copycat_picks with the risk limits of `guard` (none by default)."""
-    w = copycat_picks(data, sig, d, mode, n, who, min_count, trend, broad, weighted, top_managers)
+                    top_managers=None, cap=None, sector_cap=None, brake=False, stake_days=None,
+                    stake_forms=("13D", "13G"), stake_vote=False):
+    """copycat_picks with the risk limits of `guard` (none by default). stake_days: also use the
+    5% stakes (13D / 13G) disclosed in that many days: mode "stakes" holds them alone, consensus
+    adds them (stake_vote: counts each as a vote from its investor instead)."""
+    stakes = None
+    if stake_days and sig and getattr(sig, "stakes", None):
+        stakes = {t: c for t, c in sig.new_stakes(d, stake_days, stake_forms, who).items()
+                  if t in data.charts and data.close(t, d)}
+    if mode == "stakes":
+        w = _equal(sorted(stakes or []))
+    else:
+        w = copycat_picks(data, sig, d, mode, n, who, min_count, trend, broad, weighted, top_managers,
+                          stakes if stake_vote else None)
+        if stakes and not stake_vote:
+            w = _equal(sorted(set(w) - {"SPY"} | set(stakes)))
     return guard(data, w, d, cap, sector_cap, brake) if cap or sector_cap or brake else w
 
 
 def copycat_picks(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False, broad=False, weighted=False,
-                  top_managers=None):
+                  top_managers=None, votes=None):
     """What the upstream copycat would hold after the close of `d`, from 13Fs the market could act
     on by then. book: each investor's reported portfolio (top 50 stocks) at its weights, an equal
     share per investor. top: each investor's n biggest positions. consensus: stocks in the top n
@@ -1075,10 +1098,13 @@ def copycat_picks(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=Fa
             books[cik] = sorted(ok.items(), key=lambda kv: -kv[1][0])
     w = {}
     if mode == "consensus":
-        count = {}
-        for rows in books.values():
+        count, seen = {}, {}
+        for cik, rows in books.items():
             for t, _ in rows[:n]:
                 count[t] = count.get(t, 0) + 1
+                seen.setdefault(t, set()).add(cik)
+        for t, ciks in (votes or {}).items():  # a new 5% stake votes like a top-n holding
+            count[t] = count.get(t, 0) + len(set(ciks) - seen.get(t, set()))
         keep = {t: c for t, c in count.items() if c >= min_count}
         if weighted and keep:
             tot = float(sum(keep.values()))
@@ -1970,7 +1996,7 @@ def agent_scenarios(data, ctx, starts, asof, cash, longest):
         sig = ctx.get("signals")
         if sig and sig.f13:  # the upstream agents, every version (C: copycat, S: screener, P: Pelosi, K: plans)
             for code, name, over in COPY_VERSIONS:
-                if over.get("broad") and not sig.f13b:
+                if (over.get("broad") and not sig.f13b) or (over.get("stake_days") and not sig.stakes):
                     continue
                 add("copycat", "%s. %s" % (code, name), over,
                     lambda st, o=over: run_copycat(data, sig, st, asof, cash, **o))
@@ -2330,6 +2356,7 @@ def replay(base="trader", asof=None, cash=100.0, skip=(), offline=None, account_
         syms |= set(uni.ever(since, end)) | set(univ.CANADA) | {x for v in univ.ETFS.values() for x in v}
     if sig:  # what the copycat's investors and Nancy Pelosi held, so the upstream agents can be replayed
         syms |= {same_company(t) for f in (sig.f13, sig.f13b) for rows in f.values() for _, _, h in rows for t in h}
+        syms |= {same_company(r[6]) for r in sig.stakes}  # 13D / 13G stakes
         syms |= {same_company(r[2]) for r in sig.congress if r[2]}  # every member: the league table needs them
     syms = sorted(syms)
     charts = {}
@@ -2657,7 +2684,7 @@ LONG_STRATS = [
 ]
 LONG_BENCH = [("Nasdaq 100 (QQQ)", "QQQ"), ("S&P 500 (SPY)", "SPY")]
 LONG_C4 = ("Copycat consensus (C4)", "70% Nasdaq 100 + 30% C4")
-LONG_COPY = ("C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14")  # the other versions of the consensus rule
+LONG_COPY = ("C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14", "E1", "E2", "E3", "E4")  # the other versions of the consensus rule
 
 
 def c4_coverage(data, sig, start, end, step=91):
@@ -2766,7 +2793,7 @@ def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91,
             out[LONG_C4[0]] = run_copycat(data, sig, start, end, cash, mode="consensus", n=10)
             out[LONG_C4[1]] = run_plan(data, None, sig, start, end, cash, sleeves={"C4": 1.0})
             for code, name, over in COPY_VERSIONS:
-                if code in LONG_COPY:
+                if code in LONG_COPY and not (over.get("stake_days") and not sig.stakes):
                     out["%s. %s" % (code, name)] = run_copycat(data, sig, start, end, cash, **over)
         for name, sym in LONG_BENCH:
             if sym in data.charts:
@@ -2794,8 +2821,10 @@ def long_run(data, first="2000-01-03", until="2017-10-18", horizon=365, step=91,
     return {"asof": until, "first": first, "rolling": {"table": table, "horizon_days": horizon, "step_days": step,
                                                        "count": count},
             "periods": periods, "notes": notes or {},
-            "names": [n for n, _ in LONG_STRATS] + (list(LONG_C4) + ["%s. %s" % (c, n) for c, n, _ in COPY_VERSIONS
-                                                                      if c in LONG_COPY] if sig and sig.f13 else [])
+            "names": [n for n, _ in LONG_STRATS] + (list(LONG_C4) + ["%s. %s" % (c, n) for c, n, o in COPY_VERSIONS
+                                                                      if c in LONG_COPY and not (
+                                                                          o.get("stake_days") and not sig.stakes)]
+                                                     if sig and sig.f13 else [])
             + [n for n, _ in LONG_BENCH]}
 
 
@@ -3063,6 +3092,7 @@ def main(argv=None):
         sig = sigs.Signals.load(a.signals) if a.signals else None
         extra = {same_company(t) for rows in sig.f13.values() for e, _, h in rows if e < "2018" for t in h} \
             if sig and sig.f13 else set()
+        extra |= {same_company(r[6]) for r in (sig.stakes if sig else []) if r[0] < "2018"}
         charts, notes = long_charts(a.offline, a.save_data, log=lambda m: print(m, file=sys.stderr), extra=extra)
         old = os.path.join(a.signals or "", "f13_old.json.gz")
         if sig and os.path.exists(old):

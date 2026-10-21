@@ -1140,6 +1140,27 @@ class UpstreamAgents(unittest.TestCase):
                                    weighted=True)
         self.assertAlmostEqual(w["AAA"], 2 / 3.0)                                  # two hold it, one holds BBB
 
+    def test_early_stakes_versions(self):
+        d = tempfile.mkdtemp()
+        try:
+            base, off, data, uni, sig = self.world(d)
+        finally:
+            shutil.rmtree(d)
+        days = data.days
+        sig.stakes = sorted([[days[305], "A", "13D", days[305], "x", "Bee", "BBB"],
+                             [days[305], "B", "13G", days[305], "x", "Bee", "BBB"],
+                             [days[305], "C", "13G", days[305], "x", "Zed", "ZZZ"]])   # ZZZ has no prices
+        sig._sd = [r[0] for r in sig.stakes]
+        cw = lambda day, **o: replay.copycat_weights(data, sig, day, **dict(replay.COPY_DEFAULT, **o))  # noqa: E731
+        self.assertEqual(cw(days[304], mode="stakes", stake_days=365), {"SPY": 1.0})  # nothing filed yet
+        self.assertEqual(cw(days[306], mode="stakes", stake_days=365), {"BBB": 1.0})
+        self.assertEqual(cw(days[306], mode="stakes", stake_days=365, stake_forms=("13G",)), {"BBB": 1.0})
+        c7 = cw(days[306], mode="consensus", n=1)
+        self.assertEqual(c7, {"AAA": 1.0})
+        self.assertEqual(set(cw(days[306], mode="consensus", n=1, stake_days=182)), {"AAA", "BBB"})
+        voted = cw(days[306], mode="consensus", n=1, min_count=2, stake_days=365, stake_vote=True)
+        self.assertEqual(set(voted), {"AAA", "BBB"})                        # two stakes = two votes for BBB
+
     def test_caps_and_crash_brake(self):
         class Stub:
             charts = {"IEF": 1, "SPY": 1}

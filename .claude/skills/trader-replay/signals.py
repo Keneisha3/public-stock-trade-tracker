@@ -525,6 +525,80 @@ def build_13f(ua, since="2013-07-01", filers=None, log=print, fetcher=None, figi
             "columns": ["effective", "cik", "period", "filed", "total", "positions"], "rows": out, "stats": stats}
 
 
+# ---------------------------------------------------------------- 13D / 13G: new 5% stakes
+
+STAKE_FORMS = {"SC 13D": "13D", "SC 13G": "13G", "SCHEDULE 13D": "13D", "SCHEDULE 13G": "13G"}  # originals only
+SUBJECT = re.compile(r"<SUBJECT-COMPANY>.*?<CONFORMED-NAME>([^\n<]+).*?<CIK>(\d+)", re.S)
+
+
+def parse_stake_filings(sub):
+    """Original Schedule 13D / 13G filings in a submissions JSON (or an extra file):
+    [(filed, accepted, accession, "13D" or "13G")]. A 13D or 13G says the filer crossed 5% of a
+    company (13D: may push for change, filed within 10 days; 13G: passive, within 45). Amendments
+    are left out: the first filing is the news."""
+    block = (sub.get("filings") or {}).get("recent") if "filings" in sub else sub
+    block = block or {}
+    return [(filed, acc, accn, STAKE_FORMS[form]) for form, filed, acc, accn in zip(
+        block.get("form", []), block.get("filingDate", []), block.get("acceptanceDateTime", []),
+        block.get("accessionNumber", [])) if form in STAKE_FORMS]
+
+
+def parse_subject(header):
+    """(subject company cik, name) from a filing's .hdr.sgml header, or None."""
+    m = SUBJECT.search(header)
+    return (m.group(2).zfill(10), m.group(1).strip()) if m else None
+
+
+def build_13dg(ua, since="2001-01-01", filers=None, log=print, fetcher=None):
+    """Every original 13D / 13G the upstream copycat's investors filed since `since`, dated to when
+    the market could act on it. Rows: [effective, manager cik, form, filed, subject cik, subject
+    name, ticker or ""]. Tickers come from the SEC's current list, so companies that have since
+    vanished have none (survivorship: the replay cannot buy them)."""
+    f = fetcher or e13.Fetcher(ua)
+    filers = filers if filers is not None else e13.load_filers()
+    tickers = {}
+    for cik, t, title in e13.load_company_tickers(f.get_json(e13.TICKERS_URL)):
+        tickers.setdefault(cik, yahoo(e13.norm_ticker(t)))
+    rows, errors = [], []
+    for fl in filers:
+        cik = e13.cik10(fl["cik"])
+        try:
+            sub = f.get_json(e13.SUBMISSIONS % cik)
+            listed = parse_stake_filings(sub)
+            for extra in (sub.get("filings") or {}).get("files", []):
+                if (extra.get("filingTo") or "9999") >= since:
+                    listed += parse_stake_filings(f.get_json(SEC_SUBMISSIONS % extra["name"]))
+        except (e13.EdgarError, ValueError) as e:
+            errors.append("%s: %s" % (fl["name"], e))
+            continue
+        n = 0
+        for filed, acc, accn, form in sorted(set(listed)):
+            if filed < since:
+                continue
+            for attempt in range(3):
+                try:
+                    head = f.get(e13.archive_url(cik, accn) + accn + ".hdr.sgml").decode("latin-1")
+                    subj = parse_subject(head)
+                    if subj and subj[0] != cik:  # filings about the investor itself are someone else's stake
+                        rows.append([effective_day(filed, acc), cik, form, filed, subj[0], subj[1],
+                                     tickers.get(subj[0], "")])
+                        n += 1
+                    break
+                except e13.EdgarError as e:
+                    errors.append("%s %s: %s" % (fl["name"], accn, e))
+                    break
+                except OSError as e:  # a timeout: wait and try again
+                    if attempt == 2:
+                        errors.append("%s %s: %s" % (fl["name"], accn, e))
+                    time.sleep(5 * (attempt + 1))
+        log("%s: %d stakes" % (fl["name"], n))
+    rows.sort()
+    return {"source": "SEC EDGAR Schedule 13D / 13G filings (originals) by the upstream copycat's investors",
+            "built": _now(), "columns": ["effective", "cik", "form", "filed", "subject_cik", "subject", "ticker"],
+            "rows": rows, "stats": {"filings": len(rows), "with_ticker": sum(1 for r in rows if r[6]),
+                                    "errors": errors[:50]}}
+
+
 # ---------------------------------------------------------------- a rule-based investor list
 
 SEC_FULL_INDEX = "https://www.sec.gov/Archives/edgar/full-index/%d/QTR%d/form.idx"
@@ -822,7 +896,8 @@ def _now():
 class Signals:
     """Queries that only see rows filed on or before the day asked about."""
 
-    def __init__(self, congress=None, insiders=None, events=None, eps=None, f13=None, fundamentals=None, f13_broad=None):
+    def __init__(self, congress=None, insiders=None, events=None, eps=None, f13=None, fundamentals=None, f13_broad=None,
+                 stakes=None):
         self.congress = sorted((congress or {}).get("rows") or [], key=lambda r: r[0])  # the queries bisect by date
         self.insiders = sorted((insiders or {}).get("rows") or [], key=lambda r: r[0])
         self.events = sorted((events or {}).get("rows") or [], key=lambda r: r[0])
@@ -842,6 +917,8 @@ class Signals:
             eff, cik, period, filed, total, positions = row[:6]
             self.f13b.setdefault(cik, []).append((eff, period, {t: (v, sh) for t, v, sh in positions}))
         self.lists = sorted((x["usable_from"], tuple(x["ciks"])) for x in (f13_broad or {}).get("lists", []))  # largest first
+        self.stakes = sorted(r for r in (stakes or {}).get("rows") or [] if r[6])  # 13D / 13G with a ticker
+        self._sd = [r[0] for r in self.stakes]
         self.fund = {}  # ticker -> key -> [(filed, quarter end, value)] by filing date
         for filed, t, end, key, v in sorted((fundamentals or {}).get("rows") or []):
             self.fund.setdefault(t, {}).setdefault(key, []).append((filed, end, v))
@@ -864,10 +941,21 @@ class Signals:
             f13 = {"managers": dict(old.get("managers") or {}, **((f13 or {}).get("managers") or {})),
                    "rows": [r for r in old["rows"] if r[3] < first] + list((f13 or {}).get("rows") or [])}
         return cls(opt("congress.json.gz"), ins, opt("events.json.gz"), opt("eps.json.gz"), f13,
-                   opt("fundamentals.json.gz"), opt("f13_broad.json.gz"))
+                   opt("fundamentals.json.gz"), opt("f13_broad.json.gz"), opt("f13_stakes.json.gz"))
 
     def __bool__(self):
-        return bool(self.congress or self.insiders or self.events or self.eps or self.f13 or self.fund or self.f13b)
+        return bool(self.congress or self.insiders or self.events or self.eps or self.f13 or self.fund or self.f13b
+                    or self.stakes)
+
+    def new_stakes(self, day, days=365, forms=("13D", "13G"), who=None):
+        """{ticker: [manager ciks]} for the 5% stakes the investors disclosed (13D / 13G) in the
+        `days` before `day`, counting only filings the market could act on by `day`."""
+        out = {}
+        for eff, cik, form, filed, scik, name, t in self.stakes[bisect.bisect_left(self._sd, self._since(day, days)):
+                                                                bisect.bisect_right(self._sd, day)]:
+            if form in forms and (who is None or cik in who) and cik not in out.get(t, []):
+                out.setdefault(t, []).append(cik)
+        return out
 
     def broad_list(self, day):
         """The managers on the rule-based list that was public by `day` (None before the first)."""
@@ -1037,7 +1125,7 @@ def main(argv=None):
     bp.add_argument("--lists", required=True, help="folder with f13_list-YEAR.json.gz files")
     bp.add_argument("--out", required=True)
     bp.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
-    for name in ("13f", "13f-old", "fundamentals"):
+    for name in ("13f", "13f-old", "13dg", "fundamentals"):
         x = sub.add_parser(name)
         x.add_argument("--out", required=True)
         x.add_argument("--user-agent", default=os.environ.get("SEC_USER_AGENT") or "")
@@ -1068,7 +1156,7 @@ def main(argv=None):
         print(json.dumps(doc["stats"])[:1500])
         print("%d rows, %d managers" % (len(doc["rows"]), len(union)))
         return 0 if doc["rows"] else 3
-    if a.cmd in ("13f", "13f-old", "fundamentals"):
+    if a.cmd in ("13f", "13f-old", "13dg", "fundamentals"):
         if not a.user_agent:
             print("signals: set SEC_USER_AGENT (or --user-agent) to 'Your Name you@example.com'", file=sys.stderr)
             return 2
@@ -1076,6 +1164,8 @@ def main(argv=None):
             doc, name = build_13f(a.user_agent), "f13.json.gz"
         elif a.cmd == "13f-old":
             doc, name = build_13f_old(a.user_agent), "f13_old.json.gz"
+        elif a.cmd == "13dg":
+            doc, name = build_13dg(a.user_agent), "f13_stakes.json.gz"
         else:
             import universe
             doc, name = build_fundamentals(list(universe.Universe().spans), a.user_agent), "fundamentals.json.gz"
