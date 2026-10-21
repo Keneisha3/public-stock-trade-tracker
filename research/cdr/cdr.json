@@ -56,6 +56,13 @@
    "name": "Apple Inc."
   },
   {
+   "from": "2026-07-17",
+   "to": "2026-10-20",
+   "days": 65,
+   "cdr_pct": 12.86,
+   "us_usd": 13.59,
+   "us_cad": 14.14,
+   "hedge_cost_per_year": 2.52,
    "us": "ABBV",
    "cdr": "ABBV.NE",
    "name": "AbbVie Inc."
@@ -73,11 +80,11 @@
   {
    "from": "2021-12-01",
    "to": "2026-10-21",
-   "days": 1054,
+   "days": 1197,
    "cdr_pct": 221.89,
-   "us_usd": 265.95,
-   "us_cad": 302.95,
-   "hedge_cost_per_year": 2.66,
+   "us_usd": 265.83,
+   "us_cad": 302.77,
+   "hedge_cost_per_year": 2.65,
    "us": "AMD",
    "cdr": "AMD.NE",
    "name": "Advanced Micro Devices, Inc."

@@ -5,10 +5,10 @@
 | company | CDR | since | CDR return | US share, USD | US share, CAD | CDR shortfall a year |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
 | AAPL | AAPL.NE | (too little history) | | | | |
-| ABBV | ABBV.NE | (too little history) | | | | |
+| ABBV | ABBV.NE | 2026-07-17 | +12.9% | +13.6% | +14.1% | +2.52 pts |
 | ADBE | ADBE.NE | (too little history) | | | | |
 | AMAT | AMAT.NE | (too little history) | | | | |
-| AMD | AMD.NE | 2021-12-01 | +221.9% | +265.9% | +302.9% | +2.66 pts |
+| AMD | AMD.NE | 2021-12-01 | +221.9% | +265.8% | +302.8% | +2.65 pts |
 | AMZN | AMZN.NE | (too little history) | | | | |
 | AVGO | AVGO.NE | (too little history) | | | | |
 | BA | BA.NE | (too little history) | | | | |
