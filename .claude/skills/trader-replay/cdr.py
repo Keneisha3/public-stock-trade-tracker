@@ -49,13 +49,20 @@ def compare(cdr, us, fx, since=None):
     """How a CDR did against its US share over the days both traded: {"days", "cdr_pct", "us_usd",
     "us_cad", "hedge_cost_per_year"} (returns in %, the cost is how far the CDR fell short of the
     US-dollar return, per year)."""
-    days = sorted({b["d"] for b in cdr["bars"]} & {b["d"] for b in us["bars"]} & {b["d"] for b in fx["bars"]})
+    days = sorted({b["d"] for b in cdr["bars"]} & {b["d"] for b in us["bars"]})  # FX bars are dated differently
     if since:
         days = [d for d in days if d >= since]
     if len(days) < 60:
         return None
     a, b = days[0], days[-1]
-    r_cdr, r_usd, r_fx = _ret(cdr["bars"], a, b), _ret(us["bars"], a, b), _ret(fx["bars"], a, b)
+
+    def rate(day):  # the last exchange rate on or before `day`
+        xs = [x["c"] for x in fx["bars"] if x["d"] <= day]
+        return xs[-1] if xs else None
+    r_cdr, r_usd = _ret(cdr["bars"], a, b), _ret(us["bars"], a, b)
+    if not rate(a) or not rate(b):
+        return None
+    r_fx = 100.0 * (rate(b) / rate(a) - 1)
     years = (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days / 365.25
     r_cad = 100.0 * ((1 + r_usd / 100) * (1 + r_fx / 100) - 1)
     cost = 100.0 * (((1 + r_usd / 100) / (1 + r_cdr / 100)) ** (1 / years) - 1) if years > 0 else None

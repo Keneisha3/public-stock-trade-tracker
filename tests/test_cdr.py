@@ -22,6 +22,8 @@ class Cdr(unittest.TestCase):
         us = chart("AAPL", "USD", 100, 1.001)
         fx = chart("USDCAD=X", "CAD", 1.30, 1.0002)          # the US dollar rises against the CAD
         c = chart("AAPL.NE", "CAD", 25, 1.00098)              # follows the USD return, a little less
+        fx["bars"] = [dict(x, d=(datetime.date.fromisoformat(x["d"]) - datetime.timedelta(days=1)).isoformat())
+                      for x in fx["bars"]]                  # Yahoo dates FX bars the evening before
         r = cdr.compare(c, us, fx)
         self.assertGreater(r["us_cad"], r["us_usd"])         # CAD holders of the US share got the FX gain too
         self.assertLess(r["cdr_pct"], r["us_usd"])               # the hedged CDR did not
