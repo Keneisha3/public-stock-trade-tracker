@@ -477,12 +477,21 @@ def build_13f(ua, since="2013-07-01", filers=None, log=print, fetcher=None, figi
         for filed, acc, accn, period in sorted(set(listed)):
             if filed < since:
                 continue
-            try:
-                base = e13.archive_url(cik, accn)
-                name = e13.info_table_name(f.get_json(base + "index.json"))
-                rows = e13.parse_info_table(f.get(base + name), e13.value_multiplier(filed))
-            except (e13.EdgarError, ValueError) as e:
-                stats["errors"].append("%s %s: %s" % (fl["name"], accn, e))
+            rows = None
+            for attempt in range(3):
+                try:
+                    base = e13.archive_url(cik, accn)
+                    name = e13.info_table_name(f.get_json(base + "index.json"))
+                    rows = e13.parse_info_table(f.get(base + name), e13.value_multiplier(filed))
+                    break
+                except (e13.EdgarError, ValueError) as e:
+                    stats["errors"].append("%s %s: %s" % (fl["name"], accn, e))
+                    break
+                except OSError as e:  # a timeout: wait and try again
+                    if attempt == 2:
+                        stats["errors"].append("%s %s: %s" % (fl["name"], accn, e))
+                    time.sleep(5 * (attempt + 1))
+            if rows is None:
                 continue
             pos, total = e13.aggregate(rows)
             stocks = e13.combine_classes([p for p in pos if e13.is_stock(p)], total)
@@ -546,11 +555,19 @@ def build_13f_list(ua, year, top=50, min_entries=10, max_entries=100, log=print,
         if cik in seen:
             continue
         seen.add(cik)
+        cover = None
+        for attempt in range(3):  # a slow SEC answer times out now and then: wait and try again
+            try:
+                cover = e13.parse_cover(f.get(e13.archive_url(cik, accn) + "primary_doc.xml"))
+                break
+            except (e13.EdgarError, ValueError):
+                break
+            except OSError:
+                time.sleep(5 * (attempt + 1))
         try:
-            cover = e13.parse_cover(f.get(e13.archive_url(cik, accn) + "primary_doc.xml"))
             value, entries = float(cover.get("tableValueTotal") or 0), int(cover.get("tableEntryTotal") or 0)
             stats["read"] += 1
-        except (e13.EdgarError, ValueError):
+        except (AttributeError, ValueError):
             stats["errors"] += 1
             continue
         if min_entries <= entries <= max_entries:
@@ -824,7 +841,7 @@ class Signals:
         for row in sorted((f13_broad or {}).get("rows") or [], key=lambda r: r[:4]):
             eff, cik, period, filed, total, positions = row[:6]
             self.f13b.setdefault(cik, []).append((eff, period, {t: (v, sh) for t, v, sh in positions}))
-        self.lists = sorted((x["usable_from"], frozenset(x["ciks"])) for x in (f13_broad or {}).get("lists", []))
+        self.lists = sorted((x["usable_from"], tuple(x["ciks"])) for x in (f13_broad or {}).get("lists", []))  # largest first
         self.fund = {}  # ticker -> key -> [(filed, quarter end, value)] by filing date
         for filed, t, end, key, v in sorted((fundamentals or {}).get("rows") or []):
             self.fund.setdefault(t, {}).setdefault(key, []).append((filed, end, v))

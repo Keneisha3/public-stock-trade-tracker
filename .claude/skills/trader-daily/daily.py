@@ -41,8 +41,10 @@ IDEA_SOURCES = "trending,screens,news,fool,reddit"
 # The live paper record is computed on GitHub every weekday (it needs the SEC and Congress data kept
 # there); the briefing reads the published copy. "record_url" in trader/config.json overrides it.
 RECORD_URL = "https://raw.githubusercontent.com/Keneisha3/public-stock-trade-tracker/replay-results/forward/record.json"
-NOTES = {"(chosen)": "An option, not an order: it beat the S&P 500 in 20 of 28 test windows, with drops like the "
-                     "Nasdaq 100's. Nothing is placed for you.",
+NOTES = {"(chosen)": "The main plan (C7): stocks in the top 5 holdings of at least 3 of the copycat's 23 investors, "
+                     "from their latest 13F reports. It beat the S&P 500 from 2000 to 2017 (+7 pts a year) and in "
+                     "training, but part of that edge came from choosing famous investors, and the live record has "
+                     "to confirm it. An option, not an order: nothing is placed for you.",
          "(C4": "Stocks in the top 10 of at least 3 of the copycat's 23 investors, from their latest 13F reports. It "
                 "beat the Nasdaq 100 in training and the S&P 500 in 22 of 28 windows, trailed in the held-out year, "
                 "and is concentrated in a few large companies. An option, not an order."}

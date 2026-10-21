@@ -316,6 +316,43 @@ C4, the screener and Pelosi (+12.6 to +14.8 pts) did not beat the plan. A
 test also confirms no agent can see the future: prices cut at the as-of date
 and later prices plus later filings give identical results.
 
+**C4 from 2000 to 2017, before anything was chosen** (`research/long-history-c4/`).
+The copycat's plain-text 13Fs from 1999 to mid 2013 were parsed (a CUSIP
+counts only with the right check digit) and C4 replayed with the fund
+strategies. Only 5 of the 23 investors filed electronically in 2000 and 11
+by 2005, so before about 2004 C4 rarely had three investors agreeing and
+mostly sat in the S&P 500. Over 68 one-year windows C4 beat the S&P 500 by
++5.2 pts a year on average (90 % range +1.5 to +8.6, 44 of 68 windows) with
+an average worst drop of -17.3 % and a worst year of -26.7 % (Nasdaq 100:
++0.5 pts, worst year -66 %; the plan: +3.1 pts, worst year -60 %). In the
+24-month periods it beat the S&P 500 in 5 of 8. Caveats: only 999 of 3,623
+old holdings could be matched to a ticker, and 3-33 % of its picks around
+2002 had no prices (companies that vanished), which flatters it; the 23
+investors are still famous today (the rule-based list tests that).
+
+**The main plan is now C7** (rule v11, written before the results;
+`research/pit-v16-versions/`, `pit-v17-broad/`, `long-history-c4-versions/`).
+Versions of the consensus rule, gap to the S&P 500:
+
+| version | training 2017-24 | 2000-2017 a year (90 % range) | held-out year |
+| --- | ---: | ---: | ---: |
+| **C7 top 5 of 3+ famous investors (main plan)** | +24.5 | +7.3 (+2.7 to +12.0) | -6.0 |
+| C8 top 10 of 4+ | +23.8 | +10.0 (+5.1 to +15.3) | +5.5 |
+| C4 top 10 of 3+ | +20.5 | +5.2 (+1.5 to +8.6) | -2.9 |
+| C10 top 10 of 3+, weighted | +17.5 | +6.1 (+2.5 to +9.5) | -3.3 |
+| C9 top 10 of 2+ | +9.6 | +9.1 (+5.3 to +11.9) | -3.7 |
+| B1 rule-based list: top 10 of 5+ of the 50 largest concentrated managers | +14.2 | n/a | -14.0 |
+| B5 / B4 / B2 / B3 rule-based variants | +13.1 / +8.2 / +5.8 / -5.6 | n/a | -9 to -14 |
+| Nasdaq 100 | +14.0 | +0.5 | +2.5 |
+
+The rule-based list (chosen each year by size and concentration, not fame)
+still beat the S&P 500 with the consensus rule and matched the Nasdaq 100,
+so the method holds without hindsight, but only by a hair against the
+Nasdaq 100: roughly 6-10 points of the famous list's training edge are
+likely the famous-today choice. C7 leads the live record from 2026-10-20;
+the previous plan, C4 and the rest stay beside it. Real money should wait
+for the live record (see "Production" below).
+
 **Following the best Congress members** (`research/pit-v15-leaders/`).
 Each month, members were ranked by how their past disclosed buys did
 against the S&P 500 (only outcomes known by then), and the leaders' buys
@@ -351,6 +388,28 @@ never your holdings.
 
 Every account's settings are editable on the dashboard (**Strategy settings**)
 and are range-checked. The live review and the replay use the same rules.
+
+## Production: how to use it, and what is still missing
+
+**Use it now as a decision aid.** On your own computer: `python3 trade.py init`,
+import Wealthsimple (CSV) and sync Questrade yourself (`accounts sync --token`,
+never in chat), then run `python3 trade.py daily` every weekday evening (cron
+or Task Scheduler) and open `python3 trade.py dashboard --open`. The briefing
+shows the main plan (C7) in your growth account's dollars beside what it
+holds, the C4 card, and an alert when the picks change (new 13Fs land in
+mid February, May, August and November). When you act: size with
+`/trader-budget`, check with `/trader-risk`, enter the orders yourself in
+Questrade (its API is read-only), convert CAD with Norbert's gambit.
+
+**Not yet ready for real money.** Before that:
+1. A live record: at least 3, better 6, months of the paper record (from
+   2026-10-20) with C7 inside its backtest range and no data failures.
+2. Survivorship: about a third of the pre-2013 holdings and some delisted
+   companies have no prices; an EODHD key in `.env` fills the prices.
+3. Health checks: GitHub runs scheduled jobs late or not at all sometimes;
+   the briefing should warn when the record is stale or a build failed.
+4. Then start small (say 10-25 % of the growth account), and grow only if
+   12 months of live record holds up. Not financial advice.
 
 ## The crypto bot team
 

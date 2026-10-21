@@ -307,12 +307,13 @@ jobs:
           LABEL: ${{ inputs.label || 'long-history' }}
         run: |
           [[ "$LABEL" =~ ^[a-z0-9-]{1,40}$ ]] || { echo "label: lowercase letters, digits and dashes"; exit 1; }
-          mkdir -p signals  # the copycat's 13Fs (XML since 2013, plain text before) for C4 back to 2000
+          sig="$RUNNER_TEMP/signals"  # outside the checkout: files here would block the switch to replay-results
+          mkdir -p "$sig"  # the copycat's 13Fs (XML since 2013, plain text before) for C4 back to 2000
           git fetch -q origin replay-results || true
           for f in congress.json.gz insiders.json.gz insiders_recent.json.gz events.json.gz eps.json.gz f13.json.gz f13_old.json.gz f13_broad.json.gz fundamentals.json.gz; do
-            git show "origin/replay-results:signals/$f" > "signals/$f" 2>/dev/null || rm -f "signals/$f"
+            git show "origin/replay-results:signals/$f" > "$sig/$f" 2>/dev/null || rm -f "$sig/$f"
           done
-          python .claude/skills/trader-replay/replay.py --long out --signals signals > /dev/null
+          python .claude/skills/trader-replay/replay.py --long out --signals "$sig" > /dev/null
           python scripts/stats.py out/long-stats.md out/long.json > /dev/null
           cat out/long.md out/long-stats.md >> "$GITHUB_STEP_SUMMARY"
       - name: Save to the replay-results branch
@@ -529,7 +530,7 @@ jobs:
 
   sig-13f-broad:
     needs: sig-13f-list
-    if: ${{ always() && inputs.mode == 'build-signals' && contains(inputs.skip, 'only-13f-broad') }}
+    if: ${{ !cancelled() && inputs.mode == 'build-signals' && contains(inputs.skip, 'only-13f-broad') }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
