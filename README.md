@@ -413,8 +413,8 @@ Questrade (its API is read-only), convert CAD with Norbert's gambit.
    on Cboe Canada) shows it, so the TFSA can skip the CAD to USD conversion.
    Only AMD.NE could be verified on Yahoo (6+ months of prices); it trailed
    AMD in US dollars by about 2.7 points a year, the cost of the hedge. Check
-   other CDRs with your broker (`python3 .claude/skills/trader-replay/cdr.py
-   verify --out DIR` re-checks; the workflow mode is `cdr`).
+   other CDRs with your broker (`python3 trade.py cdr show AMD` looks one up,
+   `python3 trade.py cdr verify --out DIR` re-checks; the workflow mode is `cdr`).
 5. Then start small (say 10-25 % of the growth account), and grow only if
    12 months of live record holds up. Not financial advice.
 

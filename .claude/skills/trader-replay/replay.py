@@ -948,7 +948,30 @@ def _equal(picks):
 
 
 COPY_DEFAULT = {"mode": "top", "n": 3, "who": None, "min_count": 3, "trend": False, "broad": False,
-                "weighted": False, "top_managers": None}
+                "weighted": False, "top_managers": None, "cap": None, "sector_cap": None, "brake": False}
+# Broad sectors of the companies the famous investors hold most (a company's sector rarely changes, so
+# this is not hindsight). A company not listed counts as a sector of its own.
+SECTORS = {s: sec for sec, names in {
+    "tech": "AAPL MSFT NVDA AVGO ORCL CRM ADBE AMD INTC CSCO IBM QCOM TXN AMAT LRCX MU KLAC ADI NOW INTU SNOW "
+            "TSM ASML SAP SHOP PANW CRWD WDAY TEAM DELL HPQ HPE ACN ADP FISV FI PAYX MSI APH TEL NXPI MRVL ARM "
+            "PLTR DDOG ZS NET MDB ANET SMCI CDNS SNPS FTNT ROP GDDY TWLO DOCU OKTA",
+    "communication": "GOOGL META NFLX DIS CMCSA CHTR T VZ TMUS SPOT EA TTWO WBD PARA FOXA LBRDK LBTYA SIRI "
+                     "LYV IAC MTCH BIDU TCEHY",
+    "consumer": "AMZN TSLA HD LOW MCD SBUX NKE COST WMT TGT KO PEP PG CL KHC MDLZ PM MO BKNG ABNB UBER CMG "
+                "YUM DPZ ORLY AZO TJX ROST LULU EBAY ETSY BABA JD PDD MELI SE CPNG DG DLTR KR STZ BUD DEO "
+                "EL GM F RACE HLT MAR LVS WYNN CCL RCL DASH CVNA W",
+    "financials": "BRK-B JPM BAC WFC C GS MS SCHW BLK V MA AXP PYPL COF USB PNC TFC SPGI MCO ICE CME MSCI AON "
+                  "MMC CB PGR TRV AIG MET PRU ALL KKR BX APO ARES BAM BN AMP ALLY SYF DFS FNF MKL L JEF HOOD "
+                  "COIN SQ XYZ AFRM NU FICO TRU EFX",
+    "health": "UNH JNJ LLY ABBV MRK PFE TMO ABT DHR BMY AMGN GILD CVS CI ELV HUM MDT SYK ISRG BSX ZTS VRTX REGN "
+              "BIIB MRNA HCA MCK COR CAH IQV DXCM IDXX EW BDX A ILMN TEVA NVO AZN GSK SNY",
+    "energy": "XOM CVX COP OXY EOG SLB HAL PSX MPC VLO DVN FANG HES APA KMI WMB OKE ET EPD LNG CNQ SU ENB TRP "
+              "BP SHEL TTE PXD CTRA",
+    "industrials": "BA CAT DE HON GE RTX LMT NOC GD UNP CSX NSC UPS FDX MMM EMR ETN ITW PH ROK WM RSG CP CNI "
+                   "DAL UAL AAL LUV TDG HEI CTAS URI PCAR CMI GWW FAST ODFL JCI CARR OTIS",
+    "materials": "LIN APD SHW ECL DD DOW NEM FCX NUE STLD VMC MLM CRH IP PKG BALL ALB MOS CF",
+    "utilities_realestate": "NEE DUK SO D AEP EXC SRE XEL PCG PLD AMT CCI EQIX SPG O PSA WELL DLR VICI",
+}.items() for s in names.split()}
 COPY_VERSIONS = [
     ("C1", "Copycat: Berkshire's whole portfolio (what the upstream skill does)", {"mode": "book", "who": ["0001067983"]}),
     ("C2", "Copycat: all 23 investors' portfolios, an equal share each", {"mode": "book"}),
@@ -962,6 +985,14 @@ COPY_VERSIONS = [
     ("C9", "Copycat: consensus, in the top 10 of 2+ investors", {"mode": "consensus", "n": 10, "min_count": 2}),
     ("C10", "Copycat: consensus top 10 of 3+, more money where more investors agree",
      {"mode": "consensus", "n": 10, "weighted": True}),
+    # C7 with risk limits (round 12, rule v12): caps and a crash brake
+    ("C11", "Copycat C7, no stock over 20% (the rest in the S&P 500)", {"mode": "consensus", "n": 5, "cap": 0.2}),
+    ("C12", "Copycat C7, no stock over 20% or sector over 40%", {"mode": "consensus", "n": 5, "cap": 0.2,
+                                                                 "sector_cap": 0.4}),
+    ("C13", "Copycat C7, half in Treasuries while the S&P 500 is under its 200-day", {"mode": "consensus", "n": 5,
+                                                                                     "brake": True}),
+    ("C14", "Copycat C7 with both caps and the crash brake", {"mode": "consensus", "n": 5, "cap": 0.2,
+                                                             "sector_cap": 0.4, "brake": True}),
     # the same rules on a list chosen by a rule, not by fame: the 50 largest concentrated managers each year
     ("B1", "Rule-based list: consensus, in the top 10 of 5+ of the 50 managers", {"mode": "consensus", "n": 10,
                                                                                   "min_count": 5, "broad": True}),
@@ -975,8 +1006,48 @@ COPY_VERSIONS = [
 ]
 
 
+def guard(data, w, d, cap=None, sector_cap=None, brake=False, fill="SPY", safe="IEF"):
+    """Risk limits on a set of weights, decided at the close of `d`: no stock over `cap`, no sector
+    over `sector_cap` (SECTORS; the excess goes to `fill`, the S&P 500), and the crash brake: while
+    SPY closes below its 200-day average, half of everything sits in `safe` (Treasuries)."""
+    w = dict(w)
+    if cap or sector_cap:
+        extra = 0.0
+        if sector_cap:
+            by = {}
+            for t, x in w.items():
+                if t != fill:
+                    by.setdefault(SECTORS.get(t, t), []).append(t)
+            for names in by.values():
+                tot = sum(w[t] for t in names)
+                if tot > sector_cap:
+                    for t in names:
+                        extra += w[t] - w[t] * sector_cap / tot
+                        w[t] *= sector_cap / tot
+        if cap:
+            for t, x in list(w.items()):
+                if t != fill and x > cap:
+                    extra += x - cap
+                    w[t] = cap
+        if extra > 1e-9:
+            w[fill] = w.get(fill, 0.0) + extra
+    if brake and safe in data.charts and data.close(safe, d):
+        q = data.quick("SPY", d, 21)
+        if q and not q["above200"]:
+            w = {t: x / 2 for t, x in w.items()}
+            w[safe] = w.get(safe, 0.0) + sum(w.values())
+    return w
+
+
 def copycat_weights(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False, broad=False, weighted=False,
-                    top_managers=None):
+                    top_managers=None, cap=None, sector_cap=None, brake=False):
+    """copycat_picks with the risk limits of `guard` (none by default)."""
+    w = copycat_picks(data, sig, d, mode, n, who, min_count, trend, broad, weighted, top_managers)
+    return guard(data, w, d, cap, sector_cap, brake) if cap or sector_cap or brake else w
+
+
+def copycat_picks(data, sig, d, mode="top", n=3, who=None, min_count=3, trend=False, broad=False, weighted=False,
+                  top_managers=None):
     """What the upstream copycat would hold after the close of `d`, from 13Fs the market could act
     on by then. book: each investor's reported portfolio (top 50 stocks) at its weights, an equal
     share per investor. top: each investor's n biggest positions. consensus: stocks in the top n
@@ -2586,7 +2657,7 @@ LONG_STRATS = [
 ]
 LONG_BENCH = [("Nasdaq 100 (QQQ)", "QQQ"), ("S&P 500 (SPY)", "SPY")]
 LONG_C4 = ("Copycat consensus (C4)", "70% Nasdaq 100 + 30% C4")
-LONG_COPY = ("C7", "C8", "C9", "C10")  # the other versions of the consensus rule
+LONG_COPY = ("C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14")  # the other versions of the consensus rule
 
 
 def c4_coverage(data, sig, start, end, step=91):

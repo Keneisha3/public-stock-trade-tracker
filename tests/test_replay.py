@@ -1140,6 +1140,31 @@ class UpstreamAgents(unittest.TestCase):
                                    weighted=True)
         self.assertAlmostEqual(w["AAA"], 2 / 3.0)                                  # two hold it, one holds BBB
 
+    def test_caps_and_crash_brake(self):
+        class Stub:
+            charts = {"IEF": 1, "SPY": 1}
+            up = True
+
+            def close(self, t, d):
+                return 100.0
+
+            def quick(self, t, d, n):
+                return {"above200": self.up}
+        data, w = Stub(), {"AAPL": 0.5, "MSFT": 0.25, "JPM": 0.25}
+        g = replay.guard(data, w, "d", cap=0.2)
+        self.assertEqual((g["AAPL"], g["MSFT"], g["JPM"]), (0.2, 0.2, 0.2))
+        self.assertAlmostEqual(g["SPY"], 0.4)                           # the excess goes to the S&P 500
+        g = replay.guard(data, w, "d", sector_cap=0.4)
+        self.assertAlmostEqual(g["AAPL"] + g["MSFT"], 0.4)              # tech cut to 40%, in proportion
+        self.assertAlmostEqual(g["AAPL"] / g["MSFT"], 2.0)
+        self.assertAlmostEqual(g["SPY"], 0.35)
+        self.assertEqual(replay.guard(data, w, "d", brake=True), w)     # S&P 500 above its 200-day: no brake
+        data.up = False
+        g = replay.guard(data, w, "d", brake=True)
+        self.assertAlmostEqual(g["IEF"], 0.5)
+        self.assertAlmostEqual(sum(g.values()), 1.0)
+        self.assertEqual(replay.guard(data, w, "d"), w)                 # no limits: unchanged
+
     def test_screener_and_pelosi(self):
         d = tempfile.mkdtemp()
         try:
