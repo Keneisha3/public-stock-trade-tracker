@@ -249,6 +249,47 @@ def _days_before(day, n):
     return (datetime.date.fromisoformat(day) - datetime.timedelta(days=n)).isoformat()
 
 
+def stretch(closes):
+    """How far a stock has run, from closes up to today (oldest first): {"above_sma200_pct": % above
+    the 200-day average, "vol_1m_pct" and "vol_1y_pct": annualised volatility over 21 and 252 days,
+    "vol_ratio": the two divided, "ret_1m", "ret_3m": %}. None where history is too short. Pure: the
+    review and the stretch test (trader-replay/stretch.py) both use it."""
+    out = {"above_sma200_pct": None, "vol_1m_pct": None, "vol_1y_pct": None, "vol_ratio": None,
+           "ret_1m": _r(_ret(closes, 21)), "ret_3m": _r(_ret(closes, 63))}
+    if len(closes) >= 200 and closes[-1]:
+        sma = sum(closes[-200:]) / 200.0
+        out["above_sma200_pct"] = _r(100.0 * (closes[-1] / sma - 1)) if sma else None
+    rets = [math.log(b / a) for a, b in zip(closes[-253:-1], closes[-252:]) if a and b]
+    if len(rets) >= 200:
+        v1y = statistics.pstdev(rets) * math.sqrt(252)
+        v1m = statistics.pstdev(rets[-21:]) * math.sqrt(252)
+        out.update(vol_1m_pct=_r(100 * v1m), vol_1y_pct=_r(100 * v1y), vol_ratio=_r(v1m / v1y) if v1y else None)
+    return out
+
+
+STRETCH_SIGNALS = {  # rule v15: "sell when it gets really high, or volatility rises on the way up"
+    "X1": "50%+ above its 200-day average",
+    "X2": "up 25%+ in a month with volatility 1.5x its usual",
+    "X3": "30%+ above its 200-day, volatility 1.5x its usual, and rising",
+    "X4": "up 60%+ in 3 months",
+}
+
+
+def stretch_signals(s):
+    """Which of STRETCH_SIGNALS fire for a stretch() result."""
+    a, v, r1, r3 = s.get("above_sma200_pct"), s.get("vol_ratio"), s.get("ret_1m"), s.get("ret_3m")
+    out = []
+    if a is not None and a >= 50:
+        out.append("X1")
+    if r1 is not None and v is not None and r1 >= 25 and v >= 1.5:
+        out.append("X2")
+    if a is not None and v is not None and r1 is not None and a >= 30 and v >= 1.5 and r1 > 0:
+        out.append("X3")
+    if r3 is not None and r3 >= 60:
+        out.append("X4")
+    return out
+
+
 def metrics(chart, today=None):
     """Everything the review needs, from one chart. Pure function."""
     bars = chart["bars"]
@@ -303,6 +344,7 @@ def metrics(chart, today=None):
         "sma200": round(sma200, 4) if sma200 else None,
         "above_sma200": (price > sma200) if sma200 else None,
         "vol_pct": _r(vol),
+        "stretch": stretch(closes),
         "div_ttm": round(ttm, 4), "div_prev_ttm": round(prev_ttm, 4),
         "yield_pct": _r(100.0 * ttm / price) if price and ttm else 0.0,
         "div_growth_3y_pct": _r(growth3),

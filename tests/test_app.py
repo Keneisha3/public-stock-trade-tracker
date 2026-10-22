@@ -145,7 +145,9 @@ class TestedPlan(unittest.TestCase):
         old = dict(rec, data={"f13_latest": "2026-05-15", "congress_latest": "2026-08-01"})
         self.assertEqual(len(daily.health(old, "2026-10-21")), 2)
         runs = [{"conclusion": "failure", "created_at": "2026-10-19T01:00:00Z", "html_url": "u"},
-                {"conclusion": "failure", "created_at": "2026-10-01T01:00:00Z", "html_url": "old"}]
+                {"conclusion": "failure", "created_at": "2026-10-01T01:00:00Z", "html_url": "old"},
+                {"conclusion": "failure", "created_at": "2026-10-20T01:00:00Z", "html_url": "research",
+                 "event": "workflow_dispatch"}]  # a one-off run started by hand is not a health problem
         self.assertEqual(daily.health(rec, "2026-10-21", runs), ["A GitHub run failed on 2026-10-19: u"])
         self.assertIn("No live record", daily.health(None, "2026-10-21")[0])
         text = daily.render({"date": "2026-10-21", "steps": {}, "health": ["x"]})

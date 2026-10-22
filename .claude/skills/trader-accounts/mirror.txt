@@ -1,6 +1,6 @@
 # Tickers the GitHub "prices" job refreshes every weekday, for places that cannot reach Yahoo
 # (read through market.MIRROR). This file is public: add market tickers, never a list of your holdings.
-SPY QQQ USDCAD=X IEF SHY GLD
+SPY QQQ USDCAD=X IEF SHY GLD ^VIX
 AAPL AMZN BRK-B GOOGL META NVDA UBER MSFT
 VST
 MP USAR LAC TMQ INTC

@@ -37,9 +37,10 @@ import paper  # noqa: E402
 import team  # noqa: E402
 import replay  # noqa: E402
 import cdr as cdrs  # noqa: E402
+import govstakes  # noqa: E402
 
-STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward"]
-NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward"}
+STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward", "gov"]
+NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward", "gov"}
 IDEA_SOURCES = "trending,screens,news,fool,reddit"
 # The live paper record is computed on GitHub every weekday (it needs the SEC and Congress data kept
 # there); the briefing reads the published copy. "record_url" in trader/config.json overrides it.
@@ -129,7 +130,8 @@ def health(rec, today, runs=None):
         out.append("The newest Congress filing on file is from %s: the Congress refresh may be failing." % cong)
     week = (datetime.date.fromisoformat(today) - datetime.timedelta(days=7)).isoformat()
     for r in runs or []:
-        if r.get("conclusion") == "failure" and (r.get("created_at") or "")[:10] >= week:
+        if r.get("conclusion") == "failure" and (r.get("created_at") or "")[:10] >= week \
+                and r.get("event", "schedule") == "schedule":  # the automatic jobs, not one-off research runs
             out.append("A GitHub run failed on %s: %s" % (r["created_at"][:10], r.get("html_url", "")))
     return out
 
@@ -231,6 +233,13 @@ def run(base="trader", skip=(), offline=None, today=None):
         brief["congress"] = [{k: r.get(k) for k in ("name", "district", "filed", "url", "type_name")}
                              for r in fresh][:15]
         did("congress", doc is not None, err or "%d new filings" % len(fresh))
+    if "gov" not in skip:  # what the US government has taken stakes in, and how each did since the news
+        try:
+            brief["gov"] = govstakes.briefing(govstakes.load(), lambda t: acc.mk.get_chart(t, offline=offline,
+                                                                                          range_="2y"), brief["date"])
+            did("gov", True, "%d stakes" % len(brief["gov"]))
+        except (acc.mk.MarketError, OSError, ValueError) as e:
+            did("gov", False, str(e))
     if "discover" not in skip:  # today's idea lists, archived, then ranked (leads, not advice)
         snap, err = _tool("trader-discover", "discover.py", ["--dir", base, "snapshot", "--only", IDEA_SOURCES, "--json"],
                           timeout=300)
@@ -347,6 +356,19 @@ def render(b):
         L.append("## New Congress stock-trade filings")
         for c in b["congress"]:
             L.append("- %s (%s) filed %s: %s" % (c["name"], c["district"], c["filed"], c["url"]))
+        L.append("")
+    if b.get("gov"):
+        L.append("## US government stakes (bought at the next open after the news)")
+        for g in b["gov"]:
+            if g.get("error"):
+                L.append("- %s %s: no prices" % (g["ticker"], g["company"]))
+                continue
+            L.append("- %s%s %s (%s, %s), news %s: %s since, S&P 500 %s; %s its 200-day average" % (
+                "NEW " if g.get("new") else "", g["ticker"], g["company"], g["agency"], g["theme"], g["first_public"],
+                "%+.0f%%" % g["since_pct"] if g.get("since_pct") is not None else "n/a",
+                "%+.0f%%" % g["spy_since_pct"] if g.get("spy_since_pct") is not None else "n/a",
+                "above" if g.get("above_sma200") else "below"))
+        L.append("- Most jumped on the news day, before anyone could buy, then faded: watch, do not chase.")
         L.append("")
     for p in (b.get("plan") or []) + (b.get("c4") or []):
         L.append("## %s for %s (targets as of %s)" % (p["plan"], p["account"], p["as_of"]))
