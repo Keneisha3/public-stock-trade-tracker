@@ -14,6 +14,7 @@ growth and dividend cuts. FX (USD->CAD) comes from the same endpoint
 
     python3 market.py ENB.TO AAPL --offline DIR      # print metrics
     python3 market.py ENB.TO --json
+    python3 market.py VST --save DIR                 # also keep the raw charts, for --offline DIR later
 
 Offline: --offline DIR reads DIR/chart-<SYMBOL>.json instead of the network
 (the tests use it). Quotes are delayed and unofficial: good for a daily
@@ -78,6 +79,11 @@ def native_currency(symbol):
 
 
 RETRY_WAITS = (3, 10)  # seconds before the 2nd and 3rd try when Yahoo throttles or hiccups
+# Where Yahoo is blocked (a cloud session's network policy), charts fetched by the GitHub "prices"
+# workflow mode are read from the public replay-results branch instead. MARKET_MIRROR="" turns it off.
+MIRROR = os.environ.get("MARKET_MIRROR", "https://raw.githubusercontent.com/Keneisha3/public-stock-trade-tracker/"
+                        "replay-results/prices/chart-%s.json")
+_blocked = []  # set once Yahoo cannot be reached, so the next symbols go straight to the mirror
 
 
 def fetch(url, timeout=25):
@@ -98,6 +104,8 @@ def fetch(url, timeout=25):
                 raise last  # a real "no such symbol": retrying will not help
         except (urllib.error.URLError, OSError) as e:
             last = MarketError("could not reach %s: %s" % (u.split("/")[2], getattr(e, "reason", e)))
+            if "Tunnel connection failed: 403" in str(last):
+                raise last  # a network policy blocks the host: retrying will not help
     raise last
 
 
@@ -186,18 +194,38 @@ def get_chart_eodhd(symbol, key, since="2014-01-01", http=None):
 
 def get_chart(symbol, offline=None, range_="5y", save=None):
     """One Yahoo chart. offline: read DIR/chart-SYM.json instead. save: also write the raw
-    answer there, so a later run can use it with offline=DIR."""
+    answer there, so a later run can use it with offline=DIR. When Yahoo cannot be reached at all,
+    the copy the GitHub "prices" job saved (MIRROR) is used, marked chart["mirror"] = True: its
+    last bar shows how old it is."""
+    mirrored = False
     if offline:
         path = os.path.join(offline, "chart-%s.json" % symbol.upper())
         if not os.path.exists(path):
             raise MarketError("no offline chart file %s" % path)
         with open(path, encoding="utf-8") as fh:
-            return parse_chart(fh.read(), symbol)
-    if range_ == "max":  # every daily bar since 1990
-        text = fetch(CHART_SINCE % (urllib.parse.quote(symbol.upper()), 631152000, int(time.time())))
+            text = fh.read()
     else:
-        text = fetch(CHART % (urllib.parse.quote(symbol.upper()), range_))
+        try:
+            if _blocked and MIRROR and range_ != "max":
+                raise _blocked[0]
+            if range_ == "max":  # every daily bar since 1990
+                text = fetch(CHART_SINCE % (urllib.parse.quote(symbol.upper()), 631152000, int(time.time())))
+            else:
+                text = fetch(CHART % (urllib.parse.quote(symbol.upper()), range_))
+        except MarketError as e:
+            if not (MIRROR and range_ != "max" and "could not reach" in str(e)):
+                raise
+            if not _blocked:
+                _blocked.append(e)
+            try:
+                text = fetch(MIRROR % urllib.parse.quote(symbol.upper()))
+            except MarketError:
+                raise MarketError("%s; no saved copy of %s either: run the GitHub replay workflow in "
+                                  "mode 'prices' with tickers '%s'" % (e, symbol.upper(), symbol.upper()))
+            mirrored = True
     chart = parse_chart(text, symbol)
+    if mirrored:
+        chart["mirror"] = True
     if save:
         os.makedirs(save, exist_ok=True)
         with open(os.path.join(save, "chart-%s.json" % symbol.upper()), "w", encoding="utf-8") as fh:
@@ -288,7 +316,7 @@ def _r(x, n=2):
     return None if x is None else round(x, n)
 
 
-def refresh(symbols, offline=None, today=None, pause=PAUSE, fx_pairs=("USDCAD=X",)):
+def refresh(symbols, offline=None, today=None, pause=PAUSE, fx_pairs=("USDCAD=X",), save=None):
     """{symbols: {SYM: metrics}, fx: {USDCAD: rate}, errors: [...]}"""
     out, errors, fx = {}, [], {}
     todo = [s for s in dict.fromkeys(s.upper() for s in symbols if s)]
@@ -296,7 +324,7 @@ def refresh(symbols, offline=None, today=None, pause=PAUSE, fx_pairs=("USDCAD=X"
         if i and pause and not offline:
             time.sleep(pause)
         try:
-            ch = get_chart(sym, offline=offline, range_="1mo" if sym.endswith("=X") else "5y")
+            ch = get_chart(sym, offline=offline, range_="1mo" if sym.endswith("=X") else "5y", save=save)
         except MarketError as e:
             errors.append(str(e))
             continue
@@ -313,8 +341,9 @@ def main(argv=None):
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--today")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--save", metavar="DIR", help="also write each raw chart to DIR/chart-SYM.json")
     a = ap.parse_args(argv)
-    res = refresh(a.symbols, offline=a.offline, today=a.today, fx_pairs=())
+    res = refresh(a.symbols, offline=a.offline, today=a.today, fx_pairs=(), save=a.save)
     if a.json:
         print(json.dumps(res, indent=2))
     else:

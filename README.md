@@ -459,6 +459,21 @@ never your holdings.
 Every account's settings are editable on the dashboard (**Strategy settings**)
 and are range-checked. The live review and the replay use the same rules.
 
+**US government stakes** (`python3 trade.py gov`). The administration has
+taken stakes in about 30 companies since 2025; the publicly traded ones are
+listed with the day the news was first public, and each is "bought" at the
+next open after it, against the S&P 500 bought the same morning. So far 1 of
+5 beat it (Intel); the rare-earth magnet stocks MP and USAR, Lithium
+Americas and Trilogy Metals jumped 23-248 % on the news and then fell well
+behind. Five deals prove nothing either way; add new deals to the list as
+they come.
+
+**Prices when Yahoo is blocked** (a cloud session). A GitHub job saves the
+charts of every ticker in `mirror.txt` (public: market tickers only, never
+your holdings) every weekday, and on demand with the replay workflow's
+`prices` mode. When Yahoo cannot be reached, the price fetcher reads that
+copy instead, so every command keeps working, a few hours stale at most.
+
 ## Production: how to use it, and what is still missing
 
 **Use it now as a decision aid.** On your own computer: `python3 trade.py init`,

@@ -14,7 +14,7 @@ on:
         required: false
         default: "replay"
         type: choice
-        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history", "sessions", "cdr"]
+        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history", "sessions", "cdr", "prices"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -29,6 +29,10 @@ on:
         default: ""
       sec_user_agent:
         description: "Optional 'Name email' for SEC downloads (read privately, hidden in logs, never saved)"
+        required: false
+        default: ""
+      tickers:
+        description: "prices mode: tickers to fetch, e.g. 'VST AAPL ENB.TO' (saved to replay-results/prices/)"
         required: false
         default: ""
       label:
@@ -392,6 +396,39 @@ jobs:
           cp "$RUNNER_TEMP"/out/cdr.md "$RUNNER_TEMP"/out/cdr.json research/cdr/
           git add research/cdr
           git commit -qm "CDR check" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  # ---------------------------------------------------------------- prices
+  # Yahoo charts fetched on GitHub's machines, for places that cannot reach Yahoo
+  # (a cloud session): replay-results/prices/chart-SYM.json, read with --offline DIR.
+
+  prices:
+    if: ${{ inputs.mode == 'prices' || (github.event_name == 'schedule' && github.event.schedule == '41 22 * * 1-5') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch the charts
+        env:
+          TICKERS: ${{ inputs.tickers }}
+        run: |
+          [[ -z "$TICKERS" || "$TICKERS" =~ ^[A-Za-z0-9.^=\ -]+$ ]] || { echo "tickers: letters, digits, . ^ = - and spaces only"; exit 1; }
+          listed=$(grep -v '^#' .claude/skills/trader-accounts/mirror.txt | tr '\n' ' ')
+          python .claude/skills/trader-accounts/market.py $TICKERS $listed --save out | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        run: |
+          mkdir -p "$RUNNER_TEMP/out" && cp out/* "$RUNNER_TEMP/out/"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p prices
+          cp "$RUNNER_TEMP"/out/chart-*.json prices/
+          git add prices
+          git commit -qm "Prices: $(ls "$RUNNER_TEMP"/out | sed 's/chart-//;s/.json//' | tr '\n' ' ')" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
 
   # ---------------------------------------------------------------- build-signals
