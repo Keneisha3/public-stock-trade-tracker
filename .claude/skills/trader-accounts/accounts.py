@@ -422,6 +422,17 @@ def score(strategy, m, rules=None):
     return int(round(_clip(s, 0, 100)))
 
 
+def _stretch_verdicts(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "stretch_verdicts.json")):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh).get("verdicts", {})
+    except (OSError, ValueError):
+        return {}
+
+
+STRETCH_VERDICTS = _stretch_verdicts()  # from the stretch test (trader-replay/stretch.py), rule v15
+
+
 def _flag(level, code, text):
     return {"level": level, "code": code, "text": text}
 
@@ -460,6 +471,18 @@ def position_flags(strategy, r, p, m, weight, acct_type, cap=None):
                            "the medium-term trend is broken"))
         if (m.get("ret_6m") or 0) > 25 and m.get("above_sma200"):
             f.append(_flag("good", "momentum", "strong momentum: +%.0f%% over 6 months" % m["ret_6m"]))
+    fired = mk.stretch_signals(m.get("stretch") or {})
+    if fired:  # rule v15: "trim" only for signals the stretch test showed falling behind; else risk info
+        st, trim = m["stretch"], [x for x in fired if STRETCH_VERDICTS.get(x) == "trim"]
+        what = "; ".join(mk.STRETCH_SIGNALS[x] for x in fired)
+        if trim:
+            f.append(_flag("action", "stretched", "%s: in the test (S&P 500, 2014-2026) stocks like this fell "
+                           "behind over the next 3 months: consider trimming some, or a trailing stop" % what))
+        else:
+            f.append(_flag("watch", "stretched", "%s (%s%% above its 200-day, volatility %sx its usual). Tested: "
+                           "stocks like this did not reliably fall behind, so this is not a sell signal; a trailing "
+                           "stop or a small trim protects the gain if you want to" % (
+                               what, st.get("above_sma200_pct"), st.get("vol_ratio"))))
     if strategy == "dividend":
         y = m.get("yield_pct") or 0
         if not m.get("div_ttm"):

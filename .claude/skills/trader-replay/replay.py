@@ -2948,6 +2948,21 @@ def forward(plan, record=None, offline=None, today=None, log=print, signals=None
     # the start (prices for it may not be out yet), and any day before the start is not part of it.
     rec["days"] = {d: v for d, v in rec["days"].items() if d >= start}
     after = [d for d in data.days if start <= d <= last]
+
+    def today_weights(st):
+        if st["kind"] == "dual":
+            return dual_weights(data, last, **st.get("opts", {}))
+        if st["kind"] == "pelosi":
+            return pelosi_weights(data, signals, last, **dict(PELOSI_DEFAULT, **st.get("opts", {})))
+        if st["kind"] == "copycat":
+            return copycat_weights(data, signals, last, **dict(COPY_DEFAULT, **st.get("opts", {})))
+        if st["kind"] == "leaders":
+            return leader_weights(data, signals, last, **dict(LEADERS_DEFAULT, **st.get("opts", {})))
+        return st["weights"]
+    # what each line holds after the latest close: also before the record's first day, so the briefing
+    # can show the plan while a new record waits for its first close
+    rec["targets"] = {name: {k: round(x, 4) for k, x in today_weights(st).items()}
+                      for name, st in plan["strategies"].items()}
     if not after:
         rec["updated"] = rec.get("updated")
         return rec
@@ -2973,18 +2988,6 @@ def forward(plan, record=None, offline=None, today=None, log=print, signals=None
         rec["days"][d] = {name: v.get(d) for name, v in out.items()}
     rec["holdings"] = {name: v["_holdings"] for name, v in out.items()}
 
-    def today_weights(st):
-        if st["kind"] == "dual":
-            return dual_weights(data, last, **st.get("opts", {}))
-        if st["kind"] == "pelosi":
-            return pelosi_weights(data, signals, last, **dict(PELOSI_DEFAULT, **st.get("opts", {})))
-        if st["kind"] == "copycat":
-            return copycat_weights(data, signals, last, **dict(COPY_DEFAULT, **st.get("opts", {})))
-        if st["kind"] == "leaders":
-            return leader_weights(data, signals, last, **dict(LEADERS_DEFAULT, **st.get("opts", {})))
-        return st["weights"]
-    rec["targets"] = {name: {k: round(x, 4) for k, x in today_weights(st).items()}
-                      for name, st in plan["strategies"].items()}
     rec["updated"] = last
     rec["expect"] = {n: st["expect"] for n, st in plan["strategies"].items() if st.get("expect")}  # for tracking()
     if signals:  # how fresh the filings behind the copy lines are (the briefing warns when they go stale)

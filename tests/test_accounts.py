@@ -150,6 +150,26 @@ class SavedCharts(unittest.TestCase):
             shutil.rmtree(dst)
 
 
+class StretchedFlag(unittest.TestCase):
+    def test_watch_unless_the_test_said_trim(self):
+        r = dict(acc.RULES["growth"])
+        m = {"price": 100, "stretch": {"above_sma200_pct": 62.0, "vol_ratio": 1.1, "ret_1m": 5, "ret_3m": 20}}
+        f = {x["code"]: x for x in acc.position_flags("growth", r, {"gain_pct": 40}, m, 5.0, "TFSA")}
+        self.assertEqual(f["stretched"]["level"], "watch")
+        self.assertIn("not a sell signal", f["stretched"]["text"])
+        old = dict(acc.STRETCH_VERDICTS)
+        acc.STRETCH_VERDICTS.clear()
+        acc.STRETCH_VERDICTS["X1"] = "trim"
+        try:
+            f = {x["code"]: x for x in acc.position_flags("growth", r, {"gain_pct": 40}, m, 5.0, "TFSA")}
+            self.assertEqual(f["stretched"]["level"], "action")
+        finally:
+            acc.STRETCH_VERDICTS.clear()
+            acc.STRETCH_VERDICTS.update(old)
+        calm = dict(m, stretch={"above_sma200_pct": 10.0, "vol_ratio": 1.0, "ret_1m": 2, "ret_3m": 5})
+        self.assertNotIn("stretched", {x["code"] for x in acc.position_flags("growth", r, {}, calm, 5.0, "TFSA")})
+
+
 class BlockedYahoo(unittest.TestCase):
     def test_falls_back_to_the_saved_copy_once_yahoo_is_unreachable(self):
         src = tempfile.mkdtemp()

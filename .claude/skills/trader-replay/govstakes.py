@@ -13,6 +13,7 @@ Not financial advice.
 """
 
 import argparse
+import datetime
 import json
 import os
 import sys
@@ -66,6 +67,29 @@ def study(doc, get):
         rows.append(dict(s, now=round(ch["price"], 2), mirror=bool(ch.get("mirror")),
                          at_news=event(ch, spy, s["first_public"]), week_later=event(ch, spy, s["first_public"], 5)))
     return rows
+
+
+def briefing(doc, get, today, fresh_days=14):
+    """Compact rows for the daily briefing: each stake, how it has done since the news, its trend
+    now, and "new" when the news is under `fresh_days` old. Charts are read once each."""
+    cache = {}
+
+    def once(t):
+        if t not in cache:
+            cache[t] = get(t)
+        return cache[t]
+    out = []
+    for r in study(doc, once):
+        a = r.get("at_news") or {}
+        row = {k: r.get(k) for k in ("ticker", "company", "agency", "stake", "theme", "first_public", "now", "error")}
+        row.update(since_pct=a.get("since_pct"), spy_since_pct=a.get("spy_since_pct"), jump_pct=a.get("jump_pct"),
+                   new=r["first_public"] >= (datetime.date.fromisoformat(today)
+                                             - datetime.timedelta(days=fresh_days)).isoformat())
+        if not r.get("error"):
+            m = mk.metrics(once(r["ticker"]))
+            row.update(above_sma200=m.get("above_sma200"), ret_3m=m.get("ret_3m"))
+        out.append(row)
+    return out
 
 
 def render(rows):

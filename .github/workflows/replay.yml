@@ -14,7 +14,7 @@ on:
         required: false
         default: "replay"
         type: choice
-        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history", "sessions", "cdr", "prices"]
+        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history", "sessions", "cdr", "prices", "stretch"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -396,6 +396,32 @@ jobs:
           cp "$RUNNER_TEMP"/out/cdr.md "$RUNNER_TEMP"/out/cdr.json research/cdr/
           git add research/cdr
           git commit -qm "CDR check" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  stretch:
+    if: ${{ inputs.mode == 'stretch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test the sell (stretch) signals on the S&P 500 since 2014
+        run: |
+          python .claude/skills/trader-replay/stretch.py --out out > /dev/null
+          cat out/stretch.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        run: |
+          mkdir -p "$RUNNER_TEMP/out" && cp out/* "$RUNNER_TEMP/out/"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p research/stretch
+          cp "$RUNNER_TEMP"/out/stretch.md "$RUNNER_TEMP"/out/stretch.json research/stretch/
+          git add research/stretch
+          git commit -qm "Stretch (sell) signal test" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
 
   # ---------------------------------------------------------------- prices

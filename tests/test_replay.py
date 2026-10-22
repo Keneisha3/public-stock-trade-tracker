@@ -628,6 +628,7 @@ class ForwardRecord(unittest.TestCase):
             rec = replay.forward(plan, rec, offline=off, today=days[510], log=lambda m: None)
             early = replay.forward(dict(plan, start=days[510]), None, offline=off, today=days[509], log=lambda m: None)
             self.assertEqual(early["days"], {})          # the start's prices are not out yet: nothing recorded
+            self.assertEqual(early["targets"]["Nasdaq 100 (QQQ)"], {"QQQ": 1.0})  # but the plan shows already
             bad = {"start": days[505], "plan": plan, "days": {days[504]: {"Dual": 100.0}}}
             fixed = replay.forward(dict(plan, start=days[505]), bad, offline=off, today=days[506], log=lambda m: None)
             self.assertEqual(min(fixed["days"]), days[505])  # a day before the plan existed is dropped
