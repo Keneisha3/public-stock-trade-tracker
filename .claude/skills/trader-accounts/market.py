@@ -104,6 +104,8 @@ def fetch(url, timeout=25):
                 raise last  # a real "no such symbol": retrying will not help
         except (urllib.error.URLError, OSError) as e:
             last = MarketError("could not reach %s: %s" % (u.split("/")[2], getattr(e, "reason", e)))
+            if "Tunnel connection failed: 403" in str(last):
+                raise last  # a network policy blocks the host: retrying will not help
     raise last
 
 

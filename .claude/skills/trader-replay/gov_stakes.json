@@ -1,0 +1,11 @@
+{
+ "note": "US government equity stakes in publicly traded companies, by the day the news was first public (a report of talks counts: that is when the market could act). Dates from press reports; check each against the company's filings before relying on it. Private companies (Vulcan Elements, ReElement, Westinghouse) cannot be bought and are left out. Add rows as new deals are announced.",
+ "updated": "2026-10-22",
+ "stakes": [
+  {"ticker": "MP", "company": "MP Materials", "agency": "Defense", "stake": "about 15% (preferred stock and warrants), $400M, magnet price floor", "first_public": "2025-07-10", "theme": "rare-earth magnets"},
+  {"ticker": "INTC", "company": "Intel", "agency": "Commerce", "stake": "about 10%, $8.9B from CHIPS grants", "first_public": "2025-08-14", "theme": "chips"},
+  {"ticker": "LAC", "company": "Lithium Americas", "agency": "Energy", "stake": "5% plus 5% of the Thacker Pass venture", "first_public": "2025-09-23", "theme": "lithium"},
+  {"ticker": "TMQ", "company": "Trilogy Metals", "agency": "Defense", "stake": "10%, $35.6M", "first_public": "2025-10-06", "theme": "critical minerals"},
+  {"ticker": "USAR", "company": "USA Rare Earth", "agency": "Commerce", "stake": "8-16% (shares and warrants) with a $1.6B debt and equity package", "first_public": "2026-01-24", "theme": "rare-earth magnets"}
+ ]
+}
