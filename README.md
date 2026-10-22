@@ -468,6 +468,27 @@ Americas and Trilogy Metals jumped 23-248 % on the news and then fell well
 behind. Five deals prove nothing either way; add new deals to the list as
 they come.
 
+**Sell when it gets "too high"?** (rule v15; `research/stretch/`). Every
+S&P 500 member since 2014 on its member days, entry at the next open, the
+next 3 months against the S&P 500:
+
+| signal | 2014-2022 | 2023-2026 |
+| --- | ---: | ---: |
+| X1 50 %+ above its 200-day average | +0.1 | +9.5 |
+| X2 up 25 %+ in a month, volatility 1.5x usual | +1.4 | +2.7 |
+| X3 30 %+ above the 200-day, volatility 1.5x usual, rising | -0.3 | -1.1 |
+| X4 up 60 %+ in 3 months | -0.2 | +9.8 |
+| every stock, every day (baseline) | +0.0 | -1.9 |
+
+None passed: stretched stocks did not reliably fall behind, and the very
+high ones often kept going. X3, the "volatility rising on the way up" case,
+lagged a little in both periods (and 63 % of them trailed after 2023), but
+by far less than the 2 points the rule asked for. So the review shows a
+**watch** flag when a holding is stretched (a trailing stop or a small trim
+protects a gain if you want to), never a sell. 158 former members had no
+prices, and the ones that collapsed are the likeliest to be missing, so the
+real picture for stretched stocks may be a little worse than this.
+
 **Prices when Yahoo is blocked** (a cloud session). A GitHub job saves the
 charts of every ticker in `mirror.txt` (public: market tickers only, never
 your holdings) every weekday, and on demand with the replay workflow's
