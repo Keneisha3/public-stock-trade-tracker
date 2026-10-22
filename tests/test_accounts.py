@@ -136,6 +136,60 @@ class Retries(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class SavedCharts(unittest.TestCase):
+    def test_save_then_read_offline(self):
+        src, dst = tempfile.mkdtemp(), tempfile.mkdtemp()
+        try:
+            _synth.write(src, "VST", _synth.chart("VST", p0=100, growth=0.3, n=300))
+            first = mk.refresh(["VST"], offline=src, fx_pairs=(), save=dst)
+            self.assertTrue(os.path.exists(os.path.join(dst, "chart-VST.json")))
+            again = mk.refresh(["VST"], offline=dst, fx_pairs=())        # what a cloud session does
+            self.assertEqual(first["symbols"]["VST"]["price"], again["symbols"]["VST"]["price"])
+        finally:
+            shutil.rmtree(src)
+            shutil.rmtree(dst)
+
+
+class BlockedYahoo(unittest.TestCase):
+    def test_falls_back_to_the_saved_copy_once_yahoo_is_unreachable(self):
+        src = tempfile.mkdtemp()
+        _synth.write(src, "VST", _synth.chart("VST", p0=100, growth=0.3, n=300))
+        with open(os.path.join(src, "chart-VST.json"), encoding="utf-8") as fh:
+            saved = fh.read()
+        shutil.rmtree(src)
+        calls, real = [], mk.fetch
+
+        def fetch(url, timeout=25):
+            calls.append(url)
+            if "yahoo" in url:
+                raise mk.MarketError("could not reach query1.finance.yahoo.com: Tunnel connection failed: 403")
+            if "chart-VST" in url:
+                return saved
+            raise mk.MarketError("raw.githubusercontent.com answered HTTP 404")
+        mk.fetch, mk._blocked[:] = fetch, []
+        try:
+            ch = mk.get_chart("VST")
+            self.assertTrue(ch["mirror"])
+            self.assertEqual(len(ch["bars"]), 300)
+            mk.get_chart("VST")
+            self.assertEqual(sum("yahoo" in u for u in calls), 1)          # Yahoo is tried once, not per symbol
+            with self.assertRaisesRegex(mk.MarketError, "mode 'prices'"):  # never fetched: says how to get it
+                mk.get_chart("ZZZ")
+        finally:
+            mk.fetch, mk._blocked[:] = real, []
+
+    def test_a_real_yahoo_answer_is_not_replaced(self):
+        real = mk.fetch
+        mk.fetch, mk._blocked[:] = (lambda url, timeout=25: (_ for _ in ()).throw(
+            mk.MarketError("query1.finance.yahoo.com answered HTTP 404"))), []
+        try:
+            with self.assertRaisesRegex(mk.MarketError, "404"):          # no such symbol: no fallback
+                mk.get_chart("NOPE")
+            self.assertEqual(mk._blocked, [])
+        finally:
+            mk.fetch = real
+
+
 class NoMarketData(unittest.TestCase):
     def test_stop_and_cap_still_fire_without_price_history(self):
         a = {"id": "w", "name": "W", "strategy": "dividend", "type": "TFSA", "fractional": True,
