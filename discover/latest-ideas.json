@@ -1,1220 +1,1222 @@
 {
- "date": "2026-10-22",
+ "date": "2026-10-23",
  "deep": true,
- "candidates": 9600,
- "passed": 1465,
- "no_data": 27,
+ "candidates": 9587,
+ "passed": 1473,
+ "no_data": 28,
  "ideas": [
   {
    "symbol": "SNDK",
    "name": "Sandisk Corporation",
-   "momentum_12_1": 1174.62,
+   "momentum_12_1": 1116.86,
    "sources": [
+    "trending",
+    "screens",
     "reddit"
    ],
-   "price": 1378.22,
+   "price": 1260.93,
    "currency": "USD",
-   "ret_1m": -26.96,
-   "dollar_volume_m": 12401.4
+   "ret_1m": -30.59,
+   "dollar_volume_m": 12335.4
   },
   {
    "symbol": "MRNA",
    "name": "Moderna, Inc.",
-   "momentum_12_1": 570.17,
+   "momentum_12_1": 562.44,
    "sources": [
+    "trending",
     "screens",
     "news",
     "reddit"
    ],
-   "price": 245.81,
+   "price": 202.63,
    "currency": "USD",
-   "ret_1m": 34.65,
-   "dollar_volume_m": 3741.9
-  },
-  {
-   "symbol": "TXG",
-   "name": "10x Genomics, Inc.",
-   "momentum_12_1": 514.15,
-   "sources": [
-    "screens"
-   ],
-   "price": 75.59,
-   "currency": "USD",
-   "ret_1m": -6.33,
-   "dollar_volume_m": 335.7
-  },
-  {
-   "symbol": "CLYM",
-   "name": "Climb Bio, Inc.",
-   "momentum_12_1": 512.46,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 10.87,
-   "currency": "USD",
-   "ret_1m": -23.5,
-   "dollar_volume_m": 12.8
+   "ret_1m": 11.27,
+   "dollar_volume_m": 3742.4
   },
   {
    "symbol": "SLS",
    "name": "SELLAS Life Sciences Group, Inc.",
-   "momentum_12_1": 498.0,
+   "momentum_12_1": 503.17,
    "sources": [
     "reddit"
    ],
-   "price": 12.14,
+   "price": 11.35,
    "currency": "USD",
-   "ret_1m": 1.0,
-   "dollar_volume_m": 64.2
+   "ret_1m": -1.48,
+   "dollar_volume_m": 65.1
   },
   {
-   "symbol": "LITE",
-   "name": "Lumentum Holdings Inc.",
-   "momentum_12_1": 487.36,
+   "symbol": "TXG",
+   "name": "10x Genomics, Inc.",
+   "momentum_12_1": 480.33,
    "sources": [
-    "news"
+    "listed_us"
    ],
-   "price": 850.7,
+   "price": 69.75,
    "currency": "USD",
-   "ret_1m": -10.04,
-   "dollar_volume_m": 4628.6
+   "ret_1m": -7.76,
+   "dollar_volume_m": 333.1
+  },
+  {
+   "symbol": "CLYM",
+   "name": "Climb Bio, Inc.",
+   "momentum_12_1": 453.95,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 10.54,
+   "currency": "USD",
+   "ret_1m": -15.81,
+   "dollar_volume_m": 12.0
   },
   {
    "symbol": "MU",
    "name": "Micron Technology, Inc.",
-   "momentum_12_1": 430.15,
+   "momentum_12_1": 429.85,
    "sources": [
+    "trending",
     "screens",
     "reddit"
    ],
-   "price": 913.67,
+   "price": 856.49,
    "currency": "USD",
-   "ret_1m": -16.65,
-   "dollar_volume_m": 26584.6
-  },
-  {
-   "symbol": "TWST",
-   "name": "Twist Bioscience Corporation",
-   "momentum_12_1": 402.76,
-   "sources": [
-    "screens"
-   ],
-   "price": 149.13,
-   "currency": "USD",
-   "ret_1m": -9.4,
-   "dollar_volume_m": 540.1
-  },
-  {
-   "symbol": "MXL",
-   "name": "MaxLinear, Inc.",
-   "momentum_12_1": 395.62,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 75.79,
-   "currency": "USD",
-   "ret_1m": -13.31,
-   "dollar_volume_m": 294.8
+   "ret_1m": -20.09,
+   "dollar_volume_m": 26593.8
   },
   {
    "symbol": "MU.TO",
    "name": "Micron Technology, Inc.",
-   "momentum_12_1": 392.06,
+   "momentum_12_1": 427.13,
    "sources": [
     "listed_tsx"
    ],
-   "price": 39.99,
+   "price": 37.54,
    "currency": "CAD",
-   "ret_1m": -12.67,
-   "dollar_volume_m": 69.7
+   "ret_1m": -21.74,
+   "dollar_volume_m": 71.1
+  },
+  {
+   "symbol": "TWST",
+   "name": "Twist Bioscience Corporation",
+   "momentum_12_1": 374.69,
+   "sources": [
+    "screens"
+   ],
+   "price": 135.47,
+   "currency": "USD",
+   "ret_1m": -14.53,
+   "dollar_volume_m": 525.9
+  },
+  {
+   "symbol": "MXL",
+   "name": "MaxLinear, Inc.",
+   "momentum_12_1": 372.9,
+   "sources": [
+    "trending",
+    "screens"
+   ],
+   "price": 65.28,
+   "currency": "USD",
+   "ret_1m": -22.58,
+   "dollar_volume_m": 294.8
   },
   {
    "symbol": "IOVA",
    "name": "Iovance Biotherapeutics, Inc.",
-   "momentum_12_1": 358.61,
+   "momentum_12_1": 348.91,
    "sources": [
     "listed_us"
    ],
-   "price": 14.62,
+   "price": 14.14,
    "currency": "USD",
-   "ret_1m": 37.41,
-   "dollar_volume_m": 231.4
+   "ret_1m": 38.76,
+   "dollar_volume_m": 231.3
   },
   {
    "symbol": "EDRY",
    "name": "EuroDry Ltd.",
-   "momentum_12_1": 343.39,
+   "momentum_12_1": 319.8,
    "sources": [
     "listed_us"
    ],
-   "price": 47.59,
+   "price": 45.32,
    "currency": "USD",
-   "ret_1m": -12.0,
-   "dollar_volume_m": 7.3
-  },
-  {
-   "symbol": "MBX",
-   "name": "MBX Biosciences, Inc.",
-   "momentum_12_1": 335.57,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 53.93,
-   "currency": "USD",
-   "ret_1m": -12.99,
-   "dollar_volume_m": 31.5
-  },
-  {
-   "symbol": "STX",
-   "name": "Seagate Technology Holdings plc",
-   "momentum_12_1": 329.04,
-   "sources": [
-    "screens",
-    "reddit"
-   ],
-   "price": 696.89,
-   "currency": "USD",
-   "ret_1m": -24.24,
-   "dollar_volume_m": 3831.8
-  },
-  {
-   "symbol": "BFLY",
-   "name": "Butterfly Network, Inc.",
-   "momentum_12_1": 320.77,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 7.1,
-   "currency": "USD",
-   "ret_1m": -28.5,
-   "dollar_volume_m": 43.8
+   "ret_1m": -11.73,
+   "dollar_volume_m": 7.0
   },
   {
    "symbol": "ATEX",
    "name": "Anterix Inc.",
-   "momentum_12_1": 310.82,
+   "momentum_12_1": 312.66,
    "sources": [
     "listed_us"
    ],
-   "price": 76.77,
+   "price": 73.16,
    "currency": "USD",
-   "ret_1m": -9.94,
-   "dollar_volume_m": 21.2
+   "ret_1m": -12.88,
+   "dollar_volume_m": 21.3
+  },
+  {
+   "symbol": "BFLY",
+   "name": "Butterfly Network, Inc.",
+   "momentum_12_1": 308.9,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 6.81,
+   "currency": "USD",
+   "ret_1m": -25.98,
+   "dollar_volume_m": 42.0
   },
   {
    "symbol": "SYRE",
    "name": "Spyre Therapeutics, Inc.",
-   "momentum_12_1": 291.51,
+   "momentum_12_1": 279.22,
    "sources": [
     "listed_us"
    ],
-   "price": 92.95,
+   "price": 92.33,
    "currency": "USD",
-   "ret_1m": 1.07,
-   "dollar_volume_m": 130.7
+   "ret_1m": 4.72,
+   "dollar_volume_m": 126.9
   },
   {
-   "symbol": "IBRX",
-   "name": "ImmunityBio, Inc.",
-   "momentum_12_1": 279.19,
+   "symbol": "MBX",
+   "name": "MBX Biosciences, Inc.",
+   "momentum_12_1": 278.1,
    "sources": [
     "listed_us"
    ],
-   "price": 8.64,
+   "price": 50.46,
    "currency": "USD",
-   "ret_1m": -7.0,
-   "dollar_volume_m": 153.4
-  },
-  {
-   "symbol": "DRTS",
-   "name": "Alpha Tau Medical Ltd.",
-   "momentum_12_1": 278.48,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 13.48,
-   "currency": "USD",
-   "ret_1m": -10.96,
-   "dollar_volume_m": 6.9
+   "ret_1m": -12.83,
+   "dollar_volume_m": 31.5
   },
   {
    "symbol": "DELL",
    "name": "Dell Technologies Inc.",
-   "momentum_12_1": 271.2,
+   "momentum_12_1": 267.95,
    "sources": [
-    "screens"
+    "screens",
+    "reddit"
    ],
-   "price": 485.88,
+   "price": 452.95,
    "currency": "USD",
-   "ret_1m": -11.48,
-   "dollar_volume_m": 3657.4
-  },
-  {
-   "symbol": "CDNA",
-   "name": "CareDx, Inc.",
-   "momentum_12_1": 271.14,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 70.74,
-   "currency": "USD",
-   "ret_1m": 25.23,
-   "dollar_volume_m": 100.2
+   "ret_1m": -17.62,
+   "dollar_volume_m": 3597.4
   },
   {
    "symbol": "BAND",
    "name": "Bandwidth Inc.",
-   "momentum_12_1": 264.33,
+   "momentum_12_1": 266.59,
    "sources": [
     "listed_us"
    ],
-   "price": 46.82,
+   "price": 40.5,
    "currency": "USD",
-   "ret_1m": -19.83,
-   "dollar_volume_m": 45.5
-  },
-  {
-   "symbol": "RVMD",
-   "name": "Revolution Medicines, Inc.",
-   "momentum_12_1": 257.07,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 194.28,
-   "currency": "USD",
-   "ret_1m": 0.74,
-   "dollar_volume_m": 440.9
-  },
-  {
-   "symbol": "AGL",
-   "name": "agilon health, inc.",
-   "momentum_12_1": 250.87,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 90.99,
-   "currency": "USD",
-   "ret_1m": 4.78,
-   "dollar_volume_m": 17.8
-  },
-  {
-   "symbol": "ASX",
-   "name": "ASE Technology Holding Co., Ltd.",
-   "momentum_12_1": 247.95,
-   "sources": [
-    "screens"
-   ],
-   "price": 42.41,
-   "currency": "USD",
-   "ret_1m": -6.17,
-   "dollar_volume_m": 302.2
-  },
-  {
-   "symbol": "ORKA",
-   "name": "Oruka Therapeutics, Inc.",
-   "momentum_12_1": 244.06,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 79.92,
-   "currency": "USD",
-   "ret_1m": -15.47,
-   "dollar_volume_m": 76.1
-  },
-  {
-   "symbol": "UMC",
-   "name": "United Microelectronics Corporation",
-   "momentum_12_1": 242.69,
-   "sources": [
-    "screens"
-   ],
-   "price": 19.82,
-   "currency": "USD",
-   "ret_1m": -23.09,
-   "dollar_volume_m": 239.1
-  },
-  {
-   "symbol": "PACS",
-   "name": "PACS Group, Inc.",
-   "momentum_12_1": 227.53,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 46.76,
-   "currency": "USD",
-   "ret_1m": 12.59,
-   "dollar_volume_m": 34.9
-  },
-  {
-   "symbol": "INTC",
-   "name": "Intel Corporation",
-   "momentum_12_1": 225.1,
-   "sources": [
-    "screens",
-    "news",
-    "reddit"
-   ],
-   "price": 92.96,
-   "currency": "USD",
-   "ret_1m": -24.95,
-   "dollar_volume_m": 10814.3
-  },
-  {
-   "symbol": "QQD.TO",
-   "name": "BetaPro NASDAQ-100 -2x Daily Bear ETF",
-   "momentum_12_1": 222.59,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 22.7,
-   "currency": "CAD",
-   "ret_1m": 4.56,
-   "dollar_volume_m": 7.5
-  },
-  {
-   "symbol": "IMOS",
-   "name": "ChipMOS TECHNOLOGIES INC.",
-   "momentum_12_1": 221.0,
-   "sources": [
-    "screens"
-   ],
-   "price": 62.34,
-   "currency": "USD",
-   "ret_1m": -8.22,
-   "dollar_volume_m": 7.3
+   "ret_1m": -31.51,
+   "dollar_volume_m": 43.2
   },
   {
    "symbol": "FSLY",
    "name": "Fastly, Inc.",
-   "momentum_12_1": 214.98,
+   "momentum_12_1": 260.25,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 22.45,
+   "currency": "USD",
+   "ret_1m": -24.28,
+   "dollar_volume_m": 161.8
+  },
+  {
+   "symbol": "AGL",
+   "name": "agilon health, inc.",
+   "momentum_12_1": 259.43,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 90.29,
+   "currency": "USD",
+   "ret_1m": 6.78,
+   "dollar_volume_m": 17.8
+  },
+  {
+   "symbol": "CDNA",
+   "name": "CareDx, Inc.",
+   "momentum_12_1": 257.55,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 69.16,
+   "currency": "USD",
+   "ret_1m": 27.34,
+   "dollar_volume_m": 100.8
+  },
+  {
+   "symbol": "RVMD",
+   "name": "Revolution Medicines, Inc.",
+   "momentum_12_1": 256.6,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 187.69,
+   "currency": "USD",
+   "ret_1m": -1.6,
+   "dollar_volume_m": 414.3
+  },
+  {
+   "symbol": "IBRX",
+   "name": "ImmunityBio, Inc.",
+   "momentum_12_1": 253.69,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 8.31,
+   "currency": "USD",
+   "ret_1m": -3.71,
+   "dollar_volume_m": 152.4
+  },
+  {
+   "symbol": "ASX",
+   "name": "ASE Technology Holding Co., Ltd.",
+   "momentum_12_1": 246.44,
    "sources": [
     "screens"
    ],
-   "price": 23.3,
+   "price": 37.74,
    "currency": "USD",
-   "ret_1m": -10.66,
-   "dollar_volume_m": 200.1
+   "ret_1m": -14.09,
+   "dollar_volume_m": 305.6
+  },
+  {
+   "symbol": "DRTS",
+   "name": "Alpha Tau Medical Ltd.",
+   "momentum_12_1": 245.72,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 12.9,
+   "currency": "USD",
+   "ret_1m": -11.16,
+   "dollar_volume_m": 6.7
   },
   {
    "symbol": "ARG.TO",
    "name": "Amerigo Resources Ltd.",
-   "momentum_12_1": 211.93,
+   "momentum_12_1": 239.83,
    "sources": [
     "listed_tsx"
    ],
-   "price": 7.67,
+   "price": 7.04,
    "currency": "CAD",
-   "ret_1m": -11.23,
-   "dollar_volume_m": 6.2
+   "ret_1m": -22.12,
+   "dollar_volume_m": 6.5
   },
   {
-   "symbol": "ETON",
-   "name": "Eton Pharmaceuticals, Inc.",
-   "momentum_12_1": 210.28,
+   "symbol": "UMC",
+   "name": "United Microelectronics Corporation",
+   "momentum_12_1": 231.27,
+   "sources": [
+    "screens"
+   ],
+   "price": 18.53,
+   "currency": "USD",
+   "ret_1m": -24.92,
+   "dollar_volume_m": 247.4
+  },
+  {
+   "symbol": "ORKA",
+   "name": "Oruka Therapeutics, Inc.",
+   "momentum_12_1": 228.68,
    "sources": [
     "listed_us"
    ],
-   "price": 49.3,
+   "price": 81.15,
    "currency": "USD",
-   "ret_1m": -13.65,
-   "dollar_volume_m": 33.4
+   "ret_1m": -9.76,
+   "dollar_volume_m": 73.0
   },
   {
-   "symbol": "DFTX",
-   "name": "Definium Therapeutics, Inc.",
-   "momentum_12_1": 206.38,
+   "symbol": "PACS",
+   "name": "PACS Group, Inc.",
+   "momentum_12_1": 228.41,
    "sources": [
     "listed_us"
    ],
-   "price": 35.49,
+   "price": 47.5,
    "currency": "USD",
-   "ret_1m": -11.98,
-   "dollar_volume_m": 78.3
+   "ret_1m": 15.71,
+   "dollar_volume_m": 35.4
+  },
+  {
+   "symbol": "IMOS",
+   "name": "ChipMOS TECHNOLOGIES INC.",
+   "momentum_12_1": 227.53,
+   "sources": [
+    "screens"
+   ],
+   "price": 55.46,
+   "currency": "USD",
+   "ret_1m": -17.68,
+   "dollar_volume_m": 7.0
+  },
+  {
+   "symbol": "QQD.TO",
+   "name": "BetaPro NASDAQ-100 -2x Daily Bear ETF",
+   "momentum_12_1": 217.22,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 23.98,
+   "currency": "CAD",
+   "ret_1m": 12.16,
+   "dollar_volume_m": 7.6
   },
   {
    "symbol": "MRVL",
    "name": "Marvell Technology, Inc.",
-   "momentum_12_1": 205.65,
+   "momentum_12_1": 209.64,
    "sources": [
+    "screens",
     "reddit"
    ],
-   "price": 244.76,
+   "price": 223.47,
    "currency": "USD",
-   "ret_1m": -6.71,
-   "dollar_volume_m": 5207.2
+   "ret_1m": -14.35,
+   "dollar_volume_m": 5209.0
+  },
+  {
+   "symbol": "ETON",
+   "name": "Eton Pharmaceuticals, Inc.",
+   "momentum_12_1": 199.78,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 50.02,
+   "currency": "USD",
+   "ret_1m": -10.05,
+   "dollar_volume_m": 32.9
+  },
+  {
+   "symbol": "DFTX",
+   "name": "Definium Therapeutics, Inc.",
+   "momentum_12_1": 197.86,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 36.0,
+   "currency": "USD",
+   "ret_1m": -4.38,
+   "dollar_volume_m": 78.4
   },
   {
    "symbol": "CLMT",
    "name": "Calumet, Inc.",
-   "momentum_12_1": 200.43,
-   "sources": [
-    "screens"
-   ],
-   "price": 52.59,
-   "currency": "USD",
-   "ret_1m": -6.79,
-   "dollar_volume_m": 82.0
-  },
-  {
-   "symbol": "HND.TO",
-   "name": "BetaPro Natural Gas Inverse Leveraged Daily Bear ETF",
-   "momentum_12_1": 197.35,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 25.1,
-   "currency": "CAD",
-   "ret_1m": 1.58,
-   "dollar_volume_m": 24.8
-  },
-  {
-   "symbol": "TH",
-   "name": "Target Hospitality Corp.",
-   "momentum_12_1": 195.93,
+   "momentum_12_1": 191.26,
    "sources": [
     "listed_us"
    ],
-   "price": 15.68,
+   "price": 49.32,
    "currency": "USD",
-   "ret_1m": -26.0,
-   "dollar_volume_m": 43.5
-  },
-  {
-   "symbol": "VSTS",
-   "name": "Vestis Corporation",
-   "momentum_12_1": 195.7,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 14.83,
-   "currency": "USD",
-   "ret_1m": 2.77,
-   "dollar_volume_m": 19.6
-  },
-  {
-   "symbol": "SIMO",
-   "name": "Silicon Motion Technology Corporation",
-   "momentum_12_1": 194.66,
-   "sources": [
-    "screens"
-   ],
-   "price": 222.3,
-   "currency": "USD",
-   "ret_1m": -21.52,
-   "dollar_volume_m": 166.4
-  },
-  {
-   "symbol": "HOU.TO",
-   "name": "BetaPro Crude Oil Daily Bull ETF",
-   "momentum_12_1": 192.45,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 30.01,
-   "currency": "CAD",
-   "ret_1m": 19.32,
-   "dollar_volume_m": 30.6
-  },
-  {
-   "symbol": "INBX",
-   "name": "Inhibrx Biosciences, Inc.",
-   "momentum_12_1": 189.57,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 98.19,
-   "currency": "USD",
-   "ret_1m": -11.28,
-   "dollar_volume_m": 21.2
-  },
-  {
-   "symbol": "PLSE",
-   "name": "Pulse Biosciences, Inc.",
-   "momentum_12_1": 189.35,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 51.31,
-   "currency": "USD",
-   "ret_1m": -2.62,
-   "dollar_volume_m": 22.1
-  },
-  {
-   "symbol": "EWTX",
-   "name": "Edgewise Therapeutics, Inc.",
-   "momentum_12_1": 189.21,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 39.65,
-   "currency": "USD",
-   "ret_1m": -10.92,
-   "dollar_volume_m": 66.0
-  },
-  {
-   "symbol": "RNG",
-   "name": "RingCentral, Inc.",
-   "momentum_12_1": 188.27,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 82.42,
-   "currency": "USD",
-   "ret_1m": 3.37,
-   "dollar_volume_m": 113.1
-  },
-  {
-   "symbol": "SILC",
-   "name": "Silicom Ltd.",
-   "momentum_12_1": 188.26,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 42.57,
-   "currency": "USD",
-   "ret_1m": -14.14,
-   "dollar_volume_m": 8.6
+   "ret_1m": -9.3,
+   "dollar_volume_m": 81.1
   },
   {
    "symbol": "FET",
    "name": "Forum Energy Technologies, Inc.",
-   "momentum_12_1": 184.94,
+   "momentum_12_1": 190.3,
    "sources": [
     "listed_us"
    ],
-   "price": 86.73,
+   "price": 81.56,
    "currency": "USD",
-   "ret_1m": 7.14,
-   "dollar_volume_m": 14.6
+   "ret_1m": -1.35,
+   "dollar_volume_m": 14.7
   },
   {
-   "symbol": "COHU",
-   "name": "Cohu, Inc.",
-   "momentum_12_1": 183.31,
-   "sources": [
-    "screens"
-   ],
-   "price": 55.29,
-   "currency": "USD",
-   "ret_1m": -14.33,
-   "dollar_volume_m": 68.4
-  },
-  {
-   "symbol": "TNGX",
-   "name": "Tango Therapeutics, Inc.",
-   "momentum_12_1": 179.01,
-   "sources": [
-    "screens"
-   ],
-   "price": 26.98,
-   "currency": "USD",
-   "ret_1m": 5.68,
-   "dollar_volume_m": 86.2
-  },
-  {
-   "symbol": "BDT.TO",
-   "name": "Bird Construction Inc.",
-   "momentum_12_1": 175.4,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 73.78,
-   "currency": "CAD",
-   "ret_1m": -9.43,
-   "dollar_volume_m": 27.5
-  },
-  {
-   "symbol": "TNZ.TO",
-   "name": "Tenaz Energy Corp.",
-   "momentum_12_1": 173.43,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 71.06,
-   "currency": "CAD",
-   "ret_1m": 2.52,
-   "dollar_volume_m": 7.3
-  },
-  {
-   "symbol": "RLAY",
-   "name": "Relay Therapeutics, Inc.",
-   "momentum_12_1": 171.01,
+   "symbol": "PLSE",
+   "name": "Pulse Biosciences, Inc.",
+   "momentum_12_1": 187.49,
    "sources": [
     "listed_us"
    ],
-   "price": 18.41,
+   "price": 52.68,
    "currency": "USD",
-   "ret_1m": -4.86,
-   "dollar_volume_m": 47.9
+   "ret_1m": 1.35,
+   "dollar_volume_m": 21.5
   },
   {
-   "symbol": "MAU.TO",
-   "name": "Montage Gold Corp.",
-   "momentum_12_1": 168.3,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 16.76,
-   "currency": "CAD",
-   "ret_1m": -15.01,
-   "dollar_volume_m": 9.8
-  },
-  {
-   "symbol": "HPE",
-   "name": "Hewlett Packard Enterprise Company",
-   "momentum_12_1": 166.87,
-   "sources": [
-    "screens"
-   ],
-   "price": 58.17,
-   "currency": "USD",
-   "ret_1m": -4.69,
-   "dollar_volume_m": 1330.9
-  },
-  {
-   "symbol": "LBRX",
-   "name": "LB Pharmaceuticals Inc",
-   "momentum_12_1": 166.8,
+   "symbol": "SILC",
+   "name": "Silicom Ltd.",
+   "momentum_12_1": 187.45,
    "sources": [
     "listed_us"
    ],
-   "price": 39.23,
+   "price": 37.62,
    "currency": "USD",
-   "ret_1m": -8.1,
-   "dollar_volume_m": 18.2
-  },
-  {
-   "symbol": "VSXY",
-   "name": "Victorias Secret & Co.",
-   "momentum_12_1": 165.93,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 89.15,
-   "currency": "USD",
-   "ret_1m": 6.36,
-   "dollar_volume_m": 133.7
-  },
-  {
-   "symbol": "TOT.TO",
-   "name": "Total Energy Services Inc.",
-   "momentum_12_1": 163.39,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 38.73,
-   "currency": "CAD",
-   "ret_1m": 9.41,
-   "dollar_volume_m": 6.9
-  },
-  {
-   "symbol": "TWLO",
-   "name": "Twilio Inc.",
-   "momentum_12_1": 160.98,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 266.68,
-   "currency": "USD",
-   "ret_1m": -6.27,
-   "dollar_volume_m": 1281.9
-  },
-  {
-   "symbol": "IRDM",
-   "name": "Iridium Communications Inc.",
-   "momentum_12_1": 160.57,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 44.25,
-   "currency": "USD",
-   "ret_1m": -9.04,
-   "dollar_volume_m": 46.1
-  },
-  {
-   "symbol": "GTE",
-   "name": "Gran Tierra Energy Inc.",
-   "momentum_12_1": 160.38,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 11.58,
-   "currency": "USD",
-   "ret_1m": 18.28,
-   "dollar_volume_m": 5.4
-  },
-  {
-   "symbol": "AMD",
-   "name": "Advanced Micro Devices, Inc.",
-   "momentum_12_1": 159.29,
-   "sources": [
-    "screens",
-    "news",
-    "reddit"
-   ],
-   "price": 552.72,
-   "currency": "USD",
-   "ret_1m": -11.39,
-   "dollar_volume_m": 11658.5
-  },
-  {
-   "symbol": "FOSL",
-   "name": "Fossil Group, Inc.",
-   "momentum_12_1": 156.41,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 6.75,
-   "currency": "USD",
-   "ret_1m": 5.3,
-   "dollar_volume_m": 5.3
-  },
-  {
-   "symbol": "PENG",
-   "name": "Penguin Solutions, Inc.",
-   "momentum_12_1": 155.67,
-   "sources": [
-    "screens"
-   ],
-   "price": 58.38,
-   "currency": "USD",
-   "ret_1m": 3.18,
-   "dollar_volume_m": 331.3
-  },
-  {
-   "symbol": "OMER",
-   "name": "Omeros Corporation",
-   "momentum_12_1": 155.17,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 16.26,
-   "currency": "USD",
-   "ret_1m": -22.76,
-   "dollar_volume_m": 20.4
-  },
-  {
-   "symbol": "SMTC",
-   "name": "Semtech Corporation",
-   "momentum_12_1": 154.36,
-   "sources": [
-    "screens",
-    "news"
-   ],
-   "price": 141.63,
-   "currency": "USD",
-   "ret_1m": -18.76,
-   "dollar_volume_m": 588.4
-  },
-  {
-   "symbol": "BE",
-   "name": "Bloom Energy Corporation",
-   "momentum_12_1": 153.55,
-   "sources": [
-    "screens",
-    "news",
-    "reddit"
-   ],
-   "price": 238.53,
-   "currency": "USD",
-   "ret_1m": -13.74,
-   "dollar_volume_m": 3668.1
-  },
-  {
-   "symbol": "GH",
-   "name": "Guardant Health, Inc.",
-   "momentum_12_1": 152.38,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 166.66,
-   "currency": "USD",
-   "ret_1m": -5.93,
-   "dollar_volume_m": 296.9
-  },
-  {
-   "symbol": "SSL",
-   "name": "Sasol Limited",
-   "momentum_12_1": 149.83,
-   "sources": [
-    "screens"
-   ],
-   "price": 16.19,
-   "currency": "USD",
-   "ret_1m": 17.4,
-   "dollar_volume_m": 24.0
-  },
-  {
-   "symbol": "AMD.TO",
-   "name": "Advanced Micro Devices, Inc.",
-   "momentum_12_1": 149.29,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 14.26,
-   "currency": "CAD",
-   "ret_1m": -10.22,
-   "dollar_volume_m": 23.9
-  },
-  {
-   "symbol": "ILMN",
-   "name": "Illumina, Inc.",
-   "momentum_12_1": 148.69,
-   "sources": [
-    "screens"
-   ],
-   "price": 282.86,
-   "currency": "USD",
-   "ret_1m": 14.31,
-   "dollar_volume_m": 746.4
-  },
-  {
-   "symbol": "QMCO",
-   "name": "Quantum Corporation",
-   "momentum_12_1": 147.84,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 17.62,
-   "currency": "USD",
-   "ret_1m": -31.31,
-   "dollar_volume_m": 61.4
-  },
-  {
-   "symbol": "ECO",
-   "name": "Okeanis Eco Tankers Corp.",
-   "momentum_12_1": 147.72,
-   "sources": [
-    "screens"
-   ],
-   "price": 91.23,
-   "currency": "USD",
-   "ret_1m": 17.66,
-   "dollar_volume_m": 74.7
-  },
-  {
-   "symbol": "NRIX",
-   "name": "Nurix Therapeutics, Inc.",
-   "momentum_12_1": 147.07,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 26.02,
-   "currency": "USD",
-   "ret_1m": 1.36,
-   "dollar_volume_m": 58.4
-  },
-  {
-   "symbol": "AUGO",
-   "name": "Aura Minerals Inc.",
-   "momentum_12_1": 146.99,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 85.32,
-   "currency": "USD",
-   "ret_1m": -8.03,
-   "dollar_volume_m": 74.5
-  },
-  {
-   "symbol": "IGR",
-   "name": "CBRE Global Real Estate Income Fund",
-   "momentum_12_1": 143.54,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 10.66,
-   "currency": "USD",
-   "ret_1m": -12.98,
-   "dollar_volume_m": 5.7
-  },
-  {
-   "symbol": "LFST",
-   "name": "LifeStance Health Group, Inc.",
-   "momentum_12_1": 143.21,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 12.33,
-   "currency": "USD",
-   "ret_1m": -1.75,
-   "dollar_volume_m": 42.1
-  },
-  {
-   "symbol": "VLE.TO",
-   "name": "Valeura Energy Inc.",
-   "momentum_12_1": 142.75,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 16.98,
-   "currency": "CAD",
-   "ret_1m": 12.82,
-   "dollar_volume_m": 6.7
-  },
-  {
-   "symbol": "PBF",
-   "name": "PBF Energy Inc.",
-   "momentum_12_1": 142.08,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 81.54,
-   "currency": "USD",
-   "ret_1m": 14.14,
-   "dollar_volume_m": 239.1
-  },
-  {
-   "symbol": "NRGU.TO",
-   "name": "BetaPro S&P/TSX Capped Energy 2x Daily Bull ETF",
-   "momentum_12_1": 140.35,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 82.13,
-   "currency": "CAD",
-   "ret_1m": 23.36,
-   "dollar_volume_m": 6.0
-  },
-  {
-   "symbol": "MATX",
-   "name": "Matson, Inc.",
-   "momentum_12_1": 140.04,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 235.07,
-   "currency": "USD",
-   "ret_1m": 3.66,
-   "dollar_volume_m": 62.2
-  },
-  {
-   "symbol": "AYA",
-   "name": "Aya Gold & Silver Inc.",
-   "momentum_12_1": 138.85,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 26.59,
-   "currency": "USD",
-   "ret_1m": -12.48,
-   "dollar_volume_m": 24.8
-  },
-  {
-   "symbol": "URGN",
-   "name": "UroGen Pharma Ltd.",
-   "momentum_12_1": 137.64,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 35.48,
-   "currency": "USD",
-   "ret_1m": -17.03,
-   "dollar_volume_m": 39.6
-  },
-  {
-   "symbol": "SDE.TO",
-   "name": "Spartan Delta Corp.",
-   "momentum_12_1": 137.43,
-   "sources": [
-    "listed_tsx"
-   ],
-   "price": 14.59,
-   "currency": "CAD",
-   "ret_1m": 14.43,
-   "dollar_volume_m": 7.7
-  },
-  {
-   "symbol": "NEOG",
-   "name": "Neogen Corporation",
-   "momentum_12_1": 137.37,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 11.79,
-   "currency": "USD",
-   "ret_1m": -15.67,
-   "dollar_volume_m": 63.3
-  },
-  {
-   "symbol": "TGB",
-   "name": "Trekor Metals Limited",
-   "momentum_12_1": 135.77,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 7.96,
-   "currency": "USD",
-   "ret_1m": -14.96,
-   "dollar_volume_m": 35.9
-  },
-  {
-   "symbol": "MRX",
-   "name": "Marex Group Limited",
-   "momentum_12_1": 135.66,
-   "sources": [
-    "screens"
-   ],
-   "price": 71.54,
-   "currency": "USD",
-   "ret_1m": -1.53,
-   "dollar_volume_m": 49.5
-  },
-  {
-   "symbol": "VLO",
-   "name": "Valero Energy Corporation",
-   "momentum_12_1": 135.45,
-   "sources": [
-    "screens"
-   ],
-   "price": 436.75,
-   "currency": "USD",
-   "ret_1m": 15.81,
-   "dollar_volume_m": 1085.0
-  },
-  {
-   "symbol": "ECPG",
-   "name": "Encore Capital Group, Inc.",
-   "momentum_12_1": 133.64,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 104.16,
-   "currency": "USD",
-   "ret_1m": 5.97,
-   "dollar_volume_m": 21.0
-  },
-  {
-   "symbol": "STRZ",
-   "name": "Starz Entertainment Corp.",
-   "momentum_12_1": 132.68,
-   "sources": [
-    "screens"
-   ],
-   "price": 24.5,
-   "currency": "USD",
-   "ret_1m": -4.71,
-   "dollar_volume_m": 8.1
-  },
-  {
-   "symbol": "ALAB",
-   "name": "Astera Labs, Inc.",
-   "momentum_12_1": 132.51,
-   "sources": [
-    "screens"
-   ],
-   "price": 290.06,
-   "currency": "USD",
-   "ret_1m": -20.19,
-   "dollar_volume_m": 1341.6
-  },
-  {
-   "symbol": "FEIM",
-   "name": "Frequency Electronics, Inc.",
-   "momentum_12_1": 131.6,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 68.19,
-   "currency": "USD",
-   "ret_1m": -19.82,
-   "dollar_volume_m": 24.7
-  },
-  {
-   "symbol": "PAYS",
-   "name": "Paysign, Inc.",
-   "momentum_12_1": 129.31,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 15.62,
-   "currency": "USD",
-   "ret_1m": 20.99,
-   "dollar_volume_m": 13.0
-  },
-  {
-   "symbol": "ATI",
-   "name": "ATI Inc.",
-   "momentum_12_1": 129.17,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 180.69,
-   "currency": "USD",
-   "ret_1m": -3.15,
-   "dollar_volume_m": 238.4
-  },
-  {
-   "symbol": "LIND",
-   "name": "Lindblad Expeditions Holdings, Inc.",
-   "momentum_12_1": 127.66,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 36.19,
-   "currency": "USD",
-   "ret_1m": 32.47,
-   "dollar_volume_m": 31.5
-  },
-  {
-   "symbol": "ZIM",
-   "name": "ZIM Integrated Shipping Services Ltd.",
-   "momentum_12_1": 127.18,
-   "sources": [
-    "listed_us"
-   ],
-   "price": 29.15,
-   "currency": "USD",
-   "ret_1m": -4.46,
-   "dollar_volume_m": 45.6
-  },
-  {
-   "symbol": "HSHP",
-   "name": "Himalaya Shipping Ltd.",
-   "momentum_12_1": 126.17,
-   "sources": [
-    "screens"
-   ],
-   "price": 16.96,
-   "currency": "USD",
-   "ret_1m": -6.5,
-   "dollar_volume_m": 8.8
+   "ret_1m": -22.56,
+   "dollar_volume_m": 8.6
   },
   {
    "symbol": "AYA.TO",
    "name": "Aya Gold & Silver Inc.",
-   "momentum_12_1": 125.32,
+   "momentum_12_1": 181.89,
    "sources": [
     "listed_tsx"
    ],
-   "price": 37.32,
+   "price": 33.4,
    "currency": "CAD",
-   "ret_1m": -7.26,
-   "dollar_volume_m": 29.3
+   "ret_1m": -21.74,
+   "dollar_volume_m": 29.5
+  },
+  {
+   "symbol": "BDT.TO",
+   "name": "Bird Construction Inc.",
+   "momentum_12_1": 180.74,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 68.46,
+   "currency": "CAD",
+   "ret_1m": -17.67,
+   "dollar_volume_m": 28.2
+  },
+  {
+   "symbol": "VSTS",
+   "name": "Vestis Corporation",
+   "momentum_12_1": 175.2,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 14.55,
+   "currency": "USD",
+   "ret_1m": 4.9,
+   "dollar_volume_m": 19.3
+  },
+  {
+   "symbol": "HND.TO",
+   "name": "BetaPro Natural Gas Inverse Leveraged Daily Bear ETF",
+   "momentum_12_1": 173.58,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 25.38,
+   "currency": "CAD",
+   "ret_1m": 15.1,
+   "dollar_volume_m": 24.3
+  },
+  {
+   "symbol": "HOU.TO",
+   "name": "BetaPro Crude Oil Daily Bull ETF",
+   "momentum_12_1": 172.48,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 31.06,
+   "currency": "CAD",
+   "ret_1m": 30.72,
+   "dollar_volume_m": 30.5
+  },
+  {
+   "symbol": "TNGX",
+   "name": "Tango Therapeutics, Inc.",
+   "momentum_12_1": 171.98,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 27.93,
+   "currency": "USD",
+   "ret_1m": 14.23,
+   "dollar_volume_m": 91.7
+  },
+  {
+   "symbol": "TNZ.TO",
+   "name": "Tenaz Energy Corp.",
+   "momentum_12_1": 171.23,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 71.6,
+   "currency": "CAD",
+   "ret_1m": 7.44,
+   "dollar_volume_m": 7.1
+  },
+  {
+   "symbol": "RNG",
+   "name": "RingCentral, Inc.",
+   "momentum_12_1": 170.96,
+   "sources": [
+    "trending"
+   ],
+   "price": 79.42,
+   "currency": "USD",
+   "ret_1m": 0.24,
+   "dollar_volume_m": 116.0
+  },
+  {
+   "symbol": "GTE",
+   "name": "Gran Tierra Energy Inc.",
+   "momentum_12_1": 169.47,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 11.35,
+   "currency": "USD",
+   "ret_1m": 13.84,
+   "dollar_volume_m": 5.5
+  },
+  {
+   "symbol": "TOT.TO",
+   "name": "Total Energy Services Inc.",
+   "momentum_12_1": 168.42,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 37.52,
+   "currency": "CAD",
+   "ret_1m": 4.86,
+   "dollar_volume_m": 6.8
+  },
+  {
+   "symbol": "SSL",
+   "name": "Sasol Limited",
+   "momentum_12_1": 168.11,
+   "sources": [
+    "screens"
+   ],
+   "price": 17.46,
+   "currency": "USD",
+   "ret_1m": 22.18,
+   "dollar_volume_m": 25.3
+  },
+  {
+   "symbol": "HPE",
+   "name": "Hewlett Packard Enterprise Company",
+   "momentum_12_1": 167.87,
+   "sources": [
+    "screens"
+   ],
+   "price": 55.47,
+   "currency": "USD",
+   "ret_1m": -11.01,
+   "dollar_volume_m": 1324.1
+  },
+  {
+   "symbol": "INBX",
+   "name": "Inhibrx Biosciences, Inc.",
+   "momentum_12_1": 167.41,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 97.1,
+   "currency": "USD",
+   "ret_1m": -3.22,
+   "dollar_volume_m": 20.4
+  },
+  {
+   "symbol": "DSV.TO",
+   "name": "Discovery Mining Ltd.",
+   "momentum_12_1": 167.36,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 10.38,
+   "currency": "CAD",
+   "ret_1m": -20.28,
+   "dollar_volume_m": 27.2
+  },
+  {
+   "symbol": "RCEL",
+   "name": "AVITA Medical, Inc.",
+   "momentum_12_1": 165.78,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 15.42,
+   "currency": "USD",
+   "ret_1m": 40.82,
+   "dollar_volume_m": 5.1
+  },
+  {
+   "symbol": "VSXY",
+   "name": "Victorias Secret & Co.",
+   "momentum_12_1": 165.66,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 88.42,
+   "currency": "USD",
+   "ret_1m": 6.1,
+   "dollar_volume_m": 135.2
+  },
+  {
+   "symbol": "EWTX",
+   "name": "Edgewise Therapeutics, Inc.",
+   "momentum_12_1": 164.66,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 39.99,
+   "currency": "USD",
+   "ret_1m": -2.58,
+   "dollar_volume_m": 64.3
+  },
+  {
+   "symbol": "OMER",
+   "name": "Omeros Corporation",
+   "momentum_12_1": 163.54,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 16.86,
+   "currency": "USD",
+   "ret_1m": -18.71,
+   "dollar_volume_m": 20.1
+  },
+  {
+   "symbol": "QMCO",
+   "name": "Quantum Corporation",
+   "momentum_12_1": 162.07,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 16.98,
+   "currency": "USD",
+   "ret_1m": -34.62,
+   "dollar_volume_m": 55.2
+  },
+  {
+   "symbol": "TWLO",
+   "name": "Twilio Inc.",
+   "momentum_12_1": 161.63,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 253.63,
+   "currency": "USD",
+   "ret_1m": -12.75,
+   "dollar_volume_m": 1258.2
+  },
+  {
+   "symbol": "AYA",
+   "name": "Aya Gold & Silver Inc.",
+   "momentum_12_1": 161.26,
+   "sources": [
+    "screens"
+   ],
+   "price": 23.86,
+   "currency": "USD",
+   "ret_1m": -15.36,
+   "dollar_volume_m": 24.0
+  },
+  {
+   "symbol": "GH",
+   "name": "Guardant Health, Inc.",
+   "momentum_12_1": 161.16,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 162.94,
+   "currency": "USD",
+   "ret_1m": -7.58,
+   "dollar_volume_m": 305.5
+  },
+  {
+   "symbol": "AMD",
+   "name": "Advanced Micro Devices, Inc.",
+   "momentum_12_1": 158.22,
+   "sources": [
+    "screens",
+    "news",
+    "reddit"
+   ],
+   "price": 507.93,
+   "currency": "USD",
+   "ret_1m": -17.36,
+   "dollar_volume_m": 11653.9
+  },
+  {
+   "symbol": "ILMN",
+   "name": "Illumina, Inc.",
+   "momentum_12_1": 158.06,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 269.4,
+   "currency": "USD",
+   "ret_1m": 5.49,
+   "dollar_volume_m": 749.2
+  },
+  {
+   "symbol": "RLAY",
+   "name": "Relay Therapeutics, Inc.",
+   "momentum_12_1": 156.1,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 18.34,
+   "currency": "USD",
+   "ret_1m": 1.72,
+   "dollar_volume_m": 46.2
+  },
+  {
+   "symbol": "AUGO",
+   "name": "Aura Minerals Inc.",
+   "momentum_12_1": 155.14,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 78.55,
+   "currency": "USD",
+   "ret_1m": -7.96,
+   "dollar_volume_m": 70.4
+  },
+  {
+   "symbol": "AMD.TO",
+   "name": "Advanced Micro Devices, Inc.",
+   "momentum_12_1": 155.06,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 13.1,
+   "currency": "CAD",
+   "ret_1m": -18.53,
+   "dollar_volume_m": 24.1
+  },
+  {
+   "symbol": "IRDM",
+   "name": "Iridium Communications Inc.",
+   "momentum_12_1": 154.49,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 43.79,
+   "currency": "USD",
+   "ret_1m": -9.34,
+   "dollar_volume_m": 47.7
+  },
+  {
+   "symbol": "PBF",
+   "name": "PBF Energy Inc.",
+   "momentum_12_1": 151.14,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 79.25,
+   "currency": "USD",
+   "ret_1m": 12.46,
+   "dollar_volume_m": 237.2
+  },
+  {
+   "symbol": "ECO",
+   "name": "Okeanis Eco Tankers Corp.",
+   "momentum_12_1": 150.99,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 90.05,
+   "currency": "USD",
+   "ret_1m": 15.4,
+   "dollar_volume_m": 74.6
+  },
+  {
+   "symbol": "SMTC",
+   "name": "Semtech Corporation",
+   "momentum_12_1": 149.98,
+   "sources": [
+    "screens",
+    "news"
+   ],
+   "price": 125.12,
+   "currency": "USD",
+   "ret_1m": -26.11,
+   "dollar_volume_m": 588.7
+  },
+  {
+   "symbol": "FOSL",
+   "name": "Fossil Group, Inc.",
+   "momentum_12_1": 147.79,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 6.55,
+   "currency": "USD",
+   "ret_1m": 6.16,
+   "dollar_volume_m": 5.6
+  },
+  {
+   "symbol": "PENG",
+   "name": "Penguin Solutions, Inc.",
+   "momentum_12_1": 146.49,
+   "sources": [
+    "screens"
+   ],
+   "price": 51.91,
+   "currency": "USD",
+   "ret_1m": -3.66,
+   "dollar_volume_m": 338.0
+  },
+  {
+   "symbol": "LBRX",
+   "name": "LB Pharmaceuticals Inc",
+   "momentum_12_1": 144.93,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 39.42,
+   "currency": "USD",
+   "ret_1m": 0.59,
+   "dollar_volume_m": 17.7
+  },
+  {
+   "symbol": "IGR",
+   "name": "CBRE Global Real Estate Income Fund",
+   "momentum_12_1": 142.44,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 10.7,
+   "currency": "USD",
+   "ret_1m": -11.2,
+   "dollar_volume_m": 5.8
+  },
+  {
+   "symbol": "VLE.TO",
+   "name": "Valeura Energy Inc.",
+   "momentum_12_1": 140.42,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 16.95,
+   "currency": "CAD",
+   "ret_1m": 13.53,
+   "dollar_volume_m": 6.7
+  },
+  {
+   "symbol": "NRGU.TO",
+   "name": "BetaPro S&P/TSX Capped Energy 2x Daily Bull ETF",
+   "momentum_12_1": 140.12,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 79.29,
+   "currency": "CAD",
+   "ret_1m": 21.09,
+   "dollar_volume_m": 6.2
+  },
+  {
+   "symbol": "VLO",
+   "name": "Valero Energy Corporation",
+   "momentum_12_1": 138.34,
+   "sources": [
+    "reddit"
+   ],
+   "price": 426.28,
+   "currency": "USD",
+   "ret_1m": 13.42,
+   "dollar_volume_m": 1073.5
+  },
+  {
+   "symbol": "SDE.TO",
+   "name": "Spartan Delta Corp.",
+   "momentum_12_1": 137.1,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 14.52,
+   "currency": "CAD",
+   "ret_1m": 15.33,
+   "dollar_volume_m": 7.8
+  },
+  {
+   "symbol": "MATX",
+   "name": "Matson, Inc.",
+   "momentum_12_1": 134.13,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 227.48,
+   "currency": "USD",
+   "ret_1m": 2.51,
+   "dollar_volume_m": 62.2
+  },
+  {
+   "symbol": "FLXS",
+   "name": "Flexsteel Industries, Inc.",
+   "momentum_12_1": 133.57,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 84.98,
+   "currency": "USD",
+   "ret_1m": -0.29,
+   "dollar_volume_m": 5.3
+  },
+  {
+   "symbol": "LFST",
+   "name": "LifeStance Health Group, Inc.",
+   "momentum_12_1": 132.32,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 12.56,
+   "currency": "USD",
+   "ret_1m": 3.97,
+   "dollar_volume_m": 39.7
+  },
+  {
+   "symbol": "MRX",
+   "name": "Marex Group Limited",
+   "momentum_12_1": 132.29,
+   "sources": [
+    "screens"
+   ],
+   "price": 68.54,
+   "currency": "USD",
+   "ret_1m": -4.26,
+   "dollar_volume_m": 49.5
+  },
+  {
+   "symbol": "NEOG",
+   "name": "Neogen Corporation",
+   "momentum_12_1": 130.01,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 11.98,
+   "currency": "USD",
+   "ret_1m": -11.72,
+   "dollar_volume_m": 63.3
+  },
+  {
+   "symbol": "HSHP",
+   "name": "Himalaya Shipping Ltd.",
+   "momentum_12_1": 129.85,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 16.53,
+   "currency": "USD",
+   "ret_1m": -9.08,
+   "dollar_volume_m": 8.7
+  },
+  {
+   "symbol": "OKTA",
+   "name": "Okta, Inc.",
+   "momentum_12_1": 129.58,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 201.33,
+   "currency": "USD",
+   "ret_1m": -1.96,
+   "dollar_volume_m": 678.5
+  },
+  {
+   "symbol": "URGN",
+   "name": "UroGen Pharma Ltd.",
+   "momentum_12_1": 129.5,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 35.15,
+   "currency": "USD",
+   "ret_1m": -15.57,
+   "dollar_volume_m": 38.6
+  },
+  {
+   "symbol": "NRIX",
+   "name": "Nurix Therapeutics, Inc.",
+   "momentum_12_1": 129.17,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 25.51,
+   "currency": "USD",
+   "ret_1m": 6.83,
+   "dollar_volume_m": 58.4
+  },
+  {
+   "symbol": "ALAB",
+   "name": "Astera Labs, Inc.",
+   "momentum_12_1": 128.83,
+   "sources": [
+    "screens"
+   ],
+   "price": 257.82,
+   "currency": "USD",
+   "ret_1m": -28.47,
+   "dollar_volume_m": 1314.4
   },
   {
    "symbol": "INSW",
    "name": "International Seaways, Inc.",
-   "momentum_12_1": 124.36,
+   "momentum_12_1": 125.37,
    "sources": [
     "screens"
    ],
-   "price": 111.15,
+   "price": 108.42,
    "currency": "USD",
-   "ret_1m": 6.93,
-   "dollar_volume_m": 86.6
+   "ret_1m": 6.34,
+   "dollar_volume_m": 90.3
   },
   {
-   "symbol": "ABSI",
-   "name": "Absci Corporation",
-   "momentum_12_1": 122.9,
+   "symbol": "PAYS",
+   "name": "Paysign, Inc.",
+   "momentum_12_1": 123.85,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 15.21,
+   "currency": "USD",
+   "ret_1m": 20.05,
+   "dollar_volume_m": 13.2
+  },
+  {
+   "symbol": "ABCL",
+   "name": "AbCellera Biologics Inc.",
+   "momentum_12_1": 120.61,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 11.37,
+   "currency": "USD",
+   "ret_1m": -7.64,
+   "dollar_volume_m": 69.5
+  },
+  {
+   "symbol": "ZIM",
+   "name": "ZIM Integrated Shipping Services Ltd.",
+   "momentum_12_1": 120.61,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 29.08,
+   "currency": "USD",
+   "ret_1m": -3.36,
+   "dollar_volume_m": 44.1
+  },
+  {
+   "symbol": "ARE.TO",
+   "name": "Aecon Group Inc.",
+   "momentum_12_1": 120.5,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 47.93,
+   "currency": "CAD",
+   "ret_1m": -12.28,
+   "dollar_volume_m": 21.5
+  },
+  {
+   "symbol": "ECPG",
+   "name": "Encore Capital Group, Inc.",
+   "momentum_12_1": 120.22,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 100.36,
+   "currency": "USD",
+   "ret_1m": 6.23,
+   "dollar_volume_m": 20.9
+  },
+  {
+   "symbol": "NAT",
+   "name": "Nordic American Tankers Limited",
+   "momentum_12_1": 119.6,
    "sources": [
     "screens"
    ],
-   "price": 10.04,
+   "price": 7.54,
    "currency": "USD",
-   "ret_1m": -6.26,
-   "dollar_volume_m": 38.3
+   "ret_1m": -1.05,
+   "dollar_volume_m": 43.0
+  },
+  {
+   "symbol": "ALNT",
+   "name": "Allient Inc.",
+   "momentum_12_1": 119.56,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 86.18,
+   "currency": "USD",
+   "ret_1m": -24.14,
+   "dollar_volume_m": 23.9
+  },
+  {
+   "symbol": "PARR",
+   "name": "Par Pacific Holdings, Inc.",
+   "momentum_12_1": 119.04,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 80.18,
+   "currency": "USD",
+   "ret_1m": 4.17,
+   "dollar_volume_m": 68.4
+  },
+  {
+   "symbol": "MRVI",
+   "name": "Maravai LifeSciences Holdings, Inc.",
+   "momentum_12_1": 118.69,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 7.07,
+   "currency": "USD",
+   "ret_1m": -4.07,
+   "dollar_volume_m": 19.3
+  },
+  {
+   "symbol": "SHIP",
+   "name": "Seanergy Maritime Holdings Corp",
+   "momentum_12_1": 118.14,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 15.35,
+   "currency": "USD",
+   "ret_1m": -12.59,
+   "dollar_volume_m": 6.9
+  },
+  {
+   "symbol": "CG.TO",
+   "name": "Centerra Gold Inc.",
+   "momentum_12_1": 117.85,
+   "sources": [
+    "listed_tsx"
+   ],
+   "price": 28.68,
+   "currency": "CAD",
+   "ret_1m": -13.33,
+   "dollar_volume_m": 15.4
+  },
+  {
+   "symbol": "MG",
+   "name": "Mistras Group, Inc.",
+   "momentum_12_1": 117.0,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 21.42,
+   "currency": "USD",
+   "ret_1m": 2.29,
+   "dollar_volume_m": 6.9
+  },
+  {
+   "symbol": "XMTR",
+   "name": "Xometry, Inc.",
+   "momentum_12_1": 116.29,
+   "sources": [
+    "listed_us"
+   ],
+   "price": 89.16,
+   "currency": "USD",
+   "ret_1m": -15.09,
+   "dollar_volume_m": 75.9
   }
  ],
  "note": "Leads, not advice: liquid, above the 200-day average, ranked by 12-1 month momentum."
