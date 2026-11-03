@@ -171,6 +171,18 @@
    "Dual momentum (single strongest fund)": 101.42,
    "Nasdaq 100 (QQQ)": 98.17,
    "S&P 500 (SPY)": 99.29
+  },
+  "2026-11-02": {
+   "Copycat consensus confirmed by the rule-based list, F4 (chosen)": 95.75,
+   "Copycat consensus: top 5 of 3+ famous investors (C7, main plan until 2026-10-22)": 95.75,
+   "70% Nasdaq 100 + 30% dual momentum, every 2 weeks (main plan until 2026-10-21)": 95.97,
+   "70% Nasdaq 100 + 30% dual momentum, monthly (previous plan)": 95.97,
+   "Copycat consensus: top 10 of 3+ famous investors (C4, upstream agent)": 97.28,
+   "Pelosi copy, watch only: hindsight check failed (P2)": 96.0,
+   "Congress leaders: buys of the 3 members with the best 2-year records (L6)": 97.91,
+   "Dual momentum (single strongest fund)": 94.17,
+   "Nasdaq 100 (QQQ)": 96.72,
+   "S&P 500 (SPY)": 98.7
   }
  },
  "earlier": [
@@ -387,7 +399,7 @@
    "updated": "2026-10-19"
   }
  ],
- "updated": "2026-10-30",
+ "updated": "2026-11-02",
  "targets": {
   "Copycat consensus confirmed by the rule-based list, F4 (chosen)": {
    "AMZN": 0.2,
