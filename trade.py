@@ -12,7 +12,7 @@
     python3 trade.py replay                   what $100 would have done in each strategy
     python3 trade.py discover snapshot        today's idea lists (news, Yahoo, Motley Fool, Reddit, the whole market)
 
-Research tools: cdr, gov, copycat, news, pelosi, analyst, screener, budget, risk,
+Research tools: picks, cdr, gov, copycat, news, pelosi, analyst, screener, budget, risk,
 broker, tax, alerts, rebalance. Add --help to any command for its options.
 """
 
@@ -33,6 +33,7 @@ TOOLS = {
     "replay": "trader-replay/replay.py",
     "cdr": "trader-replay/cdr.py",
     "gov": "trader-replay/govstakes.py",
+    "picks": "trader-replay/picks.py",
     "discover": "trader-discover/discover.py",
     "copycat": "trader-copycat/edgar13f.py",
     "news": "trader-news/news.py",
