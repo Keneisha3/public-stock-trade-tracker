@@ -459,6 +459,13 @@ never your holdings.
 Every account's settings are editable on the dashboard (**Strategy settings**)
 and are range-checked. The live review and the replay use the same rules.
 
+**What to buy** (`python3 trade.py picks --cash 1000 --total 3300`). One ranked list from
+everything the project produces: the tested plans' current targets (main plan and C4), stocks two of
+the 23 famous investors hold in their top 5, and the daily idea list. Your holdings are left out,
+each name is checked against your rules (above its 200-day average, not stretched), and the cash is
+split over the top three with no new name over 10% of the account. It ranks how much the evidence
+agrees, not what will go up: only the main plan was tested walk-forward.
+
 **US government stakes** (`python3 trade.py gov`). The administration has
 taken stakes in about 30 companies since 2025; the publicly traded ones are
 listed with the day the news was first public, and each is "bought" at the
