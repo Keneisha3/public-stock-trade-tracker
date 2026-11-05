@@ -137,6 +137,27 @@ class TestedPlan(unittest.TestCase):
         self.assertEqual(p[0]["outside_plan"], 700.0)
         self.assertEqual(daily.tested_plan(review, None), [])
 
+    def test_market_watch_reports_a_cross_once(self):
+        d = tempfile.mkdtemp()
+        try:
+            state = os.path.join(d, "watch.json")
+            m = {"SPY": {"price": 760.0, "sma200": 730.0, "above_sma200": True},
+                 "QQQ": {"price": 690.0, "sma200": 680.0, "above_sma200": True}}
+            w = daily.watch(m.get, "2026-11-05", state)
+            self.assertEqual(w["crossed"], [])                                      # first look: nothing to compare
+            self.assertEqual(w["events"][0]["days"], 34)                            # the Fed on Dec 9
+            m["QQQ"] = {"price": 670.0, "sma200": 681.0, "above_sma200": False}
+            w = daily.watch(m.get, "2026-11-06", state)
+            self.assertEqual(len(w["crossed"]), 1)
+            self.assertIn("Nasdaq 100 closed below", w["crossed"][0])
+            self.assertEqual(daily.watch(m.get, "2026-11-07", state)["crossed"], [])  # once, not every day
+            text = daily.render({"date": "2026-11-06", "steps": {}, "watch": w})
+            self.assertIn("## Market watch", text)
+            self.assertIn("Fed rate decision", text)
+            self.assertEqual(daily.watch(m.get, "2026-12-10", state)["events"], [])  # past events drop off
+        finally:
+            shutil.rmtree(d)
+
     def test_health_warnings(self):
         rec = {"updated": "2026-10-20", "data": {"f13_latest": "2026-08-15", "congress_latest": "2026-10-15"}}
         self.assertEqual(daily.health(rec, "2026-10-21"), [])

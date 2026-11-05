@@ -49,5 +49,33 @@ class Stretch(unittest.TestCase):
         self.assertIn("Rule v15", st.render(st.summarize(rows), v, {"with_prices": 1, "missing": 0}))
 
 
+class Dips(unittest.TestCase):
+    def test_dip_signals(self):
+        up = [100.0 * 1.004 ** k for k in range(260)]                    # a steady uptrend
+        pull = up[:-21] + [up[-22] * (1 - 0.012 * k) for k in range(1, 22)]   # then about -23% in a month
+        s = mk.stretch(pull)
+        self.assertLessEqual(s["off_high_pct"], -20)
+        fired = mk.dip_signals(s)
+        self.assertIn("D2", fired)                                       # down 10%+ in a month
+        crash = up[:-60] + [up[-61] * 0.55] * 60                        # 45% below the high, flat since
+        self.assertIn("D4", mk.dip_signals(mk.stretch(crash)))
+        self.assertEqual(mk.dip_signals(mk.stretch(up)), [])
+
+    def test_dip_rule_and_index_study(self):
+        rows = [("2019-01-%02d" % (i % 28 + 1), ["D1"], 3.0, 4.0) for i in range(40)] + \
+               [("2024-01-%02d" % (i % 28 + 1), ["D1"], 1.0, 1.0) for i in range(12)] + \
+               [("2019-02-%02d" % (i % 28 + 1), [], 0.0, 0.5) for i in range(100)]
+        v = st.verdicts(st.summarize(rows, mk.DIP_SIGNALS), "dip")
+        self.assertEqual(v["D1"], "buy")
+        self.assertEqual(v["D3"], "info")
+        bars = [{"d": "2000-01-%02d" % (i % 28 + 1), "o": 100.0, "c": 100.0 if i % 50 else 85.0} for i in range(400)]
+        idx = st.index_dips({"bars": bars}, levels=(10,), horizons=((5, "3 months"), (10, "12 months")))
+        self.assertGreater(idx["any day"]["3 months"][0], idx["10%+ below its high"]["3 months"][0])
+        text = st.render(st.summarize(rows, mk.DIP_SIGNALS), v, {"with_prices": 1, "missing": 0}, "dip",
+                         dict(idx, first="2000"))
+        self.assertIn("Rule v16", text)
+        self.assertIn("The S&P 500 itself", text)
+
+
 if __name__ == "__main__":
     unittest.main()

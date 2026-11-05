@@ -255,7 +255,10 @@ def stretch(closes):
     "vol_ratio": the two divided, "ret_1m", "ret_3m": %}. None where history is too short. Pure: the
     review and the stretch test (trader-replay/stretch.py) both use it."""
     out = {"above_sma200_pct": None, "vol_1m_pct": None, "vol_1y_pct": None, "vol_ratio": None,
-           "ret_1m": _r(_ret(closes, 21)), "ret_3m": _r(_ret(closes, 63))}
+           "ret_1m": _r(_ret(closes, 21)), "ret_3m": _r(_ret(closes, 63)), "off_high_pct": None}
+    if len(closes) >= 200 and closes[-1]:
+        hi = max(closes[-252:])
+        out["off_high_pct"] = _r(100.0 * (closes[-1] / hi - 1)) if hi else None
     if len(closes) >= 200 and closes[-1]:
         sma = sum(closes[-200:]) / 200.0
         out["above_sma200_pct"] = _r(100.0 * (closes[-1] / sma - 1)) if sma else None
@@ -287,6 +290,29 @@ def stretch_signals(s):
         out.append("X3")
     if r3 is not None and r3 >= 60:
         out.append("X4")
+    return out
+
+
+DIP_SIGNALS = {  # rule v16: "buy the dip"
+    "D1": "20%+ below its 52-week high, still above its 200-day average",
+    "D2": "down 10%+ in a month, still above its 200-day average",
+    "D3": "30%+ below its 52-week high and below its 200-day average",
+    "D4": "40%+ below its 52-week high",
+}
+
+
+def dip_signals(s):
+    """Which of DIP_SIGNALS fire for a stretch() result."""
+    a, off, r1 = s.get("above_sma200_pct"), s.get("off_high_pct"), s.get("ret_1m")
+    out = []
+    if off is not None and a is not None and off <= -20 and a > 0:
+        out.append("D1")
+    if r1 is not None and a is not None and r1 <= -10 and a > 0:
+        out.append("D2")
+    if off is not None and a is not None and off <= -30 and a < 0:
+        out.append("D3")
+    if off is not None and off <= -40:
+        out.append("D4")
     return out
 
 

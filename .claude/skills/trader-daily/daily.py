@@ -39,8 +39,12 @@ import replay  # noqa: E402
 import cdr as cdrs  # noqa: E402
 import govstakes  # noqa: E402
 
-STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward", "gov"]
-NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward", "gov"}
+STEPS = ["sync", "market", "review", "history", "paper", "news", "congress", "alerts", "discover", "forward", "gov",
+         "watch"]
+NETWORK_ONLY = {"sync", "news", "congress", "alerts", "discover", "forward", "gov", "watch"}
+# Dates that move markets. Add your own in trader/events.json: [{"date": "YYYY-MM-DD", "what": "..."}].
+EVENTS = [{"date": "2026-12-09", "what": "Fed rate decision (2 p.m. ET), with new projections"}]
+WATCH = (("SPY", "S&P 500"), ("QQQ", "Nasdaq 100"))
 IDEA_SOURCES = "trending,screens,news,fool,reddit"
 # The live paper record is computed on GitHub every weekday (it needs the SEC and Congress data kept
 # there); the briefing reads the published copy. "record_url" in trader/config.json overrides it.
@@ -99,6 +103,33 @@ def tested_plan(review, rec, marker="(chosen)", cdr_map=None):
                     "outside_plan": round(sum(v for t, v in held.items() if t not in targets), 2),
                     "as_of": rec.get("updated")})
     return out
+
+
+def watch(get_metrics, today, state_path, events=EVENTS, horizon=60):
+    """The market's trend and what is coming: {"trend": [{name, price, sma200, above, gap_pct}], "crossed":
+    [text], "events": [{date, what, days}]}. A cross is reported once, the day the close lands on the
+    other side of the 200-day average from the last briefing."""
+    state = acc.read_json(state_path, {})
+    trend, crossed = [], []
+    for sym, name in WATCH:
+        m = get_metrics(sym)
+        if not m or not m.get("sma200"):
+            continue
+        above = bool(m["above_sma200"])
+        trend.append({"symbol": sym, "name": name, "price": m["price"], "sma200": m["sma200"], "above": above,
+                      "gap_pct": round(100.0 * (m["price"] / m["sma200"] - 1), 1)})
+        if sym in state and state[sym] != above:
+            crossed.append("%s closed %s its 200-day average (%.2f): %s" % (
+                name, "above" if above else "below", m["sma200"],
+                "the trend test turns back up" if above else "the trend test now says wait on new stock buys"))
+        state[sym] = above
+    acc.write_json(state_path, state)
+    soon = []
+    for e in sorted(events, key=lambda e: e["date"]):
+        days = (datetime.date.fromisoformat(e["date"]) - datetime.date.fromisoformat(today)).days
+        if 0 <= days <= horizon:
+            soon.append(dict(e, days=days))
+    return {"trend": trend, "crossed": crossed, "events": soon}
 
 
 def _weekdays_between(a, b):
@@ -233,6 +264,14 @@ def run(base="trader", skip=(), offline=None, today=None):
         brief["congress"] = [{k: r.get(k) for k in ("name", "district", "filed", "url", "type_name")}
                              for r in fresh][:15]
         did("congress", doc is not None, err or "%d new filings" % len(fresh))
+    if "watch" not in skip:  # the market's trend and what is coming (the Fed's next decision)
+        try:
+            extra = acc.read_json(os.path.join(base, "events.json"), [])
+            brief["watch"] = watch(lambda t: acc.mk.metrics(acc.mk.get_chart(t, offline=offline, range_="2y")),
+                                   brief["date"], os.path.join(base, "state", "watch.json"), EVENTS + list(extra))
+            did("watch", True, "%d events ahead" % len(brief["watch"]["events"]))
+        except (acc.mk.MarketError, OSError, ValueError) as e:
+            did("watch", False, str(e))
     if "gov" not in skip:  # what the US government has taken stakes in, and how each did since the news
         try:
             brief["gov"] = govstakes.briefing(govstakes.load(), lambda t: acc.mk.get_chart(t, offline=offline,
@@ -356,6 +395,16 @@ def render(b):
         L.append("## New Congress stock-trade filings")
         for c in b["congress"]:
             L.append("- %s (%s) filed %s: %s" % (c["name"], c["district"], c["filed"], c["url"]))
+        L.append("")
+    w = b.get("watch") or {}
+    if w.get("trend") or w.get("events"):
+        L.append("## Market watch")
+        L += ["- **%s**" % c for c in w.get("crossed", [])]
+        for t in w.get("trend", []):
+            L.append("- %s %.2f, %s its 200-day average %.2f (%+.1f%%)" % (
+                t["name"], t["price"], "above" if t["above"] else "BELOW", t["sma200"], t["gap_pct"]))
+        for e in w.get("events", []):
+            L.append("- In %d day%s (%s): %s" % (e["days"], "" if e["days"] == 1 else "s", e["date"], e["what"]))
         L.append("")
     if b.get("gov"):
         L.append("## US government stakes (bought at the next open after the news)")
