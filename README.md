@@ -496,6 +496,22 @@ protects a gain if you want to), never a sell. 158 former members had no
 prices, and the ones that collapsed are the likeliest to be missing, so the
 real picture for stretched stocks may be a little worse than this.
 
+**Buying the dip?** (rule v16; `research/dips/`). Every S&P 500 member since 2014, the next
+3 months against the S&P 500:
+
+| dip | 2014-2022 | 2023-2026 |
+| --- | ---: | ---: |
+| D1 20 %+ below its high, still above its 200-day | **+4.6** (63 % beat it) | -1.7 (39 %) |
+| D2 down 10 %+ in a month, above its 200-day | +0.6 | -0.2 |
+| D3 30 %+ below its high and below its 200-day | +1.3 | -1.8 |
+| D4 40 %+ below its high | +3.0 | -0.8 |
+| every stock, every day (baseline) | +0.0 | -1.9 |
+
+None passed: the pullback in an uptrend (D1) worked well until 2022, then did no better than the
+average stock once a few giants carried the index. And the S&P 500 itself, since 1993: bought 5 %,
+10 % or 20 % below its high it made +9 to +10 % over the next year, the same as bought on any day
+(+10.2 %). Waiting for a dip did not pay; buying regularly did.
+
 **Prices when Yahoo is blocked** (a cloud session). A GitHub job saves the
 charts of every ticker in `mirror.txt` (public: market tickers only, never
 your holdings) every weekday, and on demand with the replay workflow's
