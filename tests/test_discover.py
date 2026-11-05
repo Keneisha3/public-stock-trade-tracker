@@ -108,6 +108,9 @@ class SnapshotAndFunnel(unittest.TestCase):
         out = discover.funnel(snap, offline=off, log=lambda m: None)
         self.assertEqual([r["symbol"] for r in out["ideas"]], ["AAA"])  # BBB is falling: under its 200-day average
         self.assertEqual(out["ideas"][0]["sources"], ["trending", "news"])
+        big = discover.funnel(snap, offline=off, log=lambda m: None, large={"AAA"})
+        self.assertEqual([r["symbol"] for r in big["large"]], ["AAA"])   # the full large-company ranking is kept
+        self.assertIn("RY.TO", discover.large_companies("2026-10-16"))
         self.assertIsNone(discover.score({"price": 3, "above_sma200": True, "dollar_volume": 1e8, "ret_12m": 50, "ret_1m": 1}))
 
 

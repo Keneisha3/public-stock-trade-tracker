@@ -418,7 +418,15 @@ def score(m):
     return round((1 + r12 / 100.0) / (1 + r1 / 100.0) * 100 - 100, 2)
 
 
-def funnel(snap, deep=False, offline=None, top=30, log=print, pause=0.15):
+def large_companies(day=None):
+    """Established companies: the S&P 500 on `day` plus about 70 large Canadian companies (the
+    replay's lists). A momentum ranking of these is kept in full, not just the top movers."""
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "trader-replay"))
+    import universe
+    return set(universe.load().members_on(day or datetime.date.today().isoformat())) | set(universe.CANADA)
+
+
+def funnel(snap, deep=False, offline=None, top=30, log=print, pause=0.15, large=None):
     pool = candidates(snap, deep)
     log("funnel: %d candidates%s" % (len(pool), " (whole market)" if deep else ""))
     rows, errors = [], 0
@@ -442,8 +450,9 @@ def funnel(snap, deep=False, offline=None, top=30, log=print, pause=0.15):
         if i % 500 == 499:
             log("  %d of %d" % (i + 1, len(pool)))
     rows.sort(key=lambda r: (-len(r["sources"]), -r["momentum_12_1"]) if not deep else -r["momentum_12_1"])
+    big = sorted((r for r in rows if large and r["symbol"] in large), key=lambda r: -r["momentum_12_1"])
     return {"date": snap.get("date"), "deep": deep, "candidates": len(pool), "passed": len(rows),
-            "no_data": errors, "ideas": rows[:top],
+            "no_data": errors, "ideas": rows[:top], "large": big,
             "note": "Leads, not advice: liquid, above the 200-day average, ranked by 12-1 month momentum."}
 
 
@@ -477,7 +486,8 @@ def main(argv=None):
         print("discover: no snapshot yet: run `discover.py snapshot` first", file=sys.stderr)
         return 2
     if a.cmd == "funnel":
-        out = funnel(snap, a.deep, a.offline, a.top, log=(lambda m: None) if a.json else print)
+        out = funnel(snap, a.deep, a.offline, a.top, log=(lambda m: None) if a.json else print,
+                     large=large_companies(snap.get("date")))
         path = os.path.join(a.dir, "discover", "ideas.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(out, fh, indent=1)

@@ -8,8 +8,8 @@ Candidates come from three places, each counted as one piece of evidence:
     - the tested plans on the live paper record: the main plan (chosen) and the copycat top 10 (C4)
     - near-consensus: stocks two of the 23 famous investors hold in their top 5 (the main plan needs three)
     - the whole-market scan (trader/discover/ideas.json, or the weekday GitHub run's copy): liquid, above
-      the 200-day, ranked by momentum; only current S&P 500 members are kept, so a wide scan cannot hand
-      you a tiny stock that just ran 500 %
+      the 200-day, ranked by momentum; only large companies (the S&P 500 and about 70 large Canadian
+      ones) are used, so a wide scan cannot hand you a tiny stock that just ran 500 %
 Each is checked against the rules the account review uses: above its 200-day average (the trend
 test), not stretched (market.STRETCH_SIGNALS), not already held. Then ranked by evidence, then
 12-month momentum, and sized: the cash split over the top names, no name over 10% of the account.
@@ -34,10 +34,15 @@ import signals as sigs  # noqa: E402
 RAW = "https://raw.githubusercontent.com/Keneisha3/public-stock-trade-tracker/replay-results/"
 RECORD_URL = RAW + "forward/record.json"
 IDEAS_URL = RAW + "discover/latest-ideas.json"  # the weekday whole-market scan (about 9,500 stocks)
-IDEAS_TOP = 15
+IDEAS_TOP = 20
 F13_URL = RAW + "signals/f13.json.gz"
 PLANS = {"(chosen)": "main plan", "(C4": "copycat top 10 (C4)"}
 MAX_WEIGHT = 0.10   # of the account, per new name
+CURRENCY = {"questrade": "USD", "wealthsimple": "CAD"}  # buy in the account's own currency: no conversion fee
+
+
+def currency_of(ticker):
+    return "CAD" if ticker.upper().endswith((".TO", ".V", ".NE", ".CN")) else "USD"
 TOP = 3
 
 
@@ -64,9 +69,13 @@ def near_consensus(sig, day, n=5, k=2):
 
 
 def from_ideas(ideas, large=None, top=IDEAS_TOP):
-    """{ticker: [reason]} for the scan's momentum leaders, only those in `large` (S&P 500 members) if given."""
-    rows = [r for r in (ideas or {}).get("ideas", []) if r.get("symbol") and (large is None or r["symbol"] in large)]
-    return {r["symbol"]: ["S&P 500 momentum leader (market scan)"] for r in rows[:top]}
+    """{ticker: [reason]} for the scan's momentum leaders among large companies: the scan's full ranking of
+    the S&P 500 and large Canadian companies when it has one ("large"), else its top movers filtered to
+    `large`."""
+    rows = (ideas or {}).get("large")
+    if rows is None:
+        rows = [r for r in (ideas or {}).get("ideas", []) if large is None or r.get("symbol") in large]
+    return {r["symbol"]: ["large-company momentum leader (market scan)"] for r in rows[:top] if r.get("symbol")}
 
 
 def merge(*sources):
@@ -132,9 +141,12 @@ def account_total(base, account):
     return 0.0
 
 
-def build(record, sig, ideas, exclude, get_metrics, day, large=None):
+def build(record, sig, ideas, exclude, get_metrics, day, large=None, currency=None):
+    """Ranked candidates; `currency` keeps only those trading in it (USD or CAD), so the account can
+    buy them without converting."""
     cands = merge(from_plans(record), near_consensus(sig, day) if sig else {}, from_ideas(ideas, large))
-    rows = [assess(t, why, get_metrics(t)) for t, why in cands.items() if t.upper() not in exclude and t != "SPY"]
+    rows = [assess(t, why, get_metrics(t)) for t, why in cands.items()
+            if t.upper() not in exclude and t != "SPY" and (currency is None or currency_of(t) == currency)]
     return rank(rows)
 
 
@@ -161,6 +173,7 @@ def main(argv=None):
     ap.add_argument("--dir", default="trader")
     ap.add_argument("--cash", type=float, default=0.0, help="money to put to work")
     ap.add_argument("--account", default="questrade")
+    ap.add_argument("--currency", choices=("USD", "CAD"), help="default: the account's (questrade USD, wealthsimple CAD)")
     ap.add_argument("--total", type=float, help="the account's value now, in the cash's currency (default: last review)")
     ap.add_argument("--exclude", nargs="*", default=[], help="more tickers to leave out (e.g. ones you just sold)")
     ap.add_argument("--offline", help="folder with record.json, f13.json.gz and chart-*.json (tests)")
@@ -190,7 +203,7 @@ def main(argv=None):
         except (mk.MarketError, ValueError):
             ideas = None
     import universe
-    large = set(universe.load().members_on(day))
+    large = set(universe.load().members_on(day)) | set(universe.CANADA)
 
     def metrics(t):
         try:
@@ -198,7 +211,8 @@ def main(argv=None):
         except mk.MarketError:
             return None
     exclude = held(a.dir) | {t.upper() for t in a.exclude}
-    rows = build(record, sigs.Signals(f13=f13) if f13 else None, ideas, exclude, metrics, day, large)
+    currency = a.currency or CURRENCY.get(a.account.lower())
+    rows = build(record, sigs.Signals(f13=f13) if f13 else None, ideas, exclude, metrics, day, large, currency)
     plan = size(rows, a.cash, a.total if a.total is not None else account_total(a.dir, a.account)) if a.cash else []
     print(json.dumps({"candidates": rows, "plan": plan}, indent=1) if a.json else render(rows, plan))
     return 0

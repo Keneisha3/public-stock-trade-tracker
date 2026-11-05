@@ -35,6 +35,16 @@ class Picks(unittest.TestCase):
         ideas = {"ideas": [{"symbol": "TINYBIO"}, {"symbol": "BIG"}, {"symbol": "BIG2"}]}
         got = pk.from_ideas(ideas, large={"BIG", "BIG2"}, top=1)
         self.assertEqual(list(got), ["BIG"])                 # the 500 % small cap never reaches the list
+        full = {"ideas": [{"symbol": "TINYBIO"}], "large": [{"symbol": "RY.TO"}, {"symbol": "BIG"}]}
+        self.assertEqual(list(pk.from_ideas(full, top=5)), ["RY.TO", "BIG"])   # the scan's full large-company ranking
+
+    def test_account_currency(self):
+        ideas = {"large": [{"symbol": "RY.TO"}, {"symbol": "JPM"}]}
+        get = {"RY.TO": m(150), "JPM": m(300)}.get
+        usd = pk.build({}, None, ideas, set(), get, "2026-11-05", currency="USD")
+        cad = pk.build({}, None, ideas, set(), get, "2026-11-05", currency="CAD")
+        self.assertEqual([r["ticker"] for r in usd], ["JPM"])        # a USD account never gets a TSX stock
+        self.assertEqual([r["ticker"] for r in cad], ["RY.TO"])
 
     def test_near_consensus(self):
         f13 = {"managers": {"A": "Ann (X)", "B": "Bob", "C": "Cy"}, "rows": [
