@@ -31,6 +31,11 @@ class Picks(unittest.TestCase):
         self.assertEqual(capped[0]["amount"], 400.0)
         self.assertIn("Not financial advice", pk.render(rows, plan))
 
+    def test_wide_scan_keeps_only_large_companies(self):
+        ideas = {"ideas": [{"symbol": "TINYBIO"}, {"symbol": "BIG"}, {"symbol": "BIG2"}]}
+        got = pk.from_ideas(ideas, large={"BIG", "BIG2"}, top=1)
+        self.assertEqual(list(got), ["BIG"])                 # the 500 % small cap never reaches the list
+
     def test_near_consensus(self):
         f13 = {"managers": {"A": "Ann (X)", "B": "Bob", "C": "Cy"}, "rows": [
             ["2026-08-15", "A", "2026-06-30", "2026-08-15", 0, [["MU", 9, 1], ["Z", 1, 1]]],
