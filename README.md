@@ -512,6 +512,27 @@ average stock once a few giants carried the index. And the S&P 500 itself, since
 10 % or 20 % below its high it made +9 to +10 % over the next year, the same as bought on any day
 (+10.2 %). Waiting for a dip did not pay; buying regularly did.
 
+**Dips in a crash** (rules v17 and v18; `research/dips/crashes.md`). The same test since 2006,
+with membership rebuilt from 2005, the next 12 months against the S&P 500. Results for the 50
+most-traded members on each day ("the giants"):
+
+| giants | 2008 crash | 2020 crash | other years |
+| --- | ---: | ---: | ---: |
+| D3 30 %+ below its high and below its 200-day | **+18.9** (58 % beat it) | **+33.2** (73 %) | +0.2 |
+| D4 40 %+ below its high | **+27.5** (65 %) | **+53.5** (82 %) | +3.2 |
+| every giant, every day (baseline) | +9.1 | +11.6 | -1.1 |
+
+Badly fallen giants paid in both crashes and did roughly nothing the rest of the time. A crash
+is only known afterwards, so rule v18 used a test you can apply on the day: buy only when the
+whole S&P 500 is 20 %+ below its high. It was judged once, on 2022:
+
+- D4 beat the S&P 500 by +2.3 points over 12 months (the baseline was -7.9). It passed, but
+  only 48 % of buys beat the index.
+- D3 came in at -2.6 and did not pass.
+
+Companies that went to zero in 2008 have no prices, which flatters these numbers. Giants rarely
+go bankrupt, but they can lag for years (Intel since 2020, Cisco after 2000).
+
 **Prices when Yahoo is blocked** (a cloud session). A GitHub job saves the
 charts of every ticker in `mirror.txt` (public: market tickers only, never
 your holdings) every weekday, and on demand with the replay workflow's
