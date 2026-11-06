@@ -91,6 +91,9 @@ class Crashes(unittest.TestCase):
         self.assertEqual(v["D3"], "buy in a crash")
         self.assertEqual(v["D1"], "info")                               # never fired
         self.assertIn("Rule v17", st.render_crash(cs, v, {"with_prices": 1, "missing": 0}))
+        big = st.giants([("2020-03-02", [], 0, 0, 0, 5e9), ("2020-03-02", [], 0, 0, 0, 1e6),
+                         ("2020-03-09", [], 0, 0, 0, 2e6)], n=1)
+        self.assertEqual(big, {("2020-03-02", 5e9), ("2020-03-09", 2e6)})  # the most traded, day by day
         rows[25] = ("2020-03-05", ["D1"], 0.0, 0.0, None)              # no full year after: left out of 12m
         self.assertIsNone(st.crash_summary(rows)["2020 crash"]["D1"]["ex_12m"])
 
