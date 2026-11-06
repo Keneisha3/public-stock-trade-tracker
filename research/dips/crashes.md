@@ -29,7 +29,7 @@ S&P 500 members on their member days since 2006 (membership rebuilt from 2005), 
 | every member-day (baseline) | 364241 | -0.22 pts | -1.37 pts | 45% |
 | D1 20%+ below its 52-week high, still above its 200-day average | 3317 | +1.64 pts | +2.04 pts | 47% |
 | D2 down 10%+ in a month, still above its 200-day average | 2400 | +0.50 pts | +1.09 pts | 46% |
-| D3 30%+ below its 52-week high and below its 200-day average | 8133 | +0.67 pts | -0.56 pts | 44% |
+| D3 30%+ below its 52-week high and below its 200-day average | 8133 | +0.67 pts | -0.57 pts | 44% |
 | D4 40%+ below its 52-week high | 3694 | +2.41 pts | +3.26 pts | 47% |
 
 **Rule v17 verdicts:** D1 info, D2 info, D3 buy in a crash, D4 buy in a crash (buy in a crash: beat the S&P 500 by 2+ points over 12 months, and the crash's baseline, in both crashes).
@@ -71,5 +71,53 @@ S&P 500 members on their member days since 2006 (membership rebuilt from 2005), 
 | D4 40%+ below its 52-week high | 2032 | +1.75 pts | +3.20 pts | 45% |
 
 **Rule v17 verdicts:** D1 info, D2 info, D3 buy in a crash, D4 buy in a crash (buy in a crash: beat the S&P 500 by 2+ points over 12 months, and the crash's baseline, in both crashes).
+
+_Not financial advice._
+
+# Rule v18: signals only on days the whole S&P 500 was 20%+ below its high
+
+S&P 500 members on their member days since 2006 (membership rebuilt from 2005), checked every 5 trading days; entry at the next open; the gap to the S&P 500 bought the same morning. 684 stocks with prices, 293 without. Companies that went to zero in 2008 have no prices, which flatters dip-buying then.
+
+## 2008-09 bear market
+
+| signal | events | next 3 months vs S&P 500 | next 12 months | beat it (12 months) |
+| --- | ---: | ---: | ---: | ---: |
+| every member-day (baseline) | 21124 | +3.34 pts | +12.94 pts | 57% |
+| D1 20%+ below its 52-week high, still above its 200-day average | 908 | +2.36 pts | +8.10 pts | 57% |
+| D2 down 10%+ in a month, still above its 200-day average | 167 | +8.16 pts | +14.41 pts | 61% |
+| D3 30%+ below its 52-week high and below its 200-day average | 2044 | +6.40 pts | +23.92 pts | 62% |
+| D4 40%+ below its 52-week high | 1832 | +9.06 pts | +30.54 pts | 69% |
+
+## 2020 bear market
+
+| signal | events | next 3 months vs S&P 500 | next 12 months | beat it (12 months) |
+| --- | ---: | ---: | ---: | ---: |
+| every member-day (baseline) | 1699 | +0.86 pts | +16.59 pts | 55% |
+| D1 20%+ below its 52-week high, still above its 200-day average | 7 | -6.67 pts | -0.31 pts | 57% |
+| D2 down 10%+ in a month, still above its 200-day average | 17 | +0.57 pts | -11.33 pts | 41% |
+| D3 30%+ below its 52-week high and below its 200-day average | 275 | +3.60 pts | +24.60 pts | 64% |
+| D4 40%+ below its 52-week high | 187 | +8.99 pts | +50.97 pts | 81% |
+
+## 2022 bear market (the fresh test)
+
+| signal | events | next 3 months vs S&P 500 | next 12 months | beat it (12 months) |
+| --- | ---: | ---: | ---: | ---: |
+| every member-day (baseline) | 5417 | +1.35 pts | -7.89 pts | 34% |
+| D1 20%+ below its 52-week high, still above its 200-day average | 80 | +1.21 pts | -11.12 pts | 22% |
+| D2 down 10%+ in a month, still above its 200-day average | 42 | +1.44 pts | -10.02 pts | 24% |
+| D3 30%+ below its 52-week high and below its 200-day average | 540 | +4.41 pts | -2.58 pts | 43% |
+| D4 40%+ below its 52-week high | 270 | +5.87 pts | +2.34 pts | 48% |
+
+## other years
+
+| signal | events | next 3 months vs S&P 500 | next 12 months | beat it (12 months) |
+| --- | ---: | ---: | ---: | ---: |
+| every member-day (baseline) | 21598 | +1.23 pts | +1.72 pts | 50% |
+| D1 20%+ below its 52-week high, still above its 200-day average | 141 | +2.18 pts | -3.90 pts | 42% |
+| D2 down 10%+ in a month, still above its 200-day average | 215 | -0.28 pts | +4.94 pts | 56% |
+| D3 30%+ below its 52-week high and below its 200-day average | 629 | +5.04 pts | +2.05 pts | 48% |
+| D4 40%+ below its 52-week high | 262 | +5.78 pts | -2.26 pts | 44% |
+
+**Rule v18 verdicts (decided on 2022 only):** D1 info, D2 info, D3 info, D4 buy in a bear market (buy in a crash: beat the S&P 500 by 2+ points over 12 months, and the crash's baseline, in both crashes).
 
 _Not financial advice._
