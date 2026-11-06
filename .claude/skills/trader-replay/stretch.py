@@ -54,11 +54,14 @@ def events(chart, spy, member, first="2014-01-01", fire=mk.stretch_signals):
         for x in fired:
             last[x] = i
         ex = []
-        for n in (20, 62):  # close of the 21st and 63rd trading day after the entry open
+        for n in (20, 62, 251):  # close of the 21st, 63rd and 252nd trading day after the entry open
+            if i + 1 + n >= len(bars) or j + n >= len(sb):
+                ex.append(None)  # not a full year of prices after this day yet
+                continue
             r = closes[i + 1 + n] / opens[i + 1] - 1
             m = sb[j + n]["c"] / sb[j]["o"] - 1
             ex.append(round(100 * (r - m), 2))
-        out.append((d, fired, ex[0], ex[1]))
+        out.append((d, fired, ex[0], ex[1], ex[2]))
     return out
 
 
@@ -92,6 +95,69 @@ def verdicts(summary, kind="sell"):
             ok = enough and a["ex_3m"] <= -2 and a["ex_3m"] < base.get("ex_3m", 0) and b["ex_3m"] < 0
             out[x] = "trim" if ok else "info"
     return out
+
+
+CRASHES = (("2008 crash", "2007-10-01", "2009-06-30"), ("2020 crash", "2020-02-15", "2020-06-30"))
+
+
+def crash_summary(rows, names=mk.DIP_SIGNALS, crashes=CRASHES):
+    """Rule v17: each signal inside each crash window, and everything outside them. {period: {signal or
+    "all": {n, ex_3m, ex_12m, beat_12m_pct}}} (12-month figures only where a full year followed)."""
+    def stats(g):
+        if not g:
+            return {"n": 0}
+        y = [r[4] for r in g if len(r) > 4 and r[4] is not None]
+        return {"n": len(g), "ex_3m": round(statistics.mean(r[3] for r in g), 2),
+                "ex_12m": round(statistics.mean(y), 2) if y else None,
+                "beat_12m_pct": round(100.0 * sum(v > 0 for v in y) / len(y), 1) if y else None}
+    inside = lambda d: any(a <= d <= b for _, a, b in crashes)  # noqa: E731
+    out = {}
+    periods = [(name, (lambda d, a=a, b=b: a <= d <= b)) for name, a, b in crashes] + \
+        [("other years", lambda d: not inside(d))]
+    for name, keep in periods:
+        g = [r for r in rows if keep(r[0])]
+        out[name] = {"all": stats(g)}
+        out[name].update({x: stats([r for r in g if x in r[1]]) for x in names})
+    return out
+
+
+def crash_verdicts(cs, names=mk.DIP_SIGNALS, crashes=CRASHES):
+    """Rule v17: "buy in a crash" only if, in every crash, flagged stocks beat the S&P 500 over 12 months
+    by 2+ points on average and beat that crash's baseline."""
+    out = {}
+    for x in names:
+        ok = True
+        for name, _, _ in crashes:
+            a, base = cs[name].get(x, {}), cs[name]["all"]
+            if not a.get("n") or a.get("ex_12m") is None or a["ex_12m"] < 2 or a["ex_12m"] <= (base.get("ex_12m") or 0):
+                ok = False
+        out[x] = "buy in a crash" if ok else "info"
+    return out
+
+
+def render_crash(cs, verdict, stats):
+    names = mk.DIP_SIGNALS
+    L = ["# Buying the dip in the 2008 and 2020 crashes", "",
+         "S&P 500 members on their member days since 2006 (membership rebuilt from 2005), checked every %d trading "
+         "days; entry at the next open; the gap to the S&P 500 bought the same morning. %d stocks with prices, %d "
+         "without. Companies that went to zero in 2008 have no prices, which flatters dip-buying then." % (
+             STEP, stats["with_prices"], stats["missing"]), ""]
+    for period, rows in cs.items():
+        L += ["## " + period, "", "| signal | events | next 3 months vs S&P 500 | next 12 months | beat it (12 months) |",
+              "| --- | ---: | ---: | ---: | ---: |"]
+        for k in ["all"] + list(names):
+            r = rows.get(k) or {}
+            name = "every member-day (baseline)" if k == "all" else "%s %s" % (k, names[k])
+            f = lambda v: ("%+.2f pts" % v) if v is not None else "-"  # noqa: E731
+            L.append("| %s | %d | %s | %s | %s |" % (name, r.get("n", 0), f(r.get("ex_3m")), f(r.get("ex_12m")),
+                                                    ("%.0f%%" % r["beat_12m_pct"]) if r.get("beat_12m_pct") is not None
+                                                    else "-"))
+        L.append("")
+    L.append("**Rule v17 verdicts:** " + ", ".join("%s %s" % (k, v) for k, v in verdict.items()) +
+             " (buy in a crash: beat the S&P 500 by 2+ points over 12 months, and the crash's baseline, in both "
+             "crashes).")
+    L += ["", "_Not financial advice._"]
+    return "\n".join(L) + "\n"
 
 
 def index_dips(spy, levels=(5, 10, 20), horizons=((63, "3 months"), (252, "12 months"))):
@@ -171,8 +237,30 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--offline", metavar="DIR")
     ap.add_argument("--kind", choices=sorted(KINDS), default="sell")
+    ap.add_argument("--crashes", action="store_true", help="dip signals in the 2008 and 2020 crashes (rule v17)")
     a = ap.parse_args(argv)
     get = lambda t: mk.get_chart(t, offline=a.offline, range_="max")  # noqa: E731
+    if a.crashes:  # membership from 2005, rebuilt from the source (the bundled file starts in 2014)
+        uni = univ.Universe(univ.build(mk.fetch(univ.SOURCE), since="2005-01-01"))
+        spy, rows, stats = get("SPY"), [], {"with_prices": 0, "missing": 0}
+        for t in sorted(uni.ever("2005-01-01", "2099-01-01")):
+            try:
+                ch = get(t)
+            except mk.MarketError:
+                stats["missing"] += 1
+                continue
+            stats["with_prices"] += 1
+            rows += events(ch, spy, lambda d, t=t: t in uni.members_on(d), first="2006-01-01", fire=mk.dip_signals)
+        cs = crash_summary(rows)
+        v = crash_verdicts(cs)
+        os.makedirs(a.out, exist_ok=True)
+        with open(os.path.join(a.out, "crashes.json"), "w", encoding="utf-8") as fh:
+            json.dump({"summary": cs, "verdicts": v, "stats": stats}, fh, indent=1)
+        text = render_crash(cs, v, stats)
+        with open(os.path.join(a.out, "crashes.md"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        print(text)
+        return 0
     s, v, stats = run(get, univ.load(), kind=a.kind)
     index = None
     if a.kind == "dip":
