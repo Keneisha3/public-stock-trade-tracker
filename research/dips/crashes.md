@@ -35,3 +35,41 @@ S&P 500 members on their member days since 2006 (membership rebuilt from 2005), 
 **Rule v17 verdicts:** D1 info, D2 info, D3 buy in a crash, D4 buy in a crash (buy in a crash: beat the S&P 500 by 2+ points over 12 months, and the crash's baseline, in both crashes).
 
 _Not financial advice._
+
+# The giants only: the 50 most-traded S&P 500 companies on each day
+
+S&P 500 members on their member days since 2006 (membership rebuilt from 2005), checked every 5 trading days; entry at the next open; the gap to the S&P 500 bought the same morning. 684 stocks with prices, 293 without. Companies that went to zero in 2008 have no prices, which flatters dip-buying then.
+
+## 2008 crash
+
+| signal | events | next 3 months vs S&P 500 | next 12 months | beat it (12 months) |
+| --- | ---: | ---: | ---: | ---: |
+| every member-day (baseline) | 10577 | +1.72 pts | +9.07 pts | 53% |
+| D1 20%+ below its 52-week high, still above its 200-day average | 226 | -1.83 pts | +2.49 pts | 49% |
+| D2 down 10%+ in a month, still above its 200-day average | 63 | +0.29 pts | -4.15 pts | 43% |
+| D3 30%+ below its 52-week high and below its 200-day average | 1129 | +4.04 pts | +18.85 pts | 58% |
+| D4 40%+ below its 52-week high | 856 | +6.65 pts | +27.46 pts | 65% |
+
+## 2020 crash
+
+| signal | events | next 3 months vs S&P 500 | next 12 months | beat it (12 months) |
+| --- | ---: | ---: | ---: | ---: |
+| every member-day (baseline) | 3759 | -1.59 pts | +11.56 pts | 53% |
+| D1 20%+ below its 52-week high, still above its 200-day average | 19 | -3.08 pts | +26.14 pts | 68% |
+| D2 down 10%+ in a month, still above its 200-day average | 31 | +1.67 pts | -0.20 pts | 45% |
+| D3 30%+ below its 52-week high and below its 200-day average | 332 | -0.56 pts | +33.23 pts | 73% |
+| D4 40%+ below its 52-week high | 202 | +1.42 pts | +53.45 pts | 82% |
+
+## other years
+
+| signal | events | next 3 months vs S&P 500 | next 12 months | beat it (12 months) |
+| --- | ---: | ---: | ---: | ---: |
+| every member-day (baseline) | 162838 | -0.17 pts | -1.11 pts | 45% |
+| D1 20%+ below its 52-week high, still above its 200-day average | 1654 | +1.86 pts | +1.83 pts | 46% |
+| D2 down 10%+ in a month, still above its 200-day average | 1329 | +0.65 pts | +1.06 pts | 46% |
+| D3 30%+ below its 52-week high and below its 200-day average | 4117 | +0.17 pts | +0.24 pts | 44% |
+| D4 40%+ below its 52-week high | 2032 | +1.75 pts | +3.20 pts | 45% |
+
+**Rule v17 verdicts:** D1 info, D2 info, D3 buy in a crash, D4 buy in a crash (buy in a crash: beat the S&P 500 by 2+ points over 12 months, and the crash's baseline, in both crashes).
+
+_Not financial advice._
