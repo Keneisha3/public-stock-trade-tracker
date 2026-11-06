@@ -37,7 +37,7 @@ class Stretch(unittest.TestCase):
         cut = rows[len(rows) // 2][0]
         wrecked = dict(hot, bars=[b if b["d"] <= cut else dict(b, c=b["c"] * 0.1, o=b["o"] * 0.1) for b in hot["bars"]])
         again = {r[0]: r[1] for r in st.events(wrecked, spy, lambda day: True, first="2000-01-01")}
-        for day, fired, _, _ in rows:
+        for day, fired, *_ in rows:
             if day <= cut:
                 self.assertEqual(again[day], fired)
         rows = [("2019-01-%02d" % (i % 28 + 1), ["X1"], -3.0, -4.0) for i in range(40)] + \
@@ -75,6 +75,33 @@ class Dips(unittest.TestCase):
                          dict(idx, first="2000"))
         self.assertIn("Rule v16", text)
         self.assertIn("The S&P 500 itself", text)
+
+
+class Crashes(unittest.TestCase):
+    def test_crash_windows_and_rule_v17(self):
+        rows = [("2008-11-%02d" % (i % 28 + 1), ["D3"], -5.0, 1.0, 12.0) for i in range(20)] + \
+               [("2008-11-%02d" % (i % 28 + 1), [], 0.0, 0.0, 3.0) for i in range(50)] + \
+               [("2020-03-%02d" % (i % 28 + 1), ["D3"], 2.0, 4.0, 20.0) for i in range(20)] + \
+               [("2020-03-%02d" % (i % 28 + 1), [], 0.0, 0.0, 5.0) for i in range(50)] + \
+               [("2016-05-%02d" % (i % 28 + 1), ["D3"], 0.0, -1.0, -2.0) for i in range(20)]
+        cs = st.crash_summary(rows)
+        self.assertEqual(cs["2008 crash"]["D3"]["ex_12m"], 12.0)
+        self.assertEqual(cs["other years"]["D3"]["n"], 20)
+        v = st.crash_verdicts(cs)
+        self.assertEqual(v["D3"], "buy in a crash")
+        self.assertEqual(v["D1"], "info")                               # never fired
+        self.assertIn("Rule v17", st.render_crash(cs, v, {"with_prices": 1, "missing": 0}))
+        big = st.giants([("2020-03-02", [], 0, 0, 0, 5e9), ("2020-03-02", [], 0, 0, 0, 1e6),
+                         ("2020-03-09", [], 0, 0, 0, 2e6)], n=1)
+        self.assertEqual(big, {("2020-03-02", 5e9), ("2020-03-09", 2e6)})  # the most traded, day by day
+        dd = st.spy_drawdown({"bars": [{"d": "2022-01-03", "c": 100.0}, {"d": "2022-06-01", "c": 75.0}]})
+        self.assertEqual(dd["2022-06-01"], -25.0)
+        bear = [("2022-06-01", ["D4"], 0, 1.0, 9.0, 1), ("2022-06-01", [], 0, 0, 2.0, 1), ("2022-01-03", ["D4"], 0, 0, -9.0, 1)]
+        bs = st.bear_summary(bear, dd)
+        self.assertEqual(bs["2022 bear market (the fresh test)"]["D4"]["n"], 1)    # Jan 3 was not a bear-market day
+        self.assertEqual(st.bear_verdicts(bs)["D4"], "buy in a bear market")
+        rows[25] = ("2020-03-05", ["D1"], 0.0, 0.0, None)              # no full year after: left out of 12m
+        self.assertIsNone(st.crash_summary(rows)["2020 crash"]["D1"]["ex_12m"])
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ on:
         required: false
         default: "replay"
         type: choice
-        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history", "sessions", "cdr", "prices", "stretch", "dips"]
+        options: ["replay", "walk-forward", "build-signals", "discover", "forward", "long-history", "sessions", "cdr", "prices", "stretch", "dips", "dip-crashes"]
       asof:
         description: "As-of date, YYYY-MM-DD (blank = the latest Friday close)"
         required: false
@@ -448,6 +448,32 @@ jobs:
           cp "$RUNNER_TEMP"/out/dips.md "$RUNNER_TEMP"/out/dips.json research/dips/
           git add research/dips
           git commit -qm "Dip-buying test" || echo "no change"
+          for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
+
+  dip-crashes:
+    if: ${{ inputs.mode == 'dip-crashes' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Buying the dip in the 2008 and 2020 crashes (rule v17)
+        run: |
+          python .claude/skills/trader-replay/stretch.py --kind dip --crashes --out out > /dev/null
+          cat out/crashes.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Save to the replay-results branch
+        run: |
+          mkdir -p "$RUNNER_TEMP/out" && cp out/* "$RUNNER_TEMP/out/"
+          git config user.name "replay-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin replay-results
+          git checkout -q -B replay-results FETCH_HEAD
+          mkdir -p research/dips
+          cp "$RUNNER_TEMP"/out/crashes.md "$RUNNER_TEMP"/out/crashes.json research/dips/
+          git add research/dips
+          git commit -qm "Dip-buying in the 2008 and 2020 crashes" || echo "no change"
           for i in 1 2 3; do git push -q origin replay-results && break; git pull -q --rebase origin replay-results; done
 
   # ---------------------------------------------------------------- prices
