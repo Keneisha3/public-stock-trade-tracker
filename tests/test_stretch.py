@@ -94,6 +94,12 @@ class Crashes(unittest.TestCase):
         big = st.giants([("2020-03-02", [], 0, 0, 0, 5e9), ("2020-03-02", [], 0, 0, 0, 1e6),
                          ("2020-03-09", [], 0, 0, 0, 2e6)], n=1)
         self.assertEqual(big, {("2020-03-02", 5e9), ("2020-03-09", 2e6)})  # the most traded, day by day
+        dd = st.spy_drawdown({"bars": [{"d": "2022-01-03", "c": 100.0}, {"d": "2022-06-01", "c": 75.0}]})
+        self.assertEqual(dd["2022-06-01"], -25.0)
+        bear = [("2022-06-01", ["D4"], 0, 1.0, 9.0, 1), ("2022-06-01", [], 0, 0, 2.0, 1), ("2022-01-03", ["D4"], 0, 0, -9.0, 1)]
+        bs = st.bear_summary(bear, dd)
+        self.assertEqual(bs["2022 bear market (the fresh test)"]["D4"]["n"], 1)    # Jan 3 was not a bear-market day
+        self.assertEqual(st.bear_verdicts(bs)["D4"], "buy in a bear market")
         rows[25] = ("2020-03-05", ["D1"], 0.0, 0.0, None)              # no full year after: left out of 12m
         self.assertIsNone(st.crash_summary(rows)["2020 crash"]["D1"]["ex_12m"])
 

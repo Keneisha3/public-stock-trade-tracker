@@ -137,6 +137,33 @@ def crash_verdicts(cs, names=mk.DIP_SIGNALS, crashes=CRASHES):
     return out
 
 
+def spy_drawdown(spy):
+    """{day: % below the S&P 500's highest close so far} (point in time)."""
+    out, hi = {}, 0.0
+    for b in spy["bars"]:
+        hi = max(hi, b["c"])
+        out[b["d"]] = 100.0 * (b["c"] / hi - 1) if hi else 0.0
+    return out
+
+
+def bear_summary(rows, dd, level=-20.0, names=mk.DIP_SIGNALS):
+    """Rule v18: signals on days the S&P 500 was `level`% or more below its high, by bear market."""
+    bears = (("2008-09 bear market", "2008-01-01", "2009-12-31"), ("2020 bear market", "2020-01-01", "2020-12-31"),
+             ("2022 bear market (the fresh test)", "2022-01-01", "2023-12-31"))
+    on = [r for r in rows if dd.get(r[0], 0.0) <= level]
+    return crash_summary(on, names, crashes=bears)
+
+
+def bear_verdicts(bs, names=mk.DIP_SIGNALS):
+    t = "2022 bear market (the fresh test)"
+    out = {}
+    for x in names:
+        a, base = bs[t].get(x, {}), bs[t]["all"]
+        ok = bool(a.get("n")) and a.get("ex_12m") is not None and a["ex_12m"] >= 2 and a["ex_12m"] > (base.get("ex_12m") or 0)
+        out[x] = "buy in a bear market" if ok else "info"
+    return out
+
+
 def giants(rows, n=50):
     """{(day, dollar volume)} of the rows that were among the `n` most-traded stocks on their day: size
     as it was known then, not today's winners picked with hindsight."""
@@ -269,14 +296,19 @@ def main(argv=None):
             rows += events(ch, spy, lambda d, t=t: t in uni.members_on(d), first="2006-01-01", fire=mk.dip_signals)
         cs = crash_summary(rows)
         v = crash_verdicts(cs)
+        bs = bear_summary(rows, spy_drawdown(spy))
+        bv = bear_verdicts(bs)
         top = giants(rows)
         gs = crash_summary([r for r in rows if (r[0], r[5]) in top])
         gv = crash_verdicts(gs)
         os.makedirs(a.out, exist_ok=True)
         with open(os.path.join(a.out, "crashes.json"), "w", encoding="utf-8") as fh:
-            json.dump({"summary": cs, "verdicts": v, "giants": gs, "giants_verdicts": gv, "stats": stats}, fh, indent=1)
+            json.dump({"summary": cs, "verdicts": v, "giants": gs, "giants_verdicts": gv, "bear": bs,
+                       "bear_verdicts": bv, "stats": stats}, fh, indent=1)
         text = render_crash(cs, v, stats) + "\n" + render_crash(gs, gv, stats, title=(
-            "# The giants only: the 50 most-traded S&P 500 companies on each day"))
+            "# The giants only: the 50 most-traded S&P 500 companies on each day")) + "\n" + render_crash(
+            bs, bv, stats, title="# Rule v18: signals only on days the whole S&P 500 was 20%+ below its high").replace(
+            "Rule v17 verdicts", "Rule v18 verdicts (decided on 2022 only)")
         with open(os.path.join(a.out, "crashes.md"), "w", encoding="utf-8") as fh:
             fh.write(text)
         print(text)
