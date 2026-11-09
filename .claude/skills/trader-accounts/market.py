@@ -316,6 +316,46 @@ def dip_signals(s):
     return out
 
 
+DIP_RULE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dip_rule.json")
+DIP_RULE_DEFAULT = {"stock_off": 40, "market_off": 20, "trend": "any", "verdict": "info",
+                    "source": "rule v18 (passed on 2022 only)"}
+
+
+# the largest US companies the dip rule watches live (the research used the 50 most traded on each day)
+GIANTS = ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO", "TSLA", "BRK-B", "JPM", "LLY", "V", "WMT",
+          "ORCL", "MA", "NFLX", "COST", "XOM", "UNH", "HD", "PG", "JNJ", "BAC", "AMD", "CRM")
+
+
+def load_dip_rule(path=DIP_RULE_PATH):
+    """The dip rule in force: dip_rule.json (written by the tuning run, rule v19), else rule v18."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return dict(DIP_RULE_DEFAULT, **json.load(fh))
+    except (OSError, ValueError):
+        return dict(DIP_RULE_DEFAULT)
+
+
+def dip_rule_fires(m, spy_off, rule):
+    """True when a stock's metrics meet the dip rule on a day the S&P 500 is `spy_off` % (negative)
+    below its high: the stock far enough below its 52-week high, the market down enough, and the trend
+    condition if the rule has one."""
+    off = (m or {}).get("off_high_pct")
+    if off is None or spy_off is None:
+        return False
+    if off > -rule["stock_off"] or spy_off > -rule["market_off"]:
+        return False
+    return rule.get("trend", "any") == "any" or m.get("above_sma200") is False
+
+
+def describe_dip_rule(rule):
+    s = "%d%%+ below its 52-week high" % rule["stock_off"]
+    if rule.get("trend") == "below200":
+        s += " and below its 200-day average"
+    if rule["market_off"]:
+        s += ", while the S&P 500 is %d%%+ below its high" % rule["market_off"]
+    return s
+
+
 def metrics(chart, today=None):
     """Everything the review needs, from one chart. Pure function."""
     bars = chart["bars"]
@@ -367,6 +407,7 @@ def metrics(chart, today=None):
         "ret_6m": _r(_ret(closes, 126)), "ret_12m": _r(_ret(closes, 252)),
         "high_52w": round(high, 4), "low_52w": round(low, 4),
         "off_high_pct": _r(100.0 * (price / high - 1)) if high else None,
+        "off_peak_pct": _r(100.0 * (price / max(closes) - 1)) if closes and max(closes) else None,  # vs the chart's highest close
         "sma200": round(sma200, 4) if sma200 else None,
         "above_sma200": (price > sma200) if sma200 else None,
         "vol_pct": _r(vol),

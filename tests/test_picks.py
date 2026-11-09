@@ -31,6 +31,24 @@ class Picks(unittest.TestCase):
         self.assertEqual(capped[0]["amount"], 400.0)
         self.assertIn("Not financial advice", pk.render(rows, plan))
 
+    def test_dip_rule_overrides_the_trend_test_only_when_it_earned_a_buy(self):
+        fallen = dict(m(150, above=False, r12=-20), off_high_pct=-45.0)
+        buy = {"stock_off": 40, "market_off": 20, "trend": "any", "verdict": "buy", "source": "rule v19 (tuned)"}
+        r = pk.assess("GOOGL", ["x"], fallen, buy, spy_off=-25.0)
+        self.assertTrue(r["ok"] and r["dip"])
+        self.assertTrue(any("on sale by the dip rule" in n for n in r["notes"]))
+        self.assertFalse(pk.assess("GOOGL", ["x"], fallen, buy, spy_off=-5.0)["ok"])          # market not down enough
+        info = dict(buy, verdict="info", source="rule v18")
+        r = pk.assess("GOOGL", ["x"], fallen, info, spy_off=-25.0)
+        self.assertFalse(r["ok"])                                                            # not earned: still wait
+        self.assertTrue(any("information only" in n for n in r["notes"]))
+        prices = {"GOOGL": fallen, "MSFT": m(400, above=False)}
+        self.assertEqual(pk.from_dip(prices.get, buy, -25.0, giants=("GOOGL", "MSFT")), {"GOOGL": ["a giant on sale by the dip rule"]})
+        self.assertEqual(pk.from_dip(lambda t: 1 / 0, buy, -5.0), {})                           # nothing fetched
+        rows = pk.build({}, None, None, set(), prices.get, "2026-11-04", rule=buy, spy_off=-25.0)
+        self.assertEqual([x["ticker"] for x in rows if x["ok"]], ["GOOGL"])  # build adds giants on sale (market.GIANTS)
+        self.assertIn("Dip rule in force", pk.render(rows, [], buy))
+
     def test_wide_scan_keeps_only_large_companies(self):
         ideas = {"ideas": [{"symbol": "TINYBIO"}, {"symbol": "BIG"}, {"symbol": "BIG2"}]}
         got = pk.from_ideas(ideas, large={"BIG", "BIG2"}, top=1)

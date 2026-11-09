@@ -1,0 +1,14 @@
+{
+ "stock_off": 35,
+ "market_off": 30,
+ "trend": "below200",
+ "source": "rule v19 (tuned)",
+ "verdict": "buy",
+ "held_out": {
+  "n": 51,
+  "mean": 47.38,
+  "years": 1,
+  "score": 47.38,
+  "beat": 76
+ }
+}

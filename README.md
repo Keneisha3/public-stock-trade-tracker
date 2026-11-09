@@ -539,6 +539,24 @@ How often the rule's conditions happen (the research script `odds.py`; results i
 including former giants like Citigroup, AIG and GE, that were 25-33 % below their high fell to 40 %
 below within a year 49 % of the time, and 28 % of the time while the whole S&P 500 was also 20 % down.
 
+**The tuned dip rule** (rule v19, `research/dips/tune.md`). 84 combinations of cutoffs were tried on the
+50 most-traded S&P 500 companies: how far the stock is below its 52-week high (20-50 %), how far the
+S&P 500 is below its high (any, 10-30 %), and whether the stock must be below its 200-day average. The
+winner was picked on 2006-2018 only, then checked once on 2019 on:
+
+| giant 35 %+ below its high and below its 200-day, S&P 500 30 %+ down | events | 12 months vs S&P 500 | beat it |
+| --- | ---: | ---: | ---: |
+| training 2006-2018 | 871 | +36.2 | 71 % |
+| held out 2019 on (baseline +25.0) | 51 | **+47.4** | 76 % |
+
+It passed, but the held-out check rests on one crash (March 2020): the S&P 500 never fell 30 % in
+2022. A 30 % fall has happened about once a decade (2002, 2008-09, 2020). Rule v18 (40 %+ below
+its high, S&P 500 20 %+ down) also did well on the same years: 320 events, +23.2 against a baseline of +0.1.
+
+The rule lives in `.claude/skills/trader-accounts/dip_rule.json`. When it fires, `trade.py picks` treats
+the giant as a buy even below its 200-day average, and the daily briefing's Market watch alerts once.
+Until then, the trend test still says wait.
+
 **Prices when Yahoo is blocked** (a cloud session). A GitHub job saves the
 charts of every ticker in `mirror.txt` (public: market tickers only, never
 your holdings) every weekday, and on demand with the replay workflow's
