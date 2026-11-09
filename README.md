@@ -533,6 +533,12 @@ whole S&P 500 is 20 %+ below its high. It was judged once, on 2022:
 Companies that went to zero in 2008 have no prices, which flatters these numbers. Giants rarely
 go bankrupt, but they can lag for years (Intel since 2020, Cisco after 2000).
 
+How often the rule's conditions happen (the research script `odds.py`; results in
+`research/dips/odds.md`): since 1993 the S&P 500 fell 20 %+ below its high five times. From a day it was
+4-8 % below its high, it got there within 12 months 30 % of the time (53 % within 24). Big stocks,
+including former giants like Citigroup, AIG and GE, that were 25-33 % below their high fell to 40 %
+below within a year 49 % of the time, and 28 % of the time while the whole S&P 500 was also 20 % down.
+
 **Prices when Yahoo is blocked** (a cloud session). A GitHub job saves the
 charts of every ticker in `mirror.txt` (public: market tickers only, never
 your holdings) every weekday, and on demand with the replay workflow's
