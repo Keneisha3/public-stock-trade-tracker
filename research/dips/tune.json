@@ -1,0 +1,1215 @@
+{
+ "results": [
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 0,
+    "trend": "any"
+   },
+   "train": {
+    "n": 6618,
+    "mean": 4.96,
+    "years": 13,
+    "score": 2.82,
+    "beat": 49
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 0,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 5911,
+    "mean": 4.7,
+    "years": 13,
+    "score": 2.99,
+    "beat": 49
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 10,
+    "trend": "any"
+   },
+   "train": {
+    "n": 4133,
+    "mean": 8.66,
+    "years": 10,
+    "score": 5.3,
+    "beat": 53
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 10,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 3606,
+    "mean": 9.07,
+    "years": 10,
+    "score": 6.03,
+    "beat": 52
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 15,
+    "trend": "any"
+   },
+   "train": {
+    "n": 3209,
+    "mean": 10.12,
+    "years": 7,
+    "score": 7.57,
+    "beat": 53
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 15,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 2740,
+    "mean": 10.76,
+    "years": 7,
+    "score": 8.73,
+    "beat": 53
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 20,
+    "trend": "any"
+   },
+   "train": {
+    "n": 2422,
+    "mean": 13.9,
+    "years": 6,
+    "score": 7.74,
+    "beat": 55
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 20,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 2035,
+    "mean": 15.16,
+    "years": 6,
+    "score": 8.49,
+    "beat": 55
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 25,
+    "trend": "any"
+   },
+   "train": {
+    "n": 2058,
+    "mean": 16.19,
+    "years": 4,
+    "score": 11.56,
+    "beat": 56
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 25,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1685,
+    "mean": 17.92,
+    "years": 4,
+    "score": 13.27,
+    "beat": 56
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 30,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1638,
+    "mean": 20.15,
+    "years": 3,
+    "score": 16.13,
+    "beat": 59
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 20,
+    "market_off": 30,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1284,
+    "mean": 22.94,
+    "years": 3,
+    "score": 18.46,
+    "beat": 59
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 0,
+    "trend": "any"
+   },
+   "train": {
+    "n": 4848,
+    "mean": 6.84,
+    "years": 13,
+    "score": 2.97,
+    "beat": 50
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 0,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 4400,
+    "mean": 6.88,
+    "years": 13,
+    "score": 3.6,
+    "beat": 50
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 10,
+    "trend": "any"
+   },
+   "train": {
+    "n": 3195,
+    "mean": 10.95,
+    "years": 9,
+    "score": 6.73,
+    "beat": 54
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 10,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 2827,
+    "mean": 11.6,
+    "years": 9,
+    "score": 7.97,
+    "beat": 54
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 15,
+    "trend": "any"
+   },
+   "train": {
+    "n": 2523,
+    "mean": 12.8,
+    "years": 7,
+    "score": 8.08,
+    "beat": 55
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 15,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 2197,
+    "mean": 13.63,
+    "years": 7,
+    "score": 9.63,
+    "beat": 55
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 20,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1969,
+    "mean": 17.71,
+    "years": 6,
+    "score": 11.43,
+    "beat": 58
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 20,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1680,
+    "mean": 19.2,
+    "years": 6,
+    "score": 12.43,
+    "beat": 58
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 25,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1701,
+    "mean": 19.82,
+    "years": 4,
+    "score": 12.79,
+    "beat": 59
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 25,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1415,
+    "mean": 22.09,
+    "years": 4,
+    "score": 14.96,
+    "beat": 60
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 30,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1422,
+    "mean": 23.87,
+    "years": 3,
+    "score": 18.46,
+    "beat": 62
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 25,
+    "market_off": 30,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1142,
+    "mean": 26.74,
+    "years": 3,
+    "score": 20.96,
+    "beat": 63
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 0,
+    "trend": "any"
+   },
+   "train": {
+    "n": 3579,
+    "mean": 9.34,
+    "years": 13,
+    "score": 3.32,
+    "beat": 51
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 0,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 3263,
+    "mean": 9.44,
+    "years": 13,
+    "score": 4.16,
+    "beat": 51
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 10,
+    "trend": "any"
+   },
+   "train": {
+    "n": 2490,
+    "mean": 13.85,
+    "years": 9,
+    "score": 7.44,
+    "beat": 56
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 10,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 2211,
+    "mean": 14.74,
+    "years": 9,
+    "score": 8.88,
+    "beat": 56
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 15,
+    "trend": "any"
+   },
+   "train": {
+    "n": 2017,
+    "mean": 16.13,
+    "years": 7,
+    "score": 9.21,
+    "beat": 57
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 15,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1760,
+    "mean": 17.16,
+    "years": 7,
+    "score": 10.84,
+    "beat": 57
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 20,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1613,
+    "mean": 21.73,
+    "years": 6,
+    "score": 13.77,
+    "beat": 61
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 20,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1387,
+    "mean": 23.5,
+    "years": 6,
+    "score": 15.55,
+    "beat": 61
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 25,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1414,
+    "mean": 23.73,
+    "years": 4,
+    "score": 13.65,
+    "beat": 62
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 25,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1188,
+    "mean": 26.29,
+    "years": 4,
+    "score": 16.4,
+    "beat": 63
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 30,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1221,
+    "mean": 27.89,
+    "years": 3,
+    "score": 21.28,
+    "beat": 65
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 30,
+    "market_off": 30,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 998,
+    "mean": 31.0,
+    "years": 3,
+    "score": 23.89,
+    "beat": 66
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 0,
+    "trend": "any"
+   },
+   "train": {
+    "n": 2646,
+    "mean": 12.37,
+    "years": 13,
+    "score": 2.19,
+    "beat": 53
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 0,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 2436,
+    "mean": 12.42,
+    "years": 13,
+    "score": 3.06,
+    "beat": 53
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 10,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1937,
+    "mean": 17.96,
+    "years": 9,
+    "score": 8.29,
+    "beat": 58
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 10,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1744,
+    "mean": 18.56,
+    "years": 9,
+    "score": 9.55,
+    "beat": 58
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 15,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1615,
+    "mean": 20.42,
+    "years": 7,
+    "score": 10.12,
+    "beat": 59
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 15,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1430,
+    "mean": 21.43,
+    "years": 7,
+    "score": 11.95,
+    "beat": 60
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 20,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1326,
+    "mean": 25.84,
+    "years": 6,
+    "score": 13.04,
+    "beat": 63
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 20,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1157,
+    "mean": 27.78,
+    "years": 6,
+    "score": 15.04,
+    "beat": 64
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 25,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1174,
+    "mean": 28.7,
+    "years": 4,
+    "score": 13.9,
+    "beat": 66
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 25,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1005,
+    "mean": 31.23,
+    "years": 4,
+    "score": 16.97,
+    "beat": 68
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 30,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1038,
+    "mean": 32.93,
+    "years": 3,
+    "score": 23.61,
+    "beat": 69
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 35,
+    "market_off": 30,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 871,
+    "mean": 36.16,
+    "years": 3,
+    "score": 26.63,
+    "beat": 71
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 0,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1969,
+    "mean": 16.52,
+    "years": 13,
+    "score": 0.94,
+    "beat": 55
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 0,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1823,
+    "mean": 16.65,
+    "years": 13,
+    "score": 1.45,
+    "beat": 54
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 10,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1529,
+    "mean": 22.05,
+    "years": 9,
+    "score": 6.52,
+    "beat": 60
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 10,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1394,
+    "mean": 22.62,
+    "years": 9,
+    "score": 7.32,
+    "beat": 60
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 15,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1297,
+    "mean": 25.02,
+    "years": 7,
+    "score": 7.81,
+    "beat": 61
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 15,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1169,
+    "mean": 25.99,
+    "years": 7,
+    "score": 9.38,
+    "beat": 61
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 20,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1104,
+    "mean": 30.68,
+    "years": 6,
+    "score": 11.52,
+    "beat": 66
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 20,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 980,
+    "mean": 32.56,
+    "years": 6,
+    "score": 13.43,
+    "beat": 66
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 25,
+    "trend": "any"
+   },
+   "train": {
+    "n": 987,
+    "mean": 33.86,
+    "years": 4,
+    "score": 12.41,
+    "beat": 69
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 25,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 863,
+    "mean": 36.21,
+    "years": 4,
+    "score": 15.18,
+    "beat": 70
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 30,
+    "trend": "any"
+   },
+   "train": {
+    "n": 890,
+    "mean": 38.24,
+    "years": 3,
+    "score": 20.8,
+    "beat": 72
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 40,
+    "market_off": 30,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 763,
+    "mean": 41.43,
+    "years": 3,
+    "score": 24.17,
+    "beat": 74
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 0,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1484,
+    "mean": 21.57,
+    "years": 13,
+    "score": 1.91,
+    "beat": 58
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 0,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1396,
+    "mean": 22.06,
+    "years": 13,
+    "score": 2.61,
+    "beat": 58
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 10,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1190,
+    "mean": 27.88,
+    "years": 9,
+    "score": 9.03,
+    "beat": 64
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 10,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1105,
+    "mean": 28.74,
+    "years": 9,
+    "score": 9.84,
+    "beat": 64
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 15,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1042,
+    "mean": 31.69,
+    "years": 7,
+    "score": 12.26,
+    "beat": 66
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 15,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 958,
+    "mean": 32.91,
+    "years": 7,
+    "score": 13.65,
+    "beat": 67
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 20,
+    "trend": "any"
+   },
+   "train": {
+    "n": 911,
+    "mean": 37.88,
+    "years": 5,
+    "score": 22.07,
+    "beat": 71
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 20,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 828,
+    "mean": 39.89,
+    "years": 5,
+    "score": 24.16,
+    "beat": 72
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 25,
+    "trend": "any"
+   },
+   "train": {
+    "n": 821,
+    "mean": 40.49,
+    "years": 4,
+    "score": 13.64,
+    "beat": 73
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 25,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 737,
+    "mean": 42.96,
+    "years": 4,
+    "score": 16.16,
+    "beat": 74
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 30,
+    "trend": "any"
+   },
+   "train": {
+    "n": 749,
+    "mean": 44.76,
+    "years": 3,
+    "score": 22.4,
+    "beat": 76
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 45,
+    "market_off": 30,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 664,
+    "mean": 47.82,
+    "years": 3,
+    "score": 26.15,
+    "beat": 77
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 0,
+    "trend": "any"
+   },
+   "train": {
+    "n": 1156,
+    "mean": 28.05,
+    "years": 13,
+    "score": -1.53,
+    "beat": 62
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 0,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 1087,
+    "mean": 28.47,
+    "years": 13,
+    "score": -0.95,
+    "beat": 62
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 10,
+    "trend": "any"
+   },
+   "train": {
+    "n": 957,
+    "mean": 34.96,
+    "years": 9,
+    "score": 10.83,
+    "beat": 68
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 10,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 890,
+    "mean": 35.82,
+    "years": 9,
+    "score": 11.47,
+    "beat": 69
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 15,
+    "trend": "any"
+   },
+   "train": {
+    "n": 846,
+    "mean": 39.18,
+    "years": 7,
+    "score": 11.75,
+    "beat": 70
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 15,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 778,
+    "mean": 40.7,
+    "years": 7,
+    "score": 12.82,
+    "beat": 71
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 20,
+    "trend": "any"
+   },
+   "train": {
+    "n": 753,
+    "mean": 43.62,
+    "years": 5,
+    "score": 16.65,
+    "beat": 75
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 20,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 689,
+    "mean": 45.88,
+    "years": 5,
+    "score": 18.18,
+    "beat": 76
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 25,
+    "trend": "any"
+   },
+   "train": {
+    "n": 689,
+    "mean": 46.13,
+    "years": 4,
+    "score": 13.16,
+    "beat": 77
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 25,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 627,
+    "mean": 48.88,
+    "years": 4,
+    "score": 15.07,
+    "beat": 78
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 30,
+    "trend": "any"
+   },
+   "train": {
+    "n": 638,
+    "mean": 49.76,
+    "years": 3,
+    "score": 20.97,
+    "beat": 79
+   }
+  },
+  {
+   "rule": {
+    "stock_off": 50,
+    "market_off": 30,
+    "trend": "below200"
+   },
+   "train": {
+    "n": 574,
+    "mean": 52.94,
+    "years": 3,
+    "score": 23.13,
+    "beat": 81
+   }
+  }
+ ],
+ "chosen": {
+  "stock_off": 35,
+  "market_off": 30,
+  "trend": "below200",
+  "train": {
+   "n": 871,
+   "mean": 36.16,
+   "years": 3,
+   "score": 26.63,
+   "beat": 71
+  },
+  "held_out": {
+   "n": 51,
+   "mean": 47.38,
+   "years": 1,
+   "score": 47.38,
+   "beat": 76
+  },
+  "held_out_baseline": 25.0,
+  "verdict": "buy"
+ },
+ "v18": {
+  "stock_off": 40,
+  "market_off": 20,
+  "trend": "any",
+  "held_out": {
+   "n": 320,
+   "mean": 23.17,
+   "years": 3,
+   "score": 23.72,
+   "beat": 58
+  },
+  "held_out_baseline": 0.06,
+  "verdict": "buy"
+ }
+}
