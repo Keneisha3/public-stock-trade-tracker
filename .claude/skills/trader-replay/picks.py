@@ -78,6 +78,14 @@ def from_ideas(ideas, large=None, top=IDEAS_TOP):
     return {r["symbol"]: ["large-company momentum leader (market scan)"] for r in rows[:top] if r.get("symbol")}
 
 
+def from_dip(get_metrics, rule, spy_off, giants=mk.GIANTS):
+    """{ticker: [reason]} for the giants the dip rule fires on today. Nothing is fetched unless the
+    S&P 500 is already down enough for the rule."""
+    if not rule or spy_off is None or spy_off > -rule["market_off"]:
+        return {}
+    return {t: ["a giant on sale by the dip rule"] for t in giants if mk.dip_rule_fires(get_metrics(t), spy_off, rule)}
+
+
 def merge(*sources):
     out = {}
     for src in sources:
@@ -86,19 +94,30 @@ def merge(*sources):
     return out
 
 
-def assess(t, why, metrics):
-    """One candidate against the rules: {"ticker", "why", "evidence", "ok", "notes", ...metrics}."""
+def assess(t, why, metrics, rule=None, spy_off=None):
+    """One candidate against the rules: {"ticker", "why", "evidence", "ok", "notes", "dip", ...metrics}.
+    A stock below its 200-day average waits, unless the dip rule (market.load_dip_rule) fires and earned
+    "buy" on its held-out years: then the crash-buying evidence overrides the trend test."""
     m = metrics or {}
     notes = []
+    dip = bool(m) and rule is not None and mk.dip_rule_fires(m, spy_off, rule)
+    dip_buy = dip and rule.get("verdict") == "buy"
     if not m:
         notes.append("no price data")
     elif not m.get("above_sma200"):
-        notes.append("below its 200-day average: the trend test says wait")
+        if dip_buy:
+            notes.append("on sale by the dip rule (%s; %s): a buy even below its 200-day average"
+                         % (mk.describe_dip_rule(rule), rule.get("source", "")))
+        else:
+            notes.append("below its 200-day average: the trend test says wait")
+    if dip and not dip_buy:
+        notes.append("meets %s (%s), which has not earned a buy: information only"
+                     % (rule.get("source", "the dip rule"), mk.describe_dip_rule(rule)))
     fired = mk.stretch_signals(m.get("stretch") or {})
     if fired:
         notes.append("stretched (%s): fine to own, consider a smaller first buy" % ", ".join(fired))
-    ok = bool(m) and bool(m.get("above_sma200"))
-    return {"ticker": t, "why": why, "evidence": len(why), "ok": ok, "notes": notes,
+    ok = bool(m) and (bool(m.get("above_sma200")) or dip_buy)
+    return {"ticker": t, "why": why, "evidence": len(why), "ok": ok, "notes": notes, "dip": dip,
             "price": m.get("price"), "ret_12m": m.get("ret_12m"), "off_high_pct": m.get("off_high_pct"),
             "vol_pct": m.get("vol_pct")}
 
@@ -141,16 +160,17 @@ def account_total(base, account):
     return 0.0
 
 
-def build(record, sig, ideas, exclude, get_metrics, day, large=None, currency=None):
+def build(record, sig, ideas, exclude, get_metrics, day, large=None, currency=None, rule=None, spy_off=None):
     """Ranked candidates; `currency` keeps only those trading in it (USD or CAD), so the account can
-    buy them without converting."""
-    cands = merge(from_plans(record), near_consensus(sig, day) if sig else {}, from_ideas(ideas, large))
-    rows = [assess(t, why, get_metrics(t)) for t, why in cands.items()
+    buy them without converting. `rule` and `spy_off` (the S&P 500's % below its high) apply the dip rule."""
+    cands = merge(from_plans(record), near_consensus(sig, day) if sig else {}, from_ideas(ideas, large),
+                  from_dip(get_metrics, rule, spy_off))
+    rows = [assess(t, why, get_metrics(t), rule, spy_off) for t, why in cands.items()
             if t.upper() not in exclude and t != "SPY" and (currency is None or currency_of(t) == currency)]
     return rank(rows)
 
 
-def render(rows, plan):
+def render(rows, plan, rule=None):
     L = ["What to buy: candidates from the plans, the famous investors and the daily ideas, checked against your rules", ""]
     for i, r in enumerate(rows, 1):
         mark = "OK  " if r["ok"] else "WAIT"
@@ -163,7 +183,8 @@ def render(rows, plan):
     if plan:
         L += ["", "Sized for your cash (no new name over %d%% of the account):" % int(100 * MAX_WEIGHT)]
         L += ["  BUY %-6s about $%.2f (%s shares)" % (p["ticker"], p["amount"], p["shares"]) for p in plan]
-    L += ["", "Evidence = how many of the project's sources point at it. Only the main plan was tested walk-forward.",
+    L += ["", "Dip rule in force: %s (%s)." % (mk.describe_dip_rule(rule), rule.get("source", "")) if rule else "",
+          "Evidence = how many of the project's sources point at it. Only the main plan was tested walk-forward.",
           "Not financial advice: you place every order yourself."]
     return "\n".join(L)
 
@@ -205,16 +226,26 @@ def main(argv=None):
     import universe
     large = set(universe.load().members_on(day)) | set(universe.CANADA)
 
+    seen = {}
+
     def metrics(t):
-        try:
-            return mk.metrics(mk.get_chart(t, offline=a.offline, range_="2y"))
-        except mk.MarketError:
-            return None
+        if t not in seen:
+            try:
+                seen[t] = mk.metrics(mk.get_chart(t, offline=a.offline, range_="2y"))
+            except mk.MarketError:
+                seen[t] = None
+        return seen[t]
     exclude = held(a.dir) | {t.upper() for t in a.exclude}
     currency = a.currency or CURRENCY.get(a.account.lower())
-    rows = build(record, sigs.Signals(f13=f13) if f13 else None, ideas, exclude, metrics, day, large, currency)
+    rule = mk.load_dip_rule()
+    try:
+        spy_off = mk.metrics(mk.get_chart("SPY", offline=a.offline, range_="5y")).get("off_peak_pct")
+    except mk.MarketError:
+        spy_off = None
+    rows = build(record, sigs.Signals(f13=f13) if f13 else None, ideas, exclude, metrics, day, large, currency,
+                 rule, spy_off)
     plan = size(rows, a.cash, a.total if a.total is not None else account_total(a.dir, a.account)) if a.cash else []
-    print(json.dumps({"candidates": rows, "plan": plan}, indent=1) if a.json else render(rows, plan))
+    print(json.dumps({"candidates": rows, "plan": plan}, indent=1) if a.json else render(rows, plan, rule))
     return 0
 
 

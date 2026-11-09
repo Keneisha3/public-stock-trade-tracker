@@ -105,14 +105,19 @@ def tested_plan(review, rec, marker="(chosen)", cdr_map=None):
     return out
 
 
-def watch(get_metrics, today, state_path, events=EVENTS, horizon=60):
+def watch(get_metrics, today, state_path, events=EVENTS, horizon=60, rule=None, giants=acc.mk.GIANTS):
     """The market's trend and what is coming: {"trend": [{name, price, sma200, above, gap_pct}], "crossed":
-    [text], "events": [{date, what, days}]}. A cross is reported once, the day the close lands on the
-    other side of the 200-day average from the last briefing."""
+    [text], "events": [{date, what, days}], "sale": {...}}. A cross is reported once, the day the close lands
+    on the other side of the 200-day average from the last briefing. "sale" is the dip rule
+    (market.load_dip_rule): how far the S&P 500 is below its high, what the rule needs, and the giants it
+    fires on; a giant is announced once, the first briefing it qualifies."""
     state = acc.read_json(state_path, {})
     trend, crossed = [], []
+    spy_off = None
     for sym, name in WATCH:
         m = get_metrics(sym)
+        if sym == "SPY" and m:
+            spy_off = m.get("off_peak_pct")
         if not m or not m.get("sma200"):
             continue
         above = bool(m["above_sma200"])
@@ -123,13 +128,29 @@ def watch(get_metrics, today, state_path, events=EVENTS, horizon=60):
                 name, "above" if above else "below", m["sma200"],
                 "the trend test turns back up" if above else "the trend test now says wait on new stock buys"))
         state[sym] = above
+    rule = rule or acc.mk.load_dip_rule()
+    fired = []
+    if spy_off is not None and spy_off <= -rule["market_off"]:  # only then can a giant qualify: fetch nothing before
+        for t in giants:
+            m = get_metrics(t)
+            if acc.mk.dip_rule_fires(m, spy_off, rule):
+                fired.append({"symbol": t, "price": m["price"], "off_high_pct": m["off_high_pct"]})
+    before = set(state.get("on_sale", []))
+    for f in fired:
+        if f["symbol"] not in before:
+            crossed.append("%s is on sale by the dip rule: %.0f%% below its 52-week high with the S&P 500 %.0f%% below "
+                           "its high (%s%s)" % (f["symbol"], -f["off_high_pct"], -spy_off, rule.get("source", ""),
+                                               "" if rule.get("verdict") == "buy" else "; information only"))
+    state["on_sale"] = [f["symbol"] for f in fired]
     acc.write_json(state_path, state)
+    sale = {"rule": acc.mk.describe_dip_rule(rule), "source": rule.get("source", ""), "verdict": rule.get("verdict"),
+            "needs": rule["market_off"], "spy_off": spy_off, "fired": fired}
     soon = []
     for e in sorted(events, key=lambda e: e["date"]):
         days = (datetime.date.fromisoformat(e["date"]) - datetime.date.fromisoformat(today)).days
         if 0 <= days <= horizon:
             soon.append(dict(e, days=days))
-    return {"trend": trend, "crossed": crossed, "events": soon}
+    return {"trend": trend, "crossed": crossed, "events": soon, "sale": sale}
 
 
 def _weekdays_between(a, b):
@@ -267,7 +288,7 @@ def run(base="trader", skip=(), offline=None, today=None):
     if "watch" not in skip:  # the market's trend and what is coming (the Fed's next decision)
         try:
             extra = acc.read_json(os.path.join(base, "events.json"), [])
-            brief["watch"] = watch(lambda t: acc.mk.metrics(acc.mk.get_chart(t, offline=offline, range_="2y")),
+            brief["watch"] = watch(lambda t: acc.mk.metrics(acc.mk.get_chart(t, offline=offline, range_="5y")),
                                    brief["date"], os.path.join(base, "state", "watch.json"), EVENTS + list(extra))
             did("watch", True, "%d events ahead" % len(brief["watch"]["events"]))
         except (acc.mk.MarketError, OSError, ValueError) as e:
@@ -405,6 +426,12 @@ def render(b):
                 t["name"], t["price"], "above" if t["above"] else "BELOW", t["sma200"], t["gap_pct"]))
         for e in w.get("events", []):
             L.append("- In %d day%s (%s): %s" % (e["days"], "" if e["days"] == 1 else "s", e["date"], e["what"]))
+        sale = w.get("sale") or {}
+        if sale.get("spy_off") is not None:
+            L.append("- Dip rule (%s): a giant %s. S&P 500 now %.1f%% below its high%s." % (
+                sale["source"], sale["rule"], -sale["spy_off"],
+                "; on sale: " + ", ".join("%s (%.0f%% off)" % (f["symbol"], -f["off_high_pct"]) for f in sale["fired"])
+                if sale.get("fired") else ", so nothing qualifies"))
         L.append("")
     if b.get("gov"):
         L.append("## US government stakes (bought at the next open after the news)")

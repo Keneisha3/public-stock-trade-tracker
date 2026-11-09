@@ -158,6 +158,33 @@ class TestedPlan(unittest.TestCase):
         finally:
             shutil.rmtree(d)
 
+    def test_dip_rule_alert_in_the_market_watch(self):
+        d = tempfile.mkdtemp()
+        try:
+            state = os.path.join(d, "watch.json")
+            rule = {"stock_off": 40, "market_off": 20, "trend": "any", "verdict": "buy", "source": "rule v19 (tuned)"}
+            asked = []
+            m = {"SPY": {"price": 700.0, "sma200": 730.0, "above_sma200": False, "off_peak_pct": -6.0},
+                 "GOOGL": {"price": 200.0, "off_high_pct": -45.0, "above_sma200": False},
+                 "MSFT": {"price": 400.0, "off_high_pct": -10.0, "above_sma200": False}}
+
+            def get(t):
+                asked.append(t)
+                return m.get(t)
+            w = daily.watch(get, "2026-11-05", state, rule=rule, giants=("GOOGL", "MSFT"))
+            self.assertEqual(w["sale"]["fired"], [])
+            self.assertNotIn("GOOGL", asked)                     # market not down enough: no giant fetched
+            m["SPY"]["off_peak_pct"] = -22.0
+            w = daily.watch(get, "2026-11-06", state, rule=rule, giants=("GOOGL", "MSFT"))
+            self.assertEqual([f["symbol"] for f in w["sale"]["fired"]], ["GOOGL"])
+            self.assertTrue(any("GOOGL is on sale" in c for c in w["crossed"]))
+            again = daily.watch(get, "2026-11-07", state, rule=rule, giants=("GOOGL", "MSFT"))
+            self.assertFalse(any("on sale" in c for c in again["crossed"]))   # announced once
+            text = daily.render({"date": "2026-11-06", "steps": {}, "watch": w})
+            self.assertIn("on sale: GOOGL (45% off)", text)
+        finally:
+            shutil.rmtree(d)
+
     def test_health_warnings(self):
         rec = {"updated": "2026-10-20", "data": {"f13_latest": "2026-08-15", "congress_latest": "2026-10-15"}}
         self.assertEqual(daily.health(rec, "2026-10-21"), [])
